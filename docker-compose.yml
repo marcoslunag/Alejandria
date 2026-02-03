@@ -71,24 +71,6 @@ services:
     networks:
       - alejandria
 
-  # Calibre-Web (Optional - for web reading and library management)
-  calibre-web:
-    image: lscr.io/linuxserver/calibre-web:latest
-    container_name: alejandria-calibre
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Europe/Madrid
-      - DOCKER_MODS=linuxserver/mods:universal-calibre
-    volumes:
-      - calibre_config:/config
-      - manga:/books
-    ports:
-      - "8383:8083"
-    restart: unless-stopped
-    networks:
-      - alejandria
-
   # Frontend Web UI (Kaizoku-style)
   frontend:
     build: ./frontend
@@ -118,8 +100,6 @@ volumes:
   downloads:
     driver: local
   manga:
-    driver: local
-  calibre_config:
     driver: local
 
 networks:
