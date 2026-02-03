@@ -560,13 +560,10 @@ class MangaDownloader:
         on_progress: Optional[Callable[[int, int], None]] = None
     ) -> Optional[Path]:
         """
-        Descarga desde TeraBox usando múltiples métodos con fallback.
+        Descarga desde TeraBox usando el bypass via 1024tera.com.
 
-        Orden de prioridad:
-        1. Playwright con descarga nativa (mejor para bypass)
-        2. API con tokens de cuenta
-        3. terabox_downloader con extracción de tokens
-        4. Playwright para obtener enlace + descarga HTTP
+        Utiliza TeraBoxBypass que obtiene enlaces directos de descarga
+        usando el dominio alternativo 1024tera.com con cookies de sesión.
 
         Args:
             url: TeraBox URL
@@ -579,130 +576,41 @@ class MangaDownloader:
         output_path = self.download_dir / filename
         lock_file = self.download_dir / f"{filename}.downloading"
 
-        # Método 1: Playwright con descarga nativa (mejor para evitar detección)
-        try:
-            from app.services.terabox_playwright import TeraBoxPlaywright
-
-            logger.info(f"TeraBox: Method 1 - Playwright native download")
-
-            instance = TeraBoxPlaywright()
-            try:
-                result = await instance.download_file(url, output_path, on_progress)
-
-                if result.get("ok"):
-                    if result.get("file_path"):
-                        # Descarga completada directamente por Playwright
-                        logger.info(f"TeraBox: Native download completed: {filename}")
-                        return output_path
-                    elif result.get("download_link"):
-                        # Playwright obtuvo enlace, descargar con HTTP
-                        download_link = result.get("download_link")
-                        logger.info(f"TeraBox: Got link from Playwright, downloading via HTTP")
-                        return await self._download_terabox_link(
-                            download_link, output_path, lock_file, on_progress
-                        )
-                else:
-                    logger.warning(f"TeraBox Playwright native download failed: {result.get('error')}")
-            finally:
-                await instance.close()
-
-        except ImportError as e:
-            logger.warning(f"TeraBox Playwright not available: {e}")
-        except Exception as e:
-            logger.warning(f"TeraBox Playwright method failed: {e}")
-
         download_link = None
         file_info = {}
 
-        # Método 2: API con tokens de cuenta (si están configurados)
+        # Usar TeraBoxBypass (método probado y funcional)
         try:
-            from app.services.terabox_api import TeraBoxAPI
+            from app.services.terabox_bypass import TeraBoxBypass
 
-            api = TeraBoxAPI()
+            logger.info(f"TeraBox: Using TeraBoxBypass via 1024tera.com")
 
-            if api.is_configured():
-                logger.info(f"TeraBox: Method 2 - API with account tokens")
-                result = api.get_download_link(url)
+            # Construir cookies desde variables de entorno
+            cookie_dict = {}
+            if TERABOX_COOKIE:
+                # Parsear cookie string a dict
+                for part in TERABOX_COOKIE.split(';'):
+                    if '=' in part:
+                        key, value = part.strip().split('=', 1)
+                        cookie_dict[key.strip()] = value.strip()
 
-                if result.get("ok"):
-                    download_link = result.get("download_link")
-                    file_info = {
-                        "file_name": result.get("file_name", filename),
-                        "file_size": result.get("file_size", 0)
-                    }
-                    logger.info(f"TeraBox API: Got direct link for {file_info.get('file_name')}")
-                else:
-                    logger.warning(f"TeraBox API error: {result.get('error')}")
+            bypass = TeraBoxBypass(cookie_dict=cookie_dict if cookie_dict else None)
+            result = bypass.get_download_link(url)
+
+            if result.get("ok"):
+                download_link = result.get("download_link")
+                file_info = {
+                    "file_name": result.get("file_name", filename),
+                    "file_size": int(result.get("file_size", 0) or 0)
+                }
+                logger.info(f"TeraBox Bypass: Got direct link for {file_info.get('file_name')}")
+            else:
+                logger.warning(f"TeraBox Bypass error: {result.get('error')}")
 
         except ImportError as e:
-            logger.debug(f"TeraBox API module not available: {e}")
+            logger.warning(f"TeraBox Bypass not available: {e}")
         except Exception as e:
-            logger.warning(f"TeraBox API failed: {e}")
-
-        # Método 3: terabox_downloader (método con extracción de tokens)
-        if not download_link:
-            try:
-                from app.services.terabox_downloader import TeraBoxDownloader
-
-                logger.info(f"TeraBox: Method 3 - terabox_downloader")
-
-                # Intentar usar cookies de sesión persistente
-                cookie = TERABOX_COOKIE if TERABOX_COOKIE else "lang=en"
-
-                # Intentar obtener cookies del session manager
-                try:
-                    from app.services.terabox_session import get_session_manager
-                    session_mgr = get_session_manager()
-                    session_cookies = session_mgr.get_cookie_string()
-                    if session_cookies:
-                        cookie = session_cookies
-                        logger.info("TeraBox: Using persistent session cookies")
-                except:
-                    pass
-
-                tb = TeraBoxDownloader(cookie)
-                result = tb.get_file_info(url)
-
-                if "error" not in result and result.get("download_link"):
-                    download_link = result.get("download_link")
-                    file_info = {
-                        "file_name": result.get("file_name", filename),
-                        "file_size": result.get("size_bytes", 0)
-                    }
-                    logger.info(f"TeraBox Downloader: Got link for {file_info.get('file_name')}")
-
-            except ImportError as e:
-                logger.debug(f"TeraBox downloader not available: {e}")
-            except Exception as e:
-                logger.warning(f"TeraBox downloader failed: {e}")
-
-        # Método 4: Playwright solo para obtener enlace
-        if not download_link:
-            try:
-                from app.services.terabox_playwright import TeraBoxPlaywright
-
-                logger.info(f"TeraBox: Method 4 - Playwright get_direct_link")
-
-                instance = TeraBoxPlaywright()
-                try:
-                    result = await instance.get_direct_link(url)
-
-                    if result.get("ok") and result.get("download_link"):
-                        download_link = result.get("download_link")
-                        file_info = {
-                            "file_name": result.get("file_name", filename),
-                            "file_size": result.get("file_size", "unknown")
-                        }
-                        logger.info(f"TeraBox Playwright: Got link for {file_info.get('file_name')}")
-                    else:
-                        logger.warning(f"TeraBox Playwright error: {result.get('error')}")
-                finally:
-                    await instance.close()
-
-            except ImportError as e:
-                logger.warning(f"TeraBox Playwright not available: {e}")
-            except Exception as e:
-                logger.warning(f"TeraBox Playwright failed: {e}")
+            logger.warning(f"TeraBox Bypass failed: {e}")
 
         # Si no tenemos enlace de descarga, fallar
         if not download_link:

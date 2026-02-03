@@ -294,6 +294,31 @@ LOG_LEVEL=INFO
 4. Copia la URL de redirección y pégala
 5. Selecciona tu dispositivo Kindle preferido
 
+### TeraBox (Descargas desde TeraBox)
+
+Para descargar archivos desde TeraBox, necesitas configurar las cookies de tu cuenta:
+
+1. **Crear cuenta en TeraBox** (si no tienes): https://www.terabox.com
+2. **Obtener cookies**:
+   - Instala una extensión de cookies en tu navegador (Cookie-Editor, etc.)
+   - Inicia sesión en TeraBox
+   - Exporta las cookies o cópialas desde DevTools (F12 > Application > Cookies)
+3. **Configurar en `.env`**:
+
+```env
+# Formato: cookie1=valor1; cookie2=valor2; ...
+TERABOX_COOKIE=ndus=TU_NDUS; browserid=TU_BROWSERID; csrfToken=TU_CSRF; lang=es; PANWEB=1
+```
+
+**Cookies importantes:**
+| Cookie | Importancia |
+|--------|-------------|
+| `ndus` | **CRÍTICA** - Token de sesión |
+| `browserid` | Alta |
+| `csrfToken` | Media |
+
+> **Nota**: El bypass usa el dominio alternativo `1024tera.com` para evitar la verificación de captcha.
+
 ### Perfiles KCC
 
 | Perfil | Dispositivo |
@@ -408,7 +433,6 @@ alejandria/
 ### En desarrollo
 - [ ] **Soporte para libros (EPUB/PDF)**
 - [ ] **Soporte para cómics americanos**
-- [ ] **Mejoras en TeraBox** - Resolver problemas de autenticación
 
 ### Planificado
 - [ ] Notificaciones (Telegram, Discord, Email)
@@ -429,6 +453,7 @@ alejandria/
 - [x] Integración con AniList
 - [x] Cola de descargas con cancelación
 - [x] Soporte multi-dispositivo Kindle
+- [x] **Bypass de TeraBox** via 1024tera.com
 
 ---
 
@@ -449,6 +474,15 @@ Ve a Configuración > Kindle y completa la autenticación con Amazon.
 # Reiniciar descargas atascadas
 curl -X POST http://localhost:9878/api/v1/queue/reset-stuck
 ```
+
+### TeraBox: Error "errno 400141 - need verify"
+Esto ocurre en el dominio principal de TeraBox. El bypass usa `1024tera.com` para evitarlo. Si persiste, las cookies han expirado - obtén nuevas.
+
+### TeraBox: Las cookies expiraron
+1. Vuelve a iniciar sesión en terabox.com
+2. Exporta las nuevas cookies
+3. Actualiza `TERABOX_COOKIE` en tu `.env`
+4. Reinicia: `docker compose restart backend`
 
 ### Ver logs
 ```bash

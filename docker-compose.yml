@@ -39,10 +39,8 @@ services:
       - KCC_PROFILE=${KCC_PROFILE:-KPW5}
       - KCC_FORMAT=${KCC_FORMAT:-MOBI}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      # TeraBox tokens for automatic downloads (see TERABOX_SETUP.md for instructions)
+      # TeraBox cookies for automatic downloads (see README.md for instructions)
       - TERABOX_COOKIE=${TERABOX_COOKIE:-}
-      - TERABOX_JS_TOKEN=${TERABOX_JS_TOKEN:-}
-      - TERABOX_DP_LOGID=${TERABOX_DP_LOGID:-}
     volumes:
       - downloads:/downloads
       - manga:/manga

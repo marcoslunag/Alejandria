@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 import logging
+import os
 
 from app.database import get_db
 from app.models.settings import AppSettings
@@ -304,26 +305,45 @@ async def test_amazon_connection(db: Session = Depends(get_db)):
 @router.get("/terabox-status")
 async def get_terabox_status():
     """
-    Get TeraBox session status
-    Shows if authentication is configured and valid
+    Get TeraBox bypass status
+    Shows if cookies are configured for TeraBox downloads
     """
     try:
-        from app.services.terabox_session import get_session_manager
+        from app.services.terabox_bypass import TeraBoxBypass
+        from app.config import settings
 
-        session_mgr = get_session_manager()
-        status = session_mgr.get_session_status()
-
+        # Verificar si hay cookies configuradas
+        terabox_cookie = getattr(settings, 'TERABOX_COOKIE', None) or os.getenv('TERABOX_COOKIE', '')
+        
+        has_cookies = bool(terabox_cookie and 'ndus=' in terabox_cookie)
+        
+        # Parsear cookies para mostrar cuáles están presentes
+        cookies_found = []
+        if terabox_cookie:
+            for part in terabox_cookie.split(';'):
+                if '=' in part:
+                    key = part.strip().split('=', 1)[0].strip()
+                    cookies_found.append(key)
+        
+        # Verificar si tenemos las cookies críticas
+        required_cookies = ['ndus', 'browserid', 'lang']
+        cookies_missing = [c for c in required_cookies if c not in cookies_found]
+        
+        is_valid = 'ndus' in cookies_found
+        
         return {
             "ok": True,
-            "is_configured": status.get('has_auth_file', False),
-            "is_valid": status.get('is_valid', False),
-            "needs_reauth": status.get('needs_reauth', True),
-            "expires_at": status.get('expires_at'),
-            "time_remaining": status.get('time_remaining'),
-            "last_login": status.get('last_login'),
-            "cookies_found": status.get('cookies_found', []),
-            "cookies_missing": status.get('cookies_missing', []),
-            "message": _get_terabox_status_message(status)
+            "is_configured": has_cookies,
+            "is_valid": is_valid,
+            "needs_reauth": not is_valid,
+            "cookies_found": cookies_found,
+            "cookies_missing": cookies_missing,
+            "message": _get_terabox_status_message({
+                'has_cookies': has_cookies,
+                'is_valid': is_valid,
+                'cookies_missing': cookies_missing
+            }),
+            "method": "1024tera.com bypass"
         }
     except ImportError:
         return {
@@ -331,7 +351,7 @@ async def get_terabox_status():
             "is_configured": False,
             "is_valid": False,
             "needs_reauth": True,
-            "message": "TeraBox module not available"
+            "message": "TeraBox bypass module not available"
         }
     except Exception as e:
         logger.error(f"Error getting TeraBox status: {e}")
@@ -347,18 +367,14 @@ async def get_terabox_status():
 
 def _get_terabox_status_message(status: dict) -> str:
     """Genera mensaje de estado legible para TeraBox."""
-    if not status.get('has_auth_file'):
-        return "No autenticado. Ejecuta el script de autenticación."
+    if not status.get('has_cookies'):
+        return "No configurado. Configura TERABOX_COOKIE con tus cookies de sesión."
 
     if not status.get('is_valid'):
         missing = status.get('cookies_missing', [])
-        return f"Sesión inválida. Faltan cookies: {', '.join(missing)}"
+        return f"Faltan cookies requeridas: {', '.join(missing)}"
 
-    time_remaining = status.get('time_remaining')
-    if time_remaining:
-        return f"Sesión activa. Expira en: {time_remaining}"
-
-    return "Sesión activa"
+    return "Configurado correctamente. Usando bypass via 1024tera.com"
 
 
 @router.get("/smtp-guide")
