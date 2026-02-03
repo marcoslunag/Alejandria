@@ -958,6 +958,11 @@ async def _process_chapter_downloads(manga_id: int, chapter_ids: List[int]):
     from app.database import SessionLocal
     from app.services.downloader import MangaDownloader
     import json
+    import sys
+
+    # Force flush logs immediately
+    logger.info(f"=== Starting download task for manga {manga_id}, chapters: {chapter_ids} ===")
+    sys.stdout.flush()
 
     db = SessionLocal()
     try:
@@ -966,16 +971,23 @@ async def _process_chapter_downloads(manga_id: int, chapter_ids: List[int]):
         for chapter_id in chapter_ids:
             chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
 
-            if not chapter or chapter.status not in ['pending', 'error']:
+            if not chapter:
+                logger.warning(f"Chapter {chapter_id} not found, skipping")
+                continue
+                
+            if chapter.status not in ['pending', 'error', 'downloading']:
+                logger.info(f"Chapter {chapter_id} has status '{chapter.status}', skipping")
                 continue
 
             try:
                 # Update status to downloading
                 chapter.status = 'downloading'
                 db.commit()
+                logger.info(f"Chapter {chapter_id} (Tomo {chapter.number}) - starting download")
 
                 # Download the chapter
                 if chapter.download_url:
+                    logger.info(f"Download URL: {chapter.download_url[:80]}...")
                     # Check if it's an unsupported service
                     # Note: OUO.io is now supported via resolver
                     url_lower = chapter.download_url.lower()
@@ -1002,6 +1014,7 @@ async def _process_chapter_downloads(manga_id: int, chapter_ids: List[int]):
                     )
 
                     if file_path:
+                        logger.info(f"Chapter {chapter_id} downloaded successfully: {file_path}")
                         chapter.file_path = str(file_path)
                         chapter.status = 'downloaded'
                         chapter.downloaded_at = datetime.utcnow()
@@ -1015,14 +1028,16 @@ async def _process_chapter_downloads(manga_id: int, chapter_ids: List[int]):
                                 db, manga.id, chapter.download_url, str(file_path), chapter.id
                             )
                     else:
+                        logger.error(f"Chapter {chapter_id} download failed - no file returned")
                         chapter.status = 'error'
                         chapter.error_message = 'Download failed'
                 else:
+                    logger.error(f"Chapter {chapter_id} has no download URL")
                     chapter.status = 'error'
                     chapter.error_message = 'No download URL available'
 
                 db.commit()
-                logger.info(f"Downloaded chapter {chapter_id}")
+                logger.info(f"Chapter {chapter_id} processing complete, status: {chapter.status}")
 
             except Exception as e:
                 logger.error(f"Error downloading chapter {chapter_id}: {e}")
