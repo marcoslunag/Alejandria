@@ -9,6 +9,7 @@ from .downloader import MangaDownloader
 from .converter import KCCConverter
 from .kindle_sender import KindleSender
 from .scheduler import MangaScheduler
+from .terabox_bypass import TeraBoxBypass, TeraBoxBypassAsync
 
 __all__ = [
     'AnilistService',
@@ -16,5 +17,7 @@ __all__ = [
     'MangaDownloader',
     'KCCConverter',
     'KindleSender',
-    'MangaScheduler'
+    'MangaScheduler',
+    'TeraBoxBypass',
+    'TeraBoxBypassAsync',
 ]
