@@ -6,10 +6,10 @@ LABEL maintainer="Alejandria" \
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json ./
 
-# Install dependencies (clean cache)
-RUN npm ci --only=production=false && npm cache clean --force
+# Install dependencies
+RUN npm install && npm cache clean --force
 
 # Copy source code
 COPY . .

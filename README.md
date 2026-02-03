@@ -136,7 +136,6 @@ docker-compose up -d
 **Acceso:**
 - **Frontend**: http://tu-ip:8888
 - **API Docs**: http://tu-ip:9878/docs
-- **Calibre-Web**: http://tu-ip:8383
 
 ---
 
@@ -564,7 +563,6 @@ docker compose logs -f
 |--------|----------|-------------|
 | 8888 | Frontend | Interfaz web |
 | 9878 | Backend | API REST |
-| 8383 | Calibre-Web | Gestión biblioteca (opcional) |
 | 5432 | PostgreSQL | Base de datos (interno) |
 
 ---
