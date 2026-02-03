@@ -61,9 +61,6 @@ manga/
 htmlcov/
 .tox/
 
-# Alembic
-alembic/versions/__pycache__/
-
 # Node (if using frontend)
 node_modules/
 npm-debug.log*

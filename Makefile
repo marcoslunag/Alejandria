@@ -1,15 +1,15 @@
-# Manga-ARR Makefile
+# Alejandria Makefile
 # Convenient commands for common operations
 
-.PHONY: help setup start stop restart logs build clean test db-migrate db-upgrade db-downgrade
+.PHONY: help setup start stop restart logs build clean test
 
 help: ## Show this help message
-	@echo "Manga-ARR - Available commands:"
+	@echo "Alejandria - Available commands:"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 setup: ## Initial setup (copy .env and create directories)
-	@echo "Setting up Manga-ARR..."
+	@echo "Setting up Alejandria..."
 	@if [ ! -f .env ]; then \
 		cp .env.example .env; \
 		echo "✓ Created .env file - PLEASE CONFIGURE IT BEFORE STARTING!"; \
@@ -24,23 +24,23 @@ setup: ## Initial setup (copy .env and create directories)
 	@echo "  2. Run: make start"
 
 start: ## Start all services
-	@echo "Starting Manga-ARR..."
+	@echo "Starting Alejandria..."
 	docker-compose up -d
 	@echo ""
 	@echo "✓ Services started!"
-	@echo "  API:         http://localhost:7878"
-	@echo "  API Docs:    http://localhost:7878/docs"
-	@echo "  Calibre-Web: http://localhost:8083"
+	@echo "  Frontend:    http://localhost:8888"
+	@echo "  API Docs:    http://localhost:9878/docs"
+	@echo "  Calibre-Web: http://localhost:8383"
 	@echo ""
 	@echo "Check logs with: make logs"
 
 stop: ## Stop all services
-	@echo "Stopping Manga-ARR..."
+	@echo "Stopping Alejandria..."
 	docker-compose down
 	@echo "✓ Services stopped"
 
 restart: ## Restart all services
-	@echo "Restarting Manga-ARR..."
+	@echo "Restarting Alejandria..."
 	docker-compose restart
 	@echo "✓ Services restarted"
 
@@ -62,7 +62,7 @@ build: ## Rebuild all Docker images
 	@echo "✓ Build complete"
 
 rebuild: ## Rebuild and restart all services
-	@echo "Rebuilding Manga-ARR..."
+	@echo "Rebuilding Alejandria..."
 	docker-compose down
 	docker-compose build
 	docker-compose up -d
@@ -92,7 +92,7 @@ shell-backend: ## Open shell in backend container
 	docker-compose exec backend bash
 
 shell-db: ## Open psql shell in database
-	docker-compose exec postgres psql -U manga manga_arr
+	docker-compose exec postgres psql -U manga alejandria
 
 test-scraper: ## Test scraper connection
 	@curl -s http://localhost:7878/api/v1/system/test/scraper | python3 -m json.tool
@@ -115,7 +115,7 @@ queue: ## Show download queue
 db-backup: ## Backup database
 	@echo "Creating database backup..."
 	@mkdir -p backups
-	@docker-compose exec -T postgres pg_dump -U manga manga_arr > backups/backup_$$(date +%Y%m%d_%H%M%S).sql
+	@docker-compose exec -T postgres pg_dump -U manga alejandria > backups/backup_$$(date +%Y%m%d_%H%M%S).sql
 	@echo "✓ Backup created in backups/"
 
 db-restore: ## Restore database from backup (Usage: make db-restore FILE=backups/backup.sql)
@@ -125,11 +125,11 @@ db-restore: ## Restore database from backup (Usage: make db-restore FILE=backups
 		exit 1; \
 	fi
 	@echo "Restoring database from $(FILE)..."
-	@docker-compose exec -T postgres psql -U manga manga_arr < $(FILE)
+	@docker-compose exec -T postgres psql -U manga alejandria < $(FILE)
 	@echo "✓ Database restored"
 
-update: ## Update Manga-ARR to latest version
-	@echo "Updating Manga-ARR..."
+update: ## Update Alejandria to latest version
+	@echo "Updating Alejandria..."
 	git pull
 	docker-compose down
 	docker-compose build
@@ -138,6 +138,6 @@ update: ## Update Manga-ARR to latest version
 
 install: setup start ## Complete installation (setup + start)
 	@echo ""
-	@echo "🎉 Manga-ARR is installed and running!"
+	@echo "🎉 Alejandria is installed and running!"
 	@echo ""
-	@echo "Next: Open http://localhost:7878/docs and add your first manga"
+	@echo "Next: Open http://localhost:8888 and add your first content"

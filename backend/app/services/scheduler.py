@@ -206,6 +206,8 @@ class MangaScheduler:
                         download_url=download_url,
                         backup_url=backup_url,
                         download_host=download_host,
+                        volume_range_start=ch_data.get('volume_range_start'),
+                        volume_range_end=ch_data.get('volume_range_end'),
                         status='pending'
                     )
                     db.add(chapter)
@@ -238,6 +240,53 @@ class MangaScheduler:
         except Exception as e:
             logger.error(f"Error checking {manga.title}: {e}")
             db.rollback()
+
+    def _mark_bundled_chapters_downloaded(
+        self, db: Session, manga_id: int, download_url: str, file_path: str, exclude_chapter_id: int
+    ):
+        """
+        Marca todos los capítulos que comparten el mismo download_url como descargados.
+        Esto sucede cuando un archivo contiene múltiples tomos (ej: Gantz Tomos 1-4).
+
+        Args:
+            db: Database session
+            manga_id: ID del manga
+            download_url: URL de descarga compartida
+            file_path: Path al archivo descargado
+            exclude_chapter_id: ID del capítulo que ya fue marcado (para evitar duplicar)
+        """
+        try:
+            # Buscar otros capítulos del mismo manga con el mismo download_url
+            related_chapters = db.query(Chapter).filter(
+                and_(
+                    Chapter.manga_id == manga_id,
+                    Chapter.download_url == download_url,
+                    Chapter.id != exclude_chapter_id,
+                    Chapter.status == 'pending'
+                )
+            ).all()
+
+            if related_chapters:
+                logger.info(f"Marking {len(related_chapters)} bundled chapters as downloaded")
+
+                for ch in related_chapters:
+                    ch.status = 'downloaded'
+                    ch.file_path = file_path  # Mismo archivo para todos
+                    ch.downloaded_at = datetime.utcnow()
+
+                    # Eliminar de la cola de descargas si estaba pendiente
+                    db.query(DownloadQueue).filter(
+                        and_(
+                            DownloadQueue.chapter_id == ch.id,
+                            DownloadQueue.status == 'queued'
+                        )
+                    ).delete()
+
+                db.commit()
+                logger.info(f"Bundled chapters marked: {[ch.number for ch in related_chapters]}")
+
+        except Exception as e:
+            logger.error(f"Error marking bundled chapters: {e}")
 
     def _select_best_download_link(self, links: list) -> str:
         """Selecciona el mejor enlace de descarga según prioridad usando host_manager"""
@@ -358,6 +407,12 @@ class MangaScheduler:
                 # Guardar metadatos para ComicInfo.xml
                 self._save_manga_metadata(manga, chapter, file_path)
 
+                # Si este capítulo está en un paquete con otros tomos, marcarlos también
+                if chapter.is_bundled and chapter.download_url:
+                    self._mark_bundled_chapters_downloaded(
+                        db, manga.id, chapter.download_url, str(file_path), chapter.id
+                    )
+
                 logger.info(f"Download completed: {filename}")
             else:
                 # Fallo
@@ -450,7 +505,8 @@ class MangaScheduler:
 
             for ext in ['*.epub', '*.mobi']:
                 for conv_file in kindle_dir.glob(ext):
-                    file_name_lower = conv_file.stem.lower().replace(' ', '').replace('-', '')
+                    file_name = conv_file.stem  # Mantener mayúsculas para mejor matching
+                    file_name_lower = file_name.lower().replace(' ', '').replace('-', '')
 
                     # Verificar si contiene el nombre del manga (o slug)
                     manga_match = (
@@ -462,17 +518,28 @@ class MangaScheduler:
                     if not manga_match:
                         continue
 
-                    # Buscar número de tomo en el nombre del archivo
-                    # Formato: "tomo 001", "tomo001", "tomo 1", etc.
-                    # Con número formateado a 3 dígitos o sin formatear
-                    tomo_patterns = [
-                        rf'tomo\s*0*{chapter_num}(?:\D|$)',  # "tomo 001" o "tomo 1"
-                        rf'tomo\s*{chapter_num:03d}(?:\D|$)',  # "tomo001"
+                    # Buscar el ÚLTIMO número de tomo en el nombre del archivo
+                    # Esto es importante para archivos como "gantz - Tomo 007 - Tomo 012.epub"
+                    # donde 007 es el bundle y 012 es el tomo real
+                    all_tomo_matches = list(re.finditer(r'tomo\s*(\d+)', file_name_lower))
+                    
+                    if all_tomo_matches:
+                        # Tomar el último match (el número de tomo real)
+                        last_match = all_tomo_matches[-1]
+                        file_tomo_num = int(last_match.group(1))
+                        
+                        if file_tomo_num == chapter_num:
+                            converted_files.append(conv_file)
+                            continue
+                    
+                    # Fallback: buscar patrones alternativos
+                    alt_patterns = [
                         rf'chapter\s*0*{chapter_num}(?:\D|$)',
                         rf'ch\s*0*{chapter_num}(?:\D|$)',
+                        rf'parte\s*0*{chapter_num}(?:\D|$)',  # Para archivos divididos por partes
                     ]
 
-                    for pattern in tomo_patterns:
+                    for pattern in alt_patterns:
                         if re.search(pattern, file_name_lower):
                             converted_files.append(conv_file)
                             break

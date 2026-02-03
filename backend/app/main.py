@@ -90,7 +90,7 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Tu biblioteca de manga - descarga automática y envío a Kindle",
+    description="Tu biblioteca digital - manga, cómics y libros con descarga automática y envío a Kindle",
     version=settings.APP_VERSION,
     lifespan=lifespan,
     docs_url="/docs",

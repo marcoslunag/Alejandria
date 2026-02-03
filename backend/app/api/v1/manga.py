@@ -119,102 +119,44 @@ async def get_popular_manga(
 @router.get("/search", response_model=SearchResponse)
 async def search_manga(
     q: str = Query(..., min_length=2, description="Search query"),
-    source: str = Query("all", description="Search source: anilist, tomosmanga, or all"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
     db: Session = Depends(get_db)
 ):
     """
-    Universal manga search (Anilist + TomosManga)
-    Kaizoku-style unified search
+    Search manga on AniList - the best manga/anime database
     """
     results = []
-    sources_used = []
 
-    # Search Anilist
-    if source in ["anilist", "all"]:
-        try:
-            anilist = AnilistService()
-            anilist_results = await anilist.search_manga(q, page=page, per_page=limit)
+    try:
+        anilist = AnilistService()
+        anilist_results = await anilist.search_manga(q, page=page, per_page=limit)
 
-            for item in anilist_results['results']:
-                # Check if already in library
-                in_library = db.query(Manga).filter(Manga.anilist_id == item['anilist_id']).first()
+        for item in anilist_results['results']:
+            # Check if already in library
+            in_library = db.query(Manga).filter(Manga.anilist_id == item['anilist_id']).first()
 
-                results.append(MangaSearch(
-                    title=item['title'],
-                    description=item.get('description', '')[:200] + '...' if item.get('description') else None,
-                    cover=item.get('cover_image'),
-                    source='anilist',
-                    anilist_id=item['anilist_id'],
-                    anilist_url=item.get('anilist_url'),
-                    genres=item.get('genres', []),
-                    average_score=item.get('average_score'),
-                    status=item.get('status'),
-                    in_library=bool(in_library),
-                    library_id=in_library.id if in_library else None
-                ))
-
-            sources_used.append('anilist')
-        except Exception as e:
-            logger.error(f"Anilist search error: {e}")
-
-    # Search TomosManga
-    if source in ["tomosmanga", "all"]:
-        try:
-            scraper = TomosMangaScraper()
-            tomos_results = scraper.search_manga(q)
-
-            for item in tomos_results:
-                # Check if already in library by URL
-                in_library = db.query(Manga).filter(Manga.source_url == item['url']).first()
-
-                results.append(MangaSearch(
-                    title=item['title'],
-                    description=None,
-                    cover=item.get('cover'),
-                    source='tomosmanga',
-                    tomosmanga_url=item['url'],
-                    slug=item.get('slug'),
-                    in_library=bool(in_library),
-                    library_id=in_library.id if in_library else None
-                ))
-
-            sources_used.append('tomosmanga')
-        except Exception as e:
-            logger.error(f"TomosManga search error: {e}")
+            results.append(MangaSearch(
+                title=item['title'],
+                description=item.get('description', '')[:200] + '...' if item.get('description') else None,
+                cover=item.get('cover_image'),
+                source='anilist',
+                anilist_id=item['anilist_id'],
+                anilist_url=item.get('anilist_url'),
+                genres=item.get('genres', []),
+                average_score=item.get('average_score'),
+                status=item.get('status'),
+                in_library=bool(in_library),
+                library_id=in_library.id if in_library else None
+            ))
+    except Exception as e:
+        logger.error(f"AniList search error: {e}")
 
     return SearchResponse(
         query=q,
         results=results,
         total=len(results),
-        sources=sources_used
-    )
-
-
-@router.get("/search/anilist", response_model=AnilistSearchResponse)
-async def search_anilist(
-    q: str = Query(..., min_length=2),
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=50)
-):
-    """
-    Search manga on Anilist only
-    Returns rich metadata
-    """
-    anilist = AnilistService()
-    results = await anilist.search_manga(q, page=page, per_page=limit)
-
-    # Convert to schema
-    from app.schemas.manga import AnilistMangaSearch
-
-    manga_list = []
-    for item in results['results']:
-        manga_list.append(AnilistMangaSearch(**item))
-
-    return AnilistSearchResponse(
-        results=manga_list,
-        page_info=results.get('pageInfo', {})
+        sources=['anilist']
     )
 
 
@@ -951,6 +893,8 @@ async def _fetch_chapters_from_source(manga_id: int, source_url: str):
                 download_url=download_url,
                 backup_url=backup_url,
                 download_host=download_host,
+                volume_range_start=ch_data.get('volume_range_start'),
+                volume_range_end=ch_data.get('volume_range_end'),
                 status='pending'
             )
             db.add(chapter)
@@ -1037,6 +981,12 @@ async def _process_chapter_downloads(manga_id: int, chapter_ids: List[int]):
 
                         # Guardar metadatos del manga para ComicInfo.xml
                         _save_manga_metadata(manga, chapter, file_path)
+
+                        # Si este capítulo está en un bundle, marcar todos los capítulos relacionados
+                        if chapter.is_bundled and chapter.download_url:
+                            _mark_bundled_chapters_downloaded(
+                                db, manga.id, chapter.download_url, str(file_path), chapter.id
+                            )
                     else:
                         chapter.status = 'error'
                         chapter.error_message = 'Download failed'
@@ -1058,6 +1008,46 @@ async def _process_chapter_downloads(manga_id: int, chapter_ids: List[int]):
         logger.error(f"Error in download task: {e}")
     finally:
         db.close()
+
+
+def _mark_bundled_chapters_downloaded(
+    db: Session, manga_id: int, download_url: str, file_path: str, exclude_chapter_id: int
+):
+    """
+    Marca todos los capítulos que comparten el mismo download_url como descargados.
+    Esto sucede cuando un archivo contiene múltiples tomos (ej: Gantz Tomos 1-6).
+
+    Args:
+        db: Database session
+        manga_id: ID del manga
+        download_url: URL de descarga compartida
+        file_path: Path al archivo descargado
+        exclude_chapter_id: ID del capítulo que ya fue marcado (para evitar duplicar)
+    """
+    try:
+        # Buscar otros capítulos del mismo manga con el mismo download_url
+        related_chapters = db.query(Chapter).filter(
+            and_(
+                Chapter.manga_id == manga_id,
+                Chapter.download_url == download_url,
+                Chapter.id != exclude_chapter_id,
+                Chapter.status.in_(['pending', 'downloading'])
+            )
+        ).all()
+
+        if related_chapters:
+            logger.info(f"Marking {len(related_chapters)} bundled chapters as downloaded")
+
+            for ch in related_chapters:
+                ch.status = 'downloaded'
+                ch.file_path = file_path  # Mismo archivo para todos
+                ch.downloaded_at = datetime.utcnow()
+
+            db.commit()
+            logger.info(f"Bundled chapters marked: {[int(ch.number) for ch in related_chapters]}")
+
+    except Exception as e:
+        logger.error(f"Error marking bundled chapters: {e}")
 
 
 def _save_manga_metadata(manga: Manga, chapter: Chapter, file_path: str):

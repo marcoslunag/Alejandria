@@ -75,7 +75,7 @@
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐     │
 │  │   Frontend   │    │   Backend    │    │  KCC Worker  │     │
 │  │  (React UI)  │───▶│  (FastAPI)   │───▶│  (Converter) │     │
-│  │   :8888      │    │    :7878     │    │              │     │
+│  │   :8888      │    │    :9878     │    │              │     │
 │  └──────────────┘    └──────┬───────┘    └──────────────┘     │
 │                             │                    │              │
 │                             ▼                    ▼              │
@@ -98,60 +98,177 @@
 
 ## Instalación
 
-### Requisitos
+### Requisitos del sistema
 
-- Docker y Docker Compose
-- 2GB RAM mínimo (4GB recomendado para conversiones)
+| Recurso | Mínimo | Recomendado |
+|---------|--------|-------------|
+| CPU | 2 cores | 4 cores |
+| RAM | 2 GB | 4 GB |
+| Disco | 20 GB | 100+ GB |
+| SO | Linux (Docker) | Debian/Ubuntu |
+
+**Software necesario:**
+- Docker 20.10+
+- Docker Compose v2+
+- Git
+
+**Cuentas opcionales:**
 - Cuenta SMTP para envío por email (Gmail, Outlook, etc.)
 - Cuenta Amazon para STK (opcional, para archivos >25MB)
 
-### 1. Clonar el repositorio
+---
+
+### Instalación rápida (3 pasos)
 
 ```bash
+# 1. Clonar repositorio
 git clone https://github.com/tu-usuario/alejandria.git
 cd alejandria
+
+# 2. Configurar (edita .env con tus datos)
+cp .env.example .env
+nano .env
+
+# 3. Iniciar
+docker-compose up -d
 ```
 
-### 2. Configurar variables de entorno
+**Acceso:**
+- **Frontend**: http://tu-ip:8888
+- **API Docs**: http://tu-ip:9878/docs
+- **Calibre-Web**: http://tu-ip:8383
+
+---
+
+### Instalación en Proxmox LXC
+
+#### Crear container LXC
 
 ```bash
-cp .env.example .env
+# En el nodo Proxmox, crear container con plantilla Debian/Ubuntu
+pct create 200 local:vztmpl/debian-12-standard_12.2-1_amd64.tar.zst \
+  --hostname alejandria \
+  --memory 4096 \
+  --cores 4 \
+  --rootfs local-lvm:32 \
+  --net0 name=eth0,bridge=vmbr0,ip=dhcp \
+  --features nesting=1 \
+  --unprivileged 1
+
+# Iniciar container
+pct start 200
+
+# Entrar al container
+pct enter 200
 ```
 
-Edita `.env` con tus credenciales:
+> **Importante**: El flag `nesting=1` es necesario para Docker.
+
+#### Instalar Docker en el LXC
+
+```bash
+# Actualizar sistema
+apt update && apt upgrade -y
+
+# Instalar dependencias
+apt install -y ca-certificates curl gnupg git
+
+# Añadir repositorio Docker
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Instalar Docker
+apt update
+apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Verificar instalación
+docker --version
+docker compose version
+```
+
+#### Instalar Alejandria
+
+```bash
+# Clonar repositorio
+cd /opt
+git clone https://github.com/tu-usuario/alejandria.git
+cd alejandria
+
+# Configurar
+cp .env.example .env
+nano .env  # Editar con tus credenciales
+
+# Construir e iniciar (primera vez tarda ~5-10 min)
+docker compose up -d --build
+
+# Ver logs
+docker compose logs -f
+```
+
+#### Configurar inicio automático
+
+```bash
+# Crear servicio systemd
+cat > /etc/systemd/system/alejandria.service << 'EOF'
+[Unit]
+Description=Alejandria - Tu biblioteca digital
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/alejandria
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Habilitar servicio
+systemctl daemon-reload
+systemctl enable alejandria
+```
+
+---
+
+### Configuración del archivo .env
 
 ```env
-# Kindle
+# ============================================
+# ALEJANDRIA - Configuración
+# ============================================
+
+# Base de datos (cambiar password en producción)
+POSTGRES_USER=manga
+POSTGRES_PASSWORD=tu-password-seguro
+POSTGRES_DB=alejandria
+
+# Email Kindle (tu dirección @kindle.com)
 KINDLE_EMAIL=tu-kindle@kindle.com
 
-# SMTP (Gmail)
+# SMTP para envío de archivos (ejemplo Gmail)
 SMTP_SERVER=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=tu-email@gmail.com
 SMTP_PASSWORD=tu-app-password
 SMTP_FROM_EMAIL=tu-email@gmail.com
 
-# Base de datos
-POSTGRES_USER=manga
-POSTGRES_PASSWORD=tu-password-seguro
-POSTGRES_DB=alejandria
+# KCC - Conversión
+KCC_PROFILE=KPW5    # Modelo Kindle: KPW5, KPW4, KO, K11, KS
+KCC_FORMAT=MOBI     # Formato: MOBI o EPUB
 
-# KCC
-KCC_PROFILE=KPW5
-KCC_FORMAT=MOBI
+# Scheduler
+CHECK_INTERVAL_HOURS=6
+
+# Logging
+LOG_LEVEL=INFO
 ```
-
-### 3. Iniciar servicios
-
-```bash
-docker-compose up -d
-```
-
-### 4. Acceder
-
-- **Frontend**: http://localhost:8888
-- **API Docs**: http://localhost:9878/docs
-- **Calibre-Web** (opcional): http://localhost:8383
 
 ---
 
@@ -336,14 +453,85 @@ curl -X POST http://localhost:9878/api/v1/queue/reset-stuck
 ### Ver logs
 ```bash
 # Todos los servicios
-docker-compose logs -f
+docker compose logs -f
 
 # Solo backend
-docker-compose logs -f backend
+docker compose logs -f backend
 
 # Solo conversor
-docker-compose logs -f kcc-converter
+docker compose logs -f kcc-converter
 ```
+
+---
+
+## Mantenimiento
+
+### Comandos útiles
+
+```bash
+# Ver estado de containers
+docker compose ps
+
+# Reiniciar todos los servicios
+docker compose restart
+
+# Reiniciar un servicio específico
+docker compose restart backend
+
+# Actualizar a última versión
+git pull
+docker compose down
+docker compose up -d --build
+
+# Ver uso de recursos
+docker stats
+
+# Limpiar imágenes no usadas
+docker system prune -a
+```
+
+### Backup de datos
+
+```bash
+# Backup de base de datos
+docker compose exec postgres pg_dump -U manga alejandria > backup_$(date +%Y%m%d).sql
+
+# Restaurar backup
+docker compose exec -T postgres psql -U manga alejandria < backup.sql
+
+# Backup de volúmenes (manga descargado)
+docker run --rm -v alejandria_manga:/data -v $(pwd):/backup alpine tar czf /backup/manga_backup.tar.gz /data
+```
+
+### Actualización
+
+```bash
+cd /opt/alejandria  # o donde tengas el proyecto
+
+# Guardar cambios locales si los hay
+git stash
+
+# Actualizar código
+git pull
+
+# Reconstruir containers
+docker compose down
+docker compose up -d --build
+
+# Verificar que todo funciona
+docker compose logs -f
+```
+
+---
+
+## Puertos utilizados
+
+| Puerto | Servicio | Descripción |
+|--------|----------|-------------|
+| 8888 | Frontend | Interfaz web |
+| 9878 | Backend | API REST |
+| 8383 | Calibre-Web | Gestión biblioteca (opcional) |
+| 5432 | PostgreSQL | Base de datos (interno) |
 
 ---
 

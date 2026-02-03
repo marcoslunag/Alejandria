@@ -27,12 +27,9 @@ export const mangaApi = {
   getPopular: (page = 1, limit = 20) =>
     api.get(`/manga/discover/popular`, { params: { page, limit } }),
 
-  // Search
-  search: (query, source = 'all', page = 1, limit = 20) =>
-    api.get(`/manga/search`, { params: { q: query, source, page, limit } }),
-
-  searchAnilist: (query, page = 1, limit = 20) =>
-    api.get(`/manga/search/anilist`, { params: { q: query, page, limit } }),
+  // Search (AniList only)
+  search: (query, page = 1, limit = 20) =>
+    api.get(`/manga/search`, { params: { q: query, page, limit } }),
 
   // Library
   getLibrary: (params = {}) =>

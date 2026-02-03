@@ -23,6 +23,11 @@ class Chapter(Base):
     backup_url = Column(String(500))    # URL de backup
     download_host = Column(String(50))  # Host principal (mediafire, fireload, etc.)
 
+    # Rango de tomos que contiene el archivo descargable
+    # Si volume_range_start != volume_range_end, el archivo contiene múltiples tomos
+    volume_range_start = Column(Integer)  # Primer tomo en el archivo
+    volume_range_end = Column(Integer)    # Último tomo en el archivo
+
     # Status: pending, downloading, downloaded, converting, converted, sent, error
     status = Column(String(50), default="pending", index=True)
 
@@ -62,3 +67,17 @@ class Chapter(Base):
         if self.title:
             return f"Chapter {self.number}: {self.title}"
         return f"Chapter {self.number}"
+
+    @property
+    def is_bundled(self):
+        """Check if this chapter is bundled with others in the same download"""
+        if self.volume_range_start and self.volume_range_end:
+            return self.volume_range_start != self.volume_range_end
+        return False
+
+    @property
+    def bundle_range(self):
+        """Get the range of volumes in the bundle"""
+        if self.volume_range_start and self.volume_range_end:
+            return (self.volume_range_start, self.volume_range_end)
+        return (int(self.number), int(self.number))

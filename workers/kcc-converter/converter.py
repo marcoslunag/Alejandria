@@ -384,8 +384,29 @@ class ArchiveHandler(FileSystemEventHandler):
         
         if result.returncode == 0:
             return True
+        
+        # Si 7z falla con "unsupported method", intentar con unrar
+        # Esto puede pasar con archivos RAR guardados como .cbz o con RAR5/RAR moderno
+        stderr_lower = result.stderr.lower() if result.stderr else ''
+        stdout_lower = result.stdout.lower() if result.stdout else ''
+        
+        if 'unsupported method' in stderr_lower or 'unsupported method' in stdout_lower:
+            logger.warning(f"7z failed (unsupported method), trying unrar: {archive_path.name}")
             
-        if 'unsupported method' in result.stderr.lower() and ext in ['.cbr', '.rar']:
+            result_unrar = subprocess.run(
+                ['unrar', 'x', '-o+', str(archive_path), str(output_dir) + '/'],
+                capture_output=True,
+                text=True
+            )
+            
+            if result_unrar.returncode == 0:
+                return True
+                
+            logger.error(f"unrar also failed: {result_unrar.stderr}")
+            return False
+        
+        # Para archivos RAR/CBR, siempre intentar unrar como fallback
+        if ext in ['.cbr', '.rar']:
             logger.warning(f"7z failed, trying unrar: {archive_path.name}")
             
             result_unrar = subprocess.run(
@@ -415,10 +436,92 @@ class ArchiveHandler(FileSystemEventHandler):
             logger.warning(f"Corrupted image (skipping): {image_path.name}")
             return False
 
+    def _detect_volume_folders(self, extract_dir: Path) -> dict[int, list]:
+        """
+        Detecta carpetas de tomos dentro del archivo extraído.
+        Busca patrones como "Tomo 01", "Vol 1", "Volume 01", "T01", etc.
+        También detecta carpetas creadas por extracción de CBRs anidados como:
+        "_extracted_Gantz - Tomo 01 (#001-010)"
+
+        Returns:
+            Dict mapping volume number -> dict with 'folder' and 'images' keys
+        """
+        import re
+
+        volumes = {}
+
+        # Patrones para detectar número de tomo en el nombre de carpeta
+        # Orden de prioridad: más específico primero
+        volume_patterns = [
+            # "Tomo 01", "Tomo 1", "tomo01", "Tomo-01"
+            (re.compile(r'tomo\s*[_\-\.\s]*(\d+)', re.IGNORECASE), "tomo"),
+            # "Vol 01", "Volume 1", "vol.01"
+            (re.compile(r'vol(?:ume)?\.?\s*[_\-\s]*(\d+)', re.IGNORECASE), "vol"),
+            # "T01", "T.01", "T-01" (común en releases) - solo si es al principio o después de espacio
+            (re.compile(r'(?:^|\s|_)T\.?\s*[_\-]?\s*(\d+)(?:\D|$)', re.IGNORECASE), "T"),
+        ]
+
+        # Buscar todas las carpetas (incluyendo las creadas al extraer archivos anidados)
+        all_folders = [item for item in extract_dir.rglob('*') if item.is_dir()]
+
+        logger.info(f"Scanning {len(all_folders)} folders for volume structure...")
+        if all_folders:
+            logger.info(f"Folder names: {[f.name for f in all_folders[:10]]}")  # Log primeras 10
+
+        for item in all_folders:
+            folder_name = item.name
+
+            # Intentar cada patrón
+            for pattern, pattern_name in volume_patterns:
+                match = pattern.search(folder_name)
+                if match:
+                    vol_num = int(match.group(1))
+                    # Evitar números muy altos que probablemente no sean tomos
+                    if 1 <= vol_num <= 999:
+                        if vol_num not in volumes:
+                            volumes[vol_num] = {'folder': item, 'images': []}
+                            logger.info(f"Found volume {vol_num} folder (pattern: {pattern_name}): {folder_name}")
+                        break  # Usar primer patrón que coincida
+
+        # Si encontramos carpetas de tomos, recolectar imágenes de cada una
+        if volumes:
+            logger.info(f"Detected {len(volumes)} volume folders: {sorted(volumes.keys())}")
+            image_extensions = ('*.jpg', '*.jpeg', '*.png', '*.webp', '*.gif')
+
+            for vol_num, vol_data in volumes.items():
+                folder = vol_data['folder']
+                for ext in image_extensions:
+                    for img_path in folder.rglob(ext):
+                        if self.should_skip_file(img_path.name):
+                            continue
+                        if self.validate_image(img_path):
+                            size_bytes = img_path.stat().st_size
+                            vol_data['images'].append((img_path, size_bytes))
+
+                # Ordenar imágenes por nombre
+                vol_data['images'].sort(key=lambda x: x[0].name)
+                logger.info(f"Volume {vol_num}: {len(vol_data['images'])} images found")
+
+            # Filtrar volúmenes sin imágenes
+            volumes = {k: v for k, v in volumes.items() if v['images']}
+
+            if volumes:
+                logger.info(f"Volumes with images: {sorted(volumes.keys())}")
+        else:
+            logger.info("No volume folders detected - will process as single archive")
+
+        return volumes
+
     def normalize_archive(self, file_path: Path, metadata: dict = None, min_parts: int = 1) -> list[Path] | None:
         """
         Crea archivo(s) temporal(es) .clean.cbz para procesamiento interno.
-        Si el archivo es muy grande, lo divide en partes para cumplir el límite de 200MB.
+
+        IMPORTANTE: Si el archivo contiene múltiples tomos (carpetas Tomo 01, Tomo 02, etc.),
+        cada tomo se convierte por separado en lugar de dividir arbitrariamente.
+
+        Si el archivo es muy grande y NO tiene estructura de tomos, lo divide en partes
+        para cumplir el límite de 200MB.
+
         Incluye ComicInfo.xml si hay metadatos disponibles.
         Retorna una lista de paths a los CBZ normalizados.
 
@@ -447,6 +550,15 @@ class ArchiveHandler(FileSystemEventHandler):
                 if self.extract_archive(archive, nested_dir):
                     archive.unlink(missing_ok=True)
 
+            # NUEVO: Detectar si hay múltiples tomos en carpetas separadas
+            volume_folders = self._detect_volume_folders(temp_extract_dir)
+
+            if len(volume_folders) > 1:
+                # Hay múltiples tomos - convertir cada uno por separado
+                logger.info(f"📚 Detected {len(volume_folders)} separate volumes in archive: {sorted(volume_folders.keys())}")
+                return self._create_volume_cbzs(file_path.stem, volume_folders, metadata)
+
+            # Si solo hay un tomo o no hay estructura de carpetas, proceder normal
             # Colectar imágenes válidas con sus tamaños
             image_extensions = ('*.jpg', '*.jpeg', '*.png', '*.webp', '*.gif')
             image_files = []
@@ -533,6 +645,78 @@ class ArchiveHandler(FileSystemEventHandler):
 
         logger.info(f"Created: {clean_cbz_path.name} ({len(final_images)} images)")
         return [clean_cbz_path]
+
+    def _create_volume_cbzs(self, stem: str, volume_folders: dict, metadata: dict = None) -> list[Path]:
+        """
+        Crea un CBZ separado para cada tomo detectado en el archivo.
+        Esto es diferente de _create_split_cbz porque respeta la estructura original de tomos.
+        """
+        result_paths = []
+
+        # Extraer nombre base del manga (quitar info de rango y tomo del nombre)
+        import re
+        base_name = stem
+        # Quitar rangos como "[001-004]" o "[07-12]"
+        base_name = re.sub(r'\s*\[?\d+\s*-\s*\d+\]?\s*$', '', base_name).strip()
+        # Quitar "- Tomo 007" o "Tomo 007" del final
+        base_name = re.sub(r'\s*-?\s*tomo\s*\d+\s*$', '', base_name, flags=re.IGNORECASE).strip()
+        # Quitar "tomos" suelto
+        base_name = re.sub(r'\s*tomos?\s*$', '', base_name, flags=re.IGNORECASE).strip()
+        # Quitar guiones finales
+        base_name = base_name.rstrip(' -')
+
+        for vol_num in sorted(volume_folders.keys()):
+            vol_data = volume_folders[vol_num]
+            image_files = vol_data['images']
+
+            if not image_files:
+                continue
+
+            # Nombre: "Manga - Tomo 001.clean.cbz"
+            vol_name = f"{base_name} - Tomo {vol_num:03d}"
+            clean_cbz_path = Path(tempfile.gettempdir()) / f"{vol_name}.clean.cbz"
+
+            if clean_cbz_path.exists():
+                clean_cbz_path.unlink()
+
+            seen_names = set()
+            final_images = []
+
+            for img_path, _ in image_files:
+                name = img_path.name
+                counter = 1
+                original_name = name
+
+                while name in seen_names:
+                    s = Path(original_name).stem
+                    suffix = Path(original_name).suffix
+                    name = f"{s}_{counter:03d}{suffix}"
+                    counter += 1
+
+                seen_names.add(name)
+                final_images.append((img_path, name))
+
+            with zipfile.ZipFile(clean_cbz_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                # Insertar ComicInfo.xml con el número de volumen correcto
+                if metadata:
+                    try:
+                        vol_metadata = metadata.copy()
+                        vol_metadata['volume_number'] = vol_num
+                        vol_metadata['chapter_title'] = f"Tomo {vol_num}"
+                        comicinfo_xml = generate_comicinfo_xml(vol_metadata)
+                        zf.writestr("ComicInfo.xml", comicinfo_xml)
+                        logger.info(f"ComicInfo.xml added for: {vol_name}")
+                    except Exception as e:
+                        logger.warning(f"Could not generate ComicInfo.xml: {e}")
+
+                for src_path, arc_name in final_images:
+                    zf.write(src_path, arc_name)
+
+            vol_size = sum(p.stat().st_size for p, _ in image_files) / (1024 * 1024)
+            logger.info(f"📖 Created volume {vol_num}: {clean_cbz_path.name} ({len(final_images)} images, ~{vol_size:.1f}MB)")
+            result_paths.append(clean_cbz_path)
+
+        return result_paths
 
     def _create_split_cbz(self, stem: str, image_files: list, num_parts: int, metadata: dict = None) -> list[Path]:
         """Divide las imágenes en múltiples CBZ con ComicInfo.xml si hay metadatos"""
@@ -683,17 +867,34 @@ class ArchiveHandler(FileSystemEventHandler):
         # Verificar RAR (puede estar guardado como .cbz)
         if actual_format == 'rar':
             logger.info(f"RAR archive detected (extension: {file_path.suffix}): {file_path.name}")
-            # 7z puede leer RAR
+            # Primero intentar con 7z
             result = subprocess.run(
                 ['7z', 't', str(file_path)],
                 capture_output=True,
                 text=True
             )
             if result.returncode == 0:
-                logger.info(f"RAR archive verified: {file_path.name}")
+                logger.info(f"RAR archive verified with 7z: {file_path.name}")
                 return True
+            
+            # Si 7z falla con "Unsupported Method", intentar con unrar
+            if 'unsupported method' in result.stderr.lower() or 'unsupported method' in result.stdout.lower():
+                logger.info(f"7z doesn't support compression method, trying unrar for verification...")
+                result_unrar = subprocess.run(
+                    ['unrar', 't', str(file_path)],
+                    capture_output=True,
+                    text=True
+                )
+                if result_unrar.returncode == 0:
+                    logger.info(f"RAR archive verified with unrar: {file_path.name}")
+                    return True
+                else:
+                    logger.error(f"RAR integrity check failed with unrar: {file_path.name}")
+                    logger.error(f"unrar stderr: {result_unrar.stderr[:500] if result_unrar.stderr else 'None'}")
+                    return False
             else:
                 logger.error(f"RAR integrity check failed: {file_path.name}")
+                logger.error(f"7z stderr: {result.stderr[:500] if result.stderr else 'None'}")
                 return False
 
         # Para RAR/CBR por extensión (fallback)

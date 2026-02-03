@@ -14,4 +14,4 @@
 -- Grant privileges
 GRANT ALL PRIVILEGES ON DATABASE alejandria TO manga;
 
--- The tables will be created by SQLAlchemy/Alembic
+-- The tables will be created automatically by SQLAlchemy on first startup

@@ -1,8 +1,11 @@
 FROM python:3.11-slim-bookworm
 
+LABEL maintainer="Alejandria" \
+      description="Alejandria KCC Converter Worker"
+
 WORKDIR /app
 
-# Instalar dependencias del sistema (eliminado p7zip-rar)
+# Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     libjpeg62-turbo-dev \

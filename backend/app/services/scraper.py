@@ -250,6 +250,8 @@ class TomosMangaScraper:
                         'number': float(vol_num),
                         'title': f"Tomo {vol_num:03d}",
                         'url': base_url,
+                        'volume_range_start': start_vol,
+                        'volume_range_end': end_vol,
                         'download_links': [{
                             'url': button_url,
                             'host': host,

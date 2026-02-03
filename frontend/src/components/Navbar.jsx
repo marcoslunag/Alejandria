@@ -18,8 +18,8 @@ const Navbar = () => {
           <Link to="/" className="flex items-center gap-3">
             <div className="text-3xl">📚</div>
             <div>
-              <h1 className="text-xl font-bold text-primary">Alejandria</h1>
-              <p className="text-xs text-gray-400">Tu biblioteca de manga</p>
+              <h1 className="text-xl font-bold text-primary">Alejandría</h1>
+              <p className="text-xs text-gray-400">Tu biblioteca digital</p>
             </div>
           </Link>
 

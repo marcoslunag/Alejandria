@@ -11,13 +11,10 @@ until pg_isready -h postgres -p 5432 -U ${POSTGRES_USER:-manga}; do
 done
 echo "Database is ready!"
 
-# Run database migrations
-echo "Running database migrations..."
-alembic upgrade head || {
-    echo "Migration failed or no migrations needed"
-    # If alembic fails, ensure tables exist via SQLAlchemy
-    python -c "from app.database import init_db; init_db()"
-}
+# Initialize database tables (SQLAlchemy creates them if they don't exist)
+echo "Initializing database..."
+python -c "from app.database import init_db; init_db()"
+echo "Database initialized!"
 
 echo "Starting uvicorn server..."
 exec uvicorn app.main:app --host 0.0.0.0 --port 7878 --proxy-headers

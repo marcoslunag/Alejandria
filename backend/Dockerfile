@@ -1,10 +1,13 @@
 FROM python:3.11-slim
 
+LABEL maintainer="Alejandria" \
+      description="Alejandria Backend API - Tu biblioteca digital"
+
 # Set working directory
 WORKDIR /app
 
 # Install system dependencies including Playwright browser dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     postgresql-client \
@@ -28,7 +31,8 @@ RUN apt-get update && apt-get install -y \
     libpango-1.0-0 \
     libcairo2 \
     fonts-liberation \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Copy requirements first for better caching
 COPY requirements.txt .

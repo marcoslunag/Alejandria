@@ -24,8 +24,7 @@ const Search = () => {
     try {
       setLoading(true);
       setHasSearched(true);
-      // Solo buscar en AniList
-      const response = await mangaApi.search(query, 'anilist');
+      const response = await mangaApi.search(query);
       setResults(response.data.results);
     } catch (error) {
       console.error('Error buscando:', error);
