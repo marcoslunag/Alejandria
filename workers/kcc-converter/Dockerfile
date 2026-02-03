@@ -30,14 +30,6 @@ RUN cd /tmp && \
     chmod +x /usr/local/bin/unrar && \
     rm -rf rar*
 
-# Instalar KindleGen (necesario para MOBI)
-RUN cd /tmp && \
-    wget -q https://archive.org/download/kindlegen_linux_2_6_i386_v2_9/kindlegen_linux_2.6_i386_v2_9.tar.gz && \
-    tar -xzf kindlegen_linux_2.6_i386_v2_9.tar.gz && \
-    mv kindlegen /usr/local/bin/ && \
-    chmod +x /usr/local/bin/kindlegen && \
-    rm -rf kindlegen* docs EULA.txt
-
 # Verificar instalación
 RUN which 7z && which unrar && which ebook-convert && which kindlegen
 
