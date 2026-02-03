@@ -7,10 +7,7 @@ import {
   FaCheckCircle,
   FaExclamationCircle,
   FaBook,
-  FaEnvelope,
   FaTabletAlt,
-  FaKey,
-  FaQuestionCircle,
   FaSpinner,
   FaExternalLinkAlt,
   FaSave,
@@ -26,15 +23,7 @@ const Settings = () => {
 
   // Settings state
   const [settings, setSettings] = useState({
-    kindle_email: '',
-    smtp_server: 'smtp.gmail.com',
-    smtp_port: 587,
-    smtp_user: '',
-    smtp_password: '',
-    smtp_from_email: '',
     auto_send_to_kindle: false,
-    amazon_email: '',
-    amazon_password: '',
     kcc_profile: 'KPW5',
     stk_device_serial: null,
     stk_device_name: null
@@ -54,9 +43,6 @@ const Settings = () => {
     { value: 'K57', label: 'Kindle 5/7', resolution: '600 x 800' },
   ];
   const [saveStatus, setSaveStatus] = useState(null);
-  const [testStatus, setTestStatus] = useState(null);
-  const [testMessage, setTestMessage] = useState('');
-  const [showGuide, setShowGuide] = useState(false);
 
   // STK (Send to Kindle) OAuth state
   const [stkStatus, setStkStatus] = useState({ authenticated: false, devices: [] });
@@ -83,8 +69,7 @@ const Settings = () => {
       if (settingsRes?.data) {
         setSettings(prev => ({
           ...prev,
-          ...settingsRes.data,
-          smtp_password: ''
+          ...settingsRes.data
         }));
       }
       if (stkRes?.data) {
@@ -100,37 +85,13 @@ const Settings = () => {
   const handleSaveSettings = async () => {
     try {
       setSaveStatus('saving');
-      const dataToSave = { ...settings };
-      if (!dataToSave.smtp_password) {
-        delete dataToSave.smtp_password;
-      }
-      if (!dataToSave.amazon_password) {
-        delete dataToSave.amazon_password;
-      }
-      await mangaApi.saveSettings(dataToSave);
+      await mangaApi.saveSettings(settings);
       setSaveStatus('success');
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (error) {
       console.error('Error guardando configuración:', error);
       setSaveStatus('error');
       setTimeout(() => setSaveStatus(null), 3000);
-    }
-  };
-
-  const handleTestSmtp = async () => {
-    try {
-      setTestStatus('testing');
-      setTestMessage('');
-      const response = await mangaApi.testSmtp();
-      setTestStatus('success');
-      setTestMessage(response.data.message || 'Conexión exitosa');
-      setTimeout(() => {
-        setTestStatus(null);
-        setTestMessage('');
-      }, 5000);
-    } catch (error) {
-      setTestStatus('error');
-      setTestMessage(error.response?.data?.detail || 'Error de conexión');
     }
   };
 
@@ -161,7 +122,7 @@ const Settings = () => {
       setStkStatus({ authenticated: true, devices: response.data.devices || [] });
       setStkSigninUrl('');
       setStkRedirectUrl('');
-      setStkMessage({ type: 'success', text: 'Autorizacion exitosa! Ya puedes enviar archivos grandes a Kindle.' });
+      setStkMessage({ type: 'success', text: 'Autorizacion exitosa! Ya puedes enviar archivos a Kindle.' });
     } catch (error) {
       setStkMessage({ type: 'error', text: error.response?.data?.detail || 'Error de autorizacion' });
     } finally {
@@ -210,24 +171,8 @@ const Settings = () => {
               Configuración de Kindle
             </h2>
             <div className="card p-6">
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Email del Kindle
-                </label>
-                <input
-                  type="email"
-                  value={settings.kindle_email}
-                  onChange={(e) => handleInputChange('kindle_email', e.target.value)}
-                  placeholder="tu_usuario@kindle.com"
-                  className="w-full px-4 py-3 bg-white rounded-lg border border-gray-700 focus:border-primary focus:outline-none text-gray-900"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Encuentra tu email de Kindle en Amazon → Gestionar contenido y dispositivos → Preferencias → Configuración de documentos personales
-                </p>
-              </div>
-
               {/* Selector de modelo Kindle */}
-              <div className="mt-6">
+              <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">
                   Modelo de Kindle (para optimización)
                 </label>
@@ -263,155 +208,16 @@ const Settings = () => {
             </div>
           </section>
 
-          {/* Configuración SMTP / Gmail */}
-          <section>
-            <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-              <FaEnvelope className="text-red-500" />
-              Configuración de Email (Gmail)
-            </h2>
-            <div className="card p-6 space-y-4">
-              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 mb-4">
-                <p className="text-sm text-yellow-300">
-                  <strong>Nota:</strong> El envío por email tiene un límite de 25MB por archivo.
-                  Para archivos más grandes, usa <strong>Amazon Send to Kindle</strong> (hasta 200MB).
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Email de Gmail
-                  </label>
-                  <input
-                    type="email"
-                    value={settings.smtp_user}
-                    onChange={(e) => {
-                      handleInputChange('smtp_user', e.target.value);
-                      handleInputChange('smtp_from_email', e.target.value);
-                    }}
-                    placeholder="tu_email@gmail.com"
-                    className="w-full px-4 py-3 bg-white rounded-lg border border-gray-700 focus:border-primary focus:outline-none text-gray-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
-                    App Password
-                    <button
-                      onClick={() => setShowGuide(!showGuide)}
-                      className="text-primary hover:text-primary-light"
-                      title="¿Cómo obtener App Password?"
-                    >
-                      <FaQuestionCircle />
-                    </button>
-                  </label>
-                  <input
-                    type="password"
-                    value={settings.smtp_password}
-                    onChange={(e) => handleInputChange('smtp_password', e.target.value)}
-                    placeholder="••••••••••••••••"
-                    className="w-full px-4 py-3 bg-white rounded-lg border border-gray-700 focus:border-primary focus:outline-none text-gray-900"
-                  />
-                </div>
-              </div>
-
-              {/* Guía de App Password */}
-              {showGuide && (
-                <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 mt-4">
-                  <h3 className="font-bold text-blue-400 mb-3 flex items-center gap-2">
-                    <FaKey />
-                    Cómo obtener App Password de Gmail
-                  </h3>
-                  <ol className="list-decimal list-inside space-y-2 text-gray-300 text-sm">
-                    <li>
-                      Ve a{' '}
-                      <a
-                        href="https://myaccount.google.com/security"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-primary hover:underline inline-flex items-center gap-1"
-                      >
-                        myaccount.google.com/security
-                        <FaExternalLinkAlt className="text-xs" />
-                      </a>
-                    </li>
-                    <li>
-                      En <strong>"Cómo inicias sesión en Google"</strong>, activa la{' '}
-                      <strong>Verificación en 2 pasos</strong> si aún no está activa
-                    </li>
-                    <li>
-                      Después de activarla, busca{' '}
-                      <a
-                        href="https://myaccount.google.com/apppasswords"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-primary hover:underline inline-flex items-center gap-1"
-                      >
-                        Contraseñas de aplicaciones
-                        <FaExternalLinkAlt className="text-xs" />
-                      </a>
-                    </li>
-                    <li>
-                      Crea una nueva contraseña de aplicación con nombre <strong>"Alejandria"</strong>
-                    </li>
-                    <li>
-                      Copia la contraseña de <strong>16 caracteres</strong> (sin espacios) y pégala arriba
-                    </li>
-                  </ol>
-                  <div className="mt-3 p-2 bg-yellow-500/10 border border-yellow-500/30 rounded text-xs text-yellow-300">
-                    Esta contraseña es diferente a tu contraseña de Google. Guárdala en un lugar seguro.
-                  </div>
-                </div>
-              )}
-
-              {/* Botón de probar conexión */}
-              <div className="flex flex-wrap gap-3 mt-4">
-                <button
-                  onClick={handleTestSmtp}
-                  disabled={testStatus === 'testing' || !settings.smtp_user}
-                  className="btn btn-secondary flex items-center gap-2"
-                >
-                  {testStatus === 'testing' ? (
-                    <>
-                      <FaSpinner className="animate-spin" />
-                      Probando...
-                    </>
-                  ) : testStatus === 'success' ? (
-                    <>
-                      <FaCheck className="text-green-500" />
-                      Conexión exitosa
-                    </>
-                  ) : testStatus === 'error' ? (
-                    <>
-                      <FaTimes className="text-red-500" />
-                      Error
-                    </>
-                  ) : (
-                    <>
-                      <FaEnvelope />
-                      Probar conexión SMTP
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {testMessage && (
-                <p className={`text-sm mt-2 ${testStatus === 'success' ? 'text-green-400' : 'text-red-400'}`}>
-                  {testMessage}
-                </p>
-              )}
-            </div>
-          </section>
-
           {/* Amazon Send to Kindle (STK - OAuth2) */}
           <section>
             <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
               <FaAmazon className="text-orange-400" />
-              Amazon Send to Kindle (Archivos grandes)
+              Amazon Send to Kindle
             </h2>
             <div className="card p-6 space-y-4">
               <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 mb-4">
                 <p className="text-sm text-green-300">
-                  <strong>Recomendado para manga grande.</strong> Soporta archivos hasta 200MB.
+                  <strong>Método recomendado.</strong> Soporta archivos hasta 200MB.
                   Usa OAuth2 - solo necesitas autorizar una vez en tu navegador. Funciona con 2FA.
                 </p>
               </div>
@@ -612,7 +418,7 @@ const Settings = () => {
                   ) : (
                     <>
                       <FaSave />
-                      Guardar toda la configuración
+                      Guardar configuración
                     </>
                   )}
                 </button>
@@ -627,7 +433,7 @@ const Settings = () => {
               Estado de Kindle
             </h2>
             <div className="card p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Amazon STK */}
                 <div className="flex items-center gap-4">
                   <div className={`p-3 rounded-full ${stkStatus.authenticated ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
@@ -646,63 +452,20 @@ const Settings = () => {
                   </div>
                 </div>
 
-                {/* Email Kindle */}
+                {/* Dispositivo seleccionado */}
                 <div className="flex items-center gap-4">
-                  <div className={`p-3 rounded-full ${settings.kindle_email ? 'bg-green-500/20' : 'bg-yellow-500/20'}`}>
-                    {settings.kindle_email ? (
+                  <div className={`p-3 rounded-full ${settings.stk_device_serial ? 'bg-green-500/20' : 'bg-yellow-500/20'}`}>
+                    {settings.stk_device_serial ? (
                       <FaCheckCircle className="text-green-500 text-xl" />
                     ) : (
                       <FaExclamationCircle className="text-yellow-500 text-xl" />
                     )}
                   </div>
                   <div>
-                    <p className="text-gray-400 text-sm">Email Kindle</p>
-                    <p className="font-bold">{settings.kindle_email ? 'Configurado' : 'No configurado'}</p>
-                    {settings.kindle_email && (
-                      <p className="text-xs text-gray-500 truncate max-w-[150px]">{settings.kindle_email}</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* SMTP/Gmail */}
-                <div className="flex items-center gap-4">
-                  <div className={`p-3 rounded-full ${settings.smtp_user && settings.smtp_password ? 'bg-green-500/20' : 'bg-gray-500/20'}`}>
-                    {settings.smtp_user && settings.smtp_password ? (
-                      <FaCheckCircle className="text-green-500 text-xl" />
-                    ) : (
-                      <FaExclamationCircle className="text-gray-500 text-xl" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-gray-400 text-sm">Email (SMTP)</p>
-                    <p className="font-bold">{settings.smtp_user ? 'Configurado' : 'No configurado'}</p>
-                    {settings.smtp_user && (
-                      <p className="text-xs text-gray-500">Limite: 25MB</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Estado General */}
-                <div className="flex items-center gap-4">
-                  <div className={`p-3 rounded-full ${stkStatus.authenticated && settings.kindle_email ? 'bg-green-500/20' : 'bg-yellow-500/20'}`}>
-                    {stkStatus.authenticated && settings.kindle_email ? (
-                      <FaCheckCircle className="text-green-500 text-xl" />
-                    ) : (
-                      <FaExclamationCircle className="text-yellow-500 text-xl" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-gray-400 text-sm">Envio a Kindle</p>
+                    <p className="text-gray-400 text-sm">Dispositivo destino</p>
                     <p className="font-bold">
-                      {stkStatus.authenticated && settings.kindle_email
-                        ? 'Listo'
-                        : stkStatus.authenticated
-                        ? 'Falta email Kindle'
-                        : 'Falta Amazon STK'}
+                      {settings.stk_device_name || (stkStatus.devices?.length > 0 ? 'Todos los dispositivos' : 'No configurado')}
                     </p>
-                    {stkStatus.authenticated && (
-                      <p className="text-xs text-gray-500">Hasta 200MB/archivo</p>
-                    )}
                   </div>
                 </div>
               </div>
@@ -711,22 +474,13 @@ const Settings = () => {
               {!stkStatus.authenticated && (
                 <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
                   <p className="text-sm text-yellow-300">
-                    <strong>Importante:</strong> Para enviar archivos grandes de manga (hasta 200MB),
+                    <strong>Importante:</strong> Para enviar archivos de manga (hasta 200MB),
                     necesitas conectar tu cuenta de Amazon en la seccion "Amazon Send to Kindle" de arriba.
                   </p>
                 </div>
               )}
 
-              {stkStatus.authenticated && !settings.kindle_email && (
-                <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                  <p className="text-sm text-yellow-300">
-                    <strong>Falta:</strong> Introduce tu email de Kindle (@kindle.com) en la seccion de arriba
-                    para poder recibir los manga en tu dispositivo.
-                  </p>
-                </div>
-              )}
-
-              {stkStatus.authenticated && settings.kindle_email && (
+              {stkStatus.authenticated && (
                 <div className="mt-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
                   <p className="text-sm text-green-300">
                     Todo listo para enviar manga a tu Kindle. Los archivos se dividiran automaticamente
@@ -809,23 +563,6 @@ const Settings = () => {
               </div>
             </section>
           )}
-
-          {/* Información adicional */}
-          <section>
-            <div className="card p-6 bg-surface-light/50">
-              <h3 className="font-bold mb-2 flex items-center gap-2">
-                <FaTabletAlt className="text-orange-500" />
-                Información importante sobre Kindle
-              </h3>
-              <ul className="text-sm text-gray-400 space-y-1 list-disc list-inside">
-                <li>El email de envío (Gmail) debe estar en la lista de emails aprobados de tu Kindle</li>
-                <li>Ve a Amazon → Gestionar contenido → Preferencias → Configuración de documentos personales</li>
-                <li>Añade tu email de Gmail a "Lista de email de envío a Kindle aprobados"</li>
-                <li>Los archivos EPUB se envían directamente. Amazon los convierte automáticamente</li>
-                <li>Para archivos grandes (+25MB), usa Amazon Send to Kindle (hasta 200MB) o transfiere por USB</li>
-              </ul>
-            </div>
-          </section>
 
           {/* Espacio extra para el botón sticky */}
           <div className="h-20"></div>

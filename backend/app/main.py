@@ -53,24 +53,12 @@ async def lifespan(app: FastAPI):
     # Initialize and start scheduler
     global scheduler
     try:
-        smtp_config = None
-        if all([settings.SMTP_SERVER, settings.SMTP_USER, settings.SMTP_PASSWORD, settings.SMTP_FROM_EMAIL]):
-            smtp_config = {
-                'smtp_server': settings.SMTP_SERVER,
-                'smtp_port': settings.SMTP_PORT,
-                'smtp_user': settings.SMTP_USER,
-                'smtp_password': settings.SMTP_PASSWORD,
-                'from_email': settings.SMTP_FROM_EMAIL
-            }
-
         from app.services.scheduler import set_scheduler
 
         scheduler = MangaScheduler(
             check_interval_hours=settings.CHECK_INTERVAL_HOURS,
             download_dir=settings.DOWNLOAD_DIR,
-            manga_dir=settings.MANGA_DIR,
-            kindle_email=settings.KINDLE_EMAIL,
-            smtp_config=smtp_config
+            manga_dir=settings.MANGA_DIR
         )
         set_scheduler(scheduler)  # Set global instance
         scheduler.start()

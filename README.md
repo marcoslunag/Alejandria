@@ -52,8 +52,8 @@
 - Metadatos ComicInfo.xml embebidos
 
 ### Kindle
-- **Email**: Envío vía SMTP para archivos <25MB
-- **STK (Send to Kindle API)**: Para archivos grandes con autenticación OAuth2
+- **STK (Send to Kindle API)**: Envío directo con autenticación OAuth2
+- Soporte para archivos hasta 200MB
 - Soporte multi-dispositivo
 - División automática de envíos por partes
 
@@ -86,7 +86,7 @@
 │                                                                 │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐     │
 │  │   Scrapers   │    │ Downloaders  │    │ Kindle Send  │     │
-│  │ TomosManga   │    │   TeraBox    │    │  SMTP/STK    │     │
+│  │ TomosManga   │    │   TeraBox    │    │     STK      │     │
 │  │ MangaYComics │    │  MediaFire   │    │   OAuth2     │     │
 │  │   AniList    │    │   Generic    │    │              │     │
 │  └──────────────┘    └──────────────┘    └──────────────┘     │
@@ -113,8 +113,7 @@
 - Git
 
 **Cuentas opcionales:**
-- Cuenta SMTP para envío por email (Gmail, Outlook, etc.)
-- Cuenta Amazon para STK (opcional, para archivos >25MB)
+- Cuenta Amazon para STK (envío a Kindle)
 
 ---
 
@@ -248,16 +247,6 @@ POSTGRES_USER=manga
 POSTGRES_PASSWORD=tu-password-seguro
 POSTGRES_DB=alejandria
 
-# Email Kindle (tu dirección @kindle.com)
-KINDLE_EMAIL=tu-kindle@kindle.com
-
-# SMTP para envío de archivos (ejemplo Gmail)
-SMTP_SERVER=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=tu-email@gmail.com
-SMTP_PASSWORD=tu-app-password
-SMTP_FROM_EMAIL=tu-email@gmail.com
-
 # KCC - Conversión
 KCC_PROFILE=KPW5    # Modelo Kindle: KPW5, KPW4, KO, K11, KS
 KCC_FORMAT=EPUB     # EPUB (MOBI ya no soportado por Send to Kindle)
@@ -273,25 +262,18 @@ LOG_LEVEL=INFO
 
 ## Configuración
 
-### SMTP (Gmail)
+### STK (Send to Kindle API)
 
-1. Habilita verificación en 2 pasos en tu cuenta Google
-2. Genera una contraseña de aplicación: https://myaccount.google.com/apppasswords
-3. Usa esa contraseña en `SMTP_PASSWORD`
+El envío a Kindle se realiza mediante STK (Send to Kindle API) usando OAuth2 de Amazon.
 
-### Kindle Email
-
-1. Ve a Amazon > Contenido y Dispositivos > Preferencias
-2. En "Configuración de documentos personales" anota tu email `@kindle.com`
-3. Añade tu email SMTP a la lista de remitentes aprobados
-
-### STK (Send to Kindle API) - Para archivos >25MB
-
-1. En la interfaz web, ve a **Configuración > Kindle**
-2. Click en "Autenticar con Amazon"
+1. En la interfaz web, ve a **Ajustes**
+2. Click en "Conectar con Amazon"
 3. Inicia sesión con tu cuenta Amazon
 4. Copia la URL de redirección y pégala
 5. Selecciona tu dispositivo Kindle preferido
+6. Guarda la configuración
+
+> **Nota**: STK soporta archivos hasta 200MB. Los archivos más grandes se dividen automáticamente.
 
 ### TeraBox (Descargas desde TeraBox)
 
@@ -381,11 +363,10 @@ TERABOX_COOKIE=ndus=TU_NDUS; browserid=TU_BROWSERID; csrfToken=TU_CSRF; lang=es;
 | POST | `/api/v1/queue/{id}/retry` | Reintentar descarga |
 | DELETE | `/api/v1/queue/{id}/file` | Eliminar archivo |
 
-#### Kindle
+#### Kindle (STK)
 | Método | Endpoint | Descripción |
 |--------|----------|-------------|
-| POST | `/api/v1/kindle/send/{id}` | Enviar por email |
-| POST | `/api/v1/kindle/stk/send/{id}` | Enviar por STK |
+| POST | `/api/v1/kindle/stk/send/{id}` | Enviar a Kindle |
 | GET | `/api/v1/kindle/stk/status` | Estado de autenticación |
 | GET | `/api/v1/kindle/stk/devices` | Listar dispositivos |
 
@@ -406,8 +387,7 @@ alejandria/
 │   │   │   ├── scraper.py     # Scraper genérico
 │   │   │   ├── downloader.py  # Gestor de descargas
 │   │   │   ├── scheduler.py   # Tareas programadas
-│   │   │   ├── kindle_sender.py    # Envío por email
-│   │   │   └── stk_kindle_sender.py # Envío por STK
+│   │   │   └── stk_kindle_sender.py # Envío a Kindle via STK
 │   │   └── main.py
 │   └── Dockerfile
 ├── frontend/                   # React + Vite + Tailwind
@@ -446,8 +426,7 @@ alejandria/
 - [x] Interfaz web moderna
 - [x] Descarga automática desde TomosManga
 - [x] Conversión a EPUB con KCC
-- [x] Envío a Kindle por email
-- [x] STK para archivos grandes (>25MB)
+- [x] Envío a Kindle via STK (hasta 200MB)
 - [x] División automática de tomos grandes
 - [x] Integración con AniList
 - [x] Cola de descargas con cancelación
@@ -457,9 +436,6 @@ alejandria/
 ---
 
 ## Resolución de Problemas
-
-### Error: "Archivos demasiado grandes para email"
-Los archivos >25MB no se pueden enviar por email. Configura STK en Configuración > Kindle.
 
 ### Error: "STK not authenticated"
 Ve a Configuración > Kindle y completa la autenticación con Amazon.

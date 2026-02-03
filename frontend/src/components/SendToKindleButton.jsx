@@ -9,7 +9,7 @@ import {
 } from 'react-icons/fa';
 
 /**
- * SendToKindleButton Component
+ * SendToKindleButton Component - Uses STK (Send to Kindle) API
  *
  * @param {Object} props
  * @param {number} props.chapterId - Chapter ID to send
@@ -39,37 +39,14 @@ const SendToKindleButton = ({
       setStatus('sending');
       setErrorMessage('');
 
-      // First check file size to determine which method to use
-      let useStk = false;
-      try {
-        const statusResponse = await mangaApi.getKindleStatus(chapterId);
-        // If file is larger than 25MB or can_send_email is false, use STK
-        if (statusResponse.data.file_size_mb > 25 || !statusResponse.data.can_send_email) {
-          useStk = true;
-        }
-      } catch {
-        // If status check fails, try STK first (it handles large files better)
-        useStk = true;
+      // Check if STK is authenticated
+      const stkStatus = await mangaApi.stkGetStatus();
+      if (!stkStatus.data.authenticated) {
+        throw new Error('STK no autenticado. Ve a Ajustes para conectar tu cuenta de Amazon.');
       }
 
-      let response;
-      if (useStk) {
-        // Check if STK is authenticated
-        try {
-          const stkStatus = await mangaApi.stkGetStatus();
-          if (stkStatus.data.authenticated) {
-            response = await mangaApi.stkSendToKindle(chapterId);
-          } else {
-            // STK not authenticated, try email anyway (will fail with helpful message)
-            response = await mangaApi.sendToKindle(chapterId);
-          }
-        } catch {
-          // Fall back to email method
-          response = await mangaApi.sendToKindle(chapterId);
-        }
-      } else {
-        response = await mangaApi.sendToKindle(chapterId);
-      }
+      // Send via STK
+      const response = await mangaApi.stkSendToKindle(chapterId);
 
       if (response.data.ok) {
         setStatus('success');
