@@ -15,7 +15,7 @@ from app.models.download import DownloadQueue
 from app.services.scraper import TomosMangaScraper
 from app.services.downloader import MangaDownloader
 from app.services.converter import KCCConverter
-from app.services.kindle_sender import KindleSender
+from app.services.stk_kindle_sender import STKKindleSender
 from pathlib import Path
 from datetime import datetime, timedelta
 import logging
@@ -38,9 +38,7 @@ class MangaScheduler:
         self,
         check_interval_hours: int = 6,
         download_dir: str = "/downloads",
-        manga_dir: str = "/manga",
-        kindle_email: str = None,
-        smtp_config: dict = None
+        manga_dir: str = "/manga"
     ):
         """
         Initialize scheduler
@@ -49,8 +47,6 @@ class MangaScheduler:
             check_interval_hours: Hours between chapter checks
             download_dir: Directory for downloads
             manga_dir: Directory for processed manga
-            kindle_email: Kindle email for sending
-            smtp_config: SMTP configuration dict
         """
         self.scheduler = AsyncIOScheduler()
         self.check_interval_hours = check_interval_hours
@@ -59,12 +55,6 @@ class MangaScheduler:
         self.scraper = TomosMangaScraper()
         self.downloader = MangaDownloader(download_dir=download_dir)
         self.converter = KCCConverter(output_dir=str(Path(manga_dir) / "kindle"))
-
-        # Initialize Kindle sender if configured
-        self.kindle_sender = None
-        self.kindle_email = kindle_email
-        if smtp_config and kindle_email:
-            self.kindle_sender = KindleSender(**smtp_config)
 
         # Tracking
         self.is_running = False
@@ -651,7 +641,7 @@ class MangaScheduler:
             db.close()
 
     async def send_to_kindle(self):
-        """Envía archivos convertidos al Kindle"""
+        """Envía archivos convertidos al Kindle via STK"""
         logger.debug("Checking for files to send to Kindle...")
 
         db: Session = SessionLocal()
@@ -664,12 +654,12 @@ class MangaScheduler:
                 logger.debug("No settings configured, skipping Kindle send")
                 return
 
-            if not settings.kindle_email or not settings.smtp_user or not settings.smtp_password:
-                logger.debug("SMTP/Kindle not fully configured, skipping")
-                return
-
             if not settings.auto_send_to_kindle:
                 logger.debug("Auto send to Kindle is disabled")
+                return
+
+            if not settings.stk_device_serial:
+                logger.debug("STK device not configured, skipping")
                 return
 
             # Obtener capítulos convertidos no enviados
@@ -680,7 +670,7 @@ class MangaScheduler:
             if not chapters:
                 return
 
-            logger.info(f"Sending {len(chapters)} chapters to Kindle")
+            logger.info(f"Sending {len(chapters)} chapters to Kindle via STK")
 
             for chapter in chapters:
                 await self._send_chapter_to_kindle(chapter.id, settings)
@@ -692,7 +682,7 @@ class MangaScheduler:
 
     async def _send_chapter_to_kindle(self, chapter_id: int, settings=None):
         """
-        Envía un capítulo individual al Kindle usando el método más apropiado.
+        Envía un capítulo individual al Kindle usando STK.
 
         Soporta archivos divididos en partes (rutas separadas por '|' en converted_path).
         """
@@ -726,84 +716,33 @@ class MangaScheduler:
                     logger.error("No settings configured")
                     return
 
-            # Enviar cada archivo por separado
+            if not settings.stk_device_serial:
+                logger.error("STK device not configured")
+                return
+
+            # Send via STK
+            stk_sender = STKKindleSender()
+
             all_success = True
             for idx, file_path in enumerate(file_paths):
-                # Check file size to determine method
                 file_size_mb = file_path.stat().st_size / (1024 * 1024)
-                sync_method = settings.kindle_sync_method or "auto"
-
                 part_info = f" (Part {idx + 1}/{len(file_paths)})" if len(file_paths) > 1 else ""
-                logger.info(f"Sending to Kindle: {file_path.name}{part_info} ({file_size_mb:.0f}MB) via {sync_method}")
+                logger.info(f"Sending to Kindle via STK: {file_path.name}{part_info} ({file_size_mb:.1f}MB)")
 
-                success = False
-
-                # Determine which method to use
-                use_amazon = (
-                    sync_method == "amazon" or
-                    (sync_method == "auto" and file_size_mb > 25) or
-                    (sync_method == "auto" and not settings.is_smtp_configured)
-                )
-
-                if use_amazon and settings.is_amazon_configured:
-                    # Use Amazon Send to Kindle for large files
-                    try:
-                        from app.services.amazon_kindle_sender import AmazonKindleSender
-
-                        amazon_sender = AmazonKindleSender(
-                            amazon_email=settings.amazon_email,
-                            amazon_password=settings.amazon_password
-                        )
-
-                        success = await amazon_sender.send_to_kindle(
-                            file_path,
-                            device_name=settings.amazon_device_name
-                        )
-
-                        if success:
-                            logger.info(f"Sent via Amazon Send to Kindle: {file_path.name}")
-
-                    except Exception as e:
-                        logger.error(f"Amazon Send to Kindle failed: {e}")
-                        # Fall back to email if Amazon fails and file is small enough
-                        if file_size_mb <= 25 and settings.is_smtp_configured:
-                            logger.info("Falling back to email method...")
-                            use_amazon = False
-
-                if not use_amazon and settings.is_smtp_configured and settings.kindle_email:
-                    # Use email for small files
-                    if file_size_mb > 25:
-                        logger.warning(f"File too large for email ({file_size_mb:.0f}MB), skipping this part")
-                        all_success = False
-                        continue
-
-                    kindle_sender = KindleSender(
-                        smtp_server=settings.smtp_server,
-                        smtp_port=settings.smtp_port,
-                        smtp_user=settings.smtp_user,
-                        smtp_password=settings.smtp_password,
-                        from_email=settings.smtp_from_email or settings.smtp_user
-                    )
-
-                    # Incluir número de parte en el título si hay múltiples partes
-                    title = f"{manga.title} - Tomo {int(chapter.number)}"
-                    if len(file_paths) > 1:
-                        title = f"{title} - Parte {idx + 1}"
-
-                    loop = asyncio.get_event_loop()
-                    success = await loop.run_in_executor(
-                        None,
-                        kindle_sender.send_to_kindle,
-                        file_path,
-                        settings.kindle_email,
-                        title
+                try:
+                    success = await stk_sender.send_file(
+                        file_path=str(file_path),
+                        device_serial=settings.stk_device_serial
                     )
 
                     if success:
-                        logger.info(f"Sent via email: {file_path.name}")
+                        logger.info(f"Sent via STK: {file_path.name}")
+                    else:
+                        logger.error(f"Failed to send via STK: {file_path.name}")
+                        all_success = False
 
-                if not success:
-                    logger.error(f"Failed to send: {file_path.name}")
+                except Exception as e:
+                    logger.error(f"STK send failed for {file_path.name}: {e}")
                     all_success = False
 
             # Marcar como enviado solo si todas las partes se enviaron correctamente

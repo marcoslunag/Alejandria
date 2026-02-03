@@ -95,22 +95,22 @@ shell-db: ## Open psql shell in database
 	docker-compose exec postgres psql -U manga alejandria
 
 test-scraper: ## Test scraper connection
-	@curl -s http://localhost:7878/api/v1/system/test/scraper | python3 -m json.tool
+	@curl -s http://localhost:9878/api/v1/system/test/scraper | python3 -m json.tool
 
-test-smtp: ## Test SMTP connection
-	@curl -s http://localhost:7878/api/v1/system/test/smtp | python3 -m json.tool
+test-stk: ## Test STK (Send to Kindle) connection
+	@curl -s http://localhost:9878/api/v1/system/test/stk | python3 -m json.tool
 
 test-kcc: ## Test KCC installation
-	@curl -s http://localhost:7878/api/v1/system/test/kcc | python3 -m json.tool
+	@curl -s http://localhost:9878/api/v1/system/test/kcc | python3 -m json.tool
 
 api-status: ## Get API status
-	@curl -s http://localhost:7878/api/v1/system/status | python3 -m json.tool
+	@curl -s http://localhost:9878/api/v1/system/status | python3 -m json.tool
 
 api-stats: ## Get detailed statistics
-	@curl -s http://localhost:7878/api/v1/system/stats | python3 -m json.tool
+	@curl -s http://localhost:9878/api/v1/system/stats | python3 -m json.tool
 
 queue: ## Show download queue
-	@curl -s http://localhost:7878/api/v1/queue/ | python3 -m json.tool
+	@curl -s http://localhost:9878/api/v1/queue/ | python3 -m json.tool
 
 db-backup: ## Backup database
 	@echo "Creating database backup..."

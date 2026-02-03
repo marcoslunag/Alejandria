@@ -84,8 +84,7 @@ def get_config():
         "check_interval_hours": settings.CHECK_INTERVAL_HOURS,
         "max_concurrent_downloads": settings.MAX_CONCURRENT_DOWNLOADS,
         "kcc_profile": settings.KCC_PROFILE,
-        "kcc_format": settings.KCC_FORMAT,
-        "kindle_configured": bool(settings.KINDLE_EMAIL and settings.SMTP_USER),
+        "kcc_format": settings.KCC_FORMAT
     }
 
 
@@ -133,43 +132,38 @@ def test_kcc():
     }
 
 
-@router.get("/test/smtp")
-def test_smtp():
+@router.get("/test/stk")
+def test_stk():
     """
-    Test SMTP connection
+    Test STK (Send to Kindle) connection
 
     Returns:
-        SMTP test result
+        STK test result
     """
-    from app.services.kindle_sender import KindleSender
-
-    if not all([settings.SMTP_SERVER, settings.SMTP_USER, settings.SMTP_PASSWORD, settings.FROM_EMAIL]):
-        return {
-            "service": "smtp",
-            "status": "not_configured",
-            "message": "SMTP settings not configured"
-        }
+    from app.services.stk_kindle_sender import get_stk_sender
 
     try:
-        sender = KindleSender(
-            smtp_server=settings.SMTP_SERVER,
-            smtp_port=settings.SMTP_PORT,
-            smtp_user=settings.SMTP_USER,
-            smtp_password=settings.SMTP_PASSWORD,
-            from_email=settings.FROM_EMAIL
-        )
+        sender = get_stk_sender()
+        is_auth = sender.is_authenticated()
 
-        success = sender.test_connection()
-
-        return {
-            "service": "smtp",
-            "status": "online" if success else "offline",
-            "message": "SMTP connection successful" if success else "SMTP connection failed"
-        }
+        if is_auth:
+            devices = sender.get_devices()
+            return {
+                "service": "stk",
+                "status": "online",
+                "message": f"STK authenticated with {len(devices)} device(s)",
+                "devices": devices
+            }
+        else:
+            return {
+                "service": "stk",
+                "status": "not_authenticated",
+                "message": "STK not authenticated. Go to Settings to authorize."
+            }
     except Exception as e:
-        logger.error(f"SMTP test failed: {e}")
+        logger.error(f"STK test failed: {e}")
         return {
-            "service": "smtp",
+            "service": "stk",
             "status": "error",
             "message": str(e)
         }

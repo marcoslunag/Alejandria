@@ -101,29 +101,7 @@ export const mangaApi = {
   saveSettings: (data) =>
     api.post(`/settings`, data),
 
-  testSmtp: () =>
-    api.post(`/settings/test-smtp`),
-
-  testAmazon: () =>
-    api.post(`/settings/test-amazon`),
-
-  getSmtpGuide: () =>
-    api.get(`/settings/smtp-guide`),
-
-  // Kindle (Email - max 25MB)
-  sendToKindle: (chapterId) =>
-    api.post(`/kindle/send/${chapterId}`),
-
-  sendBatchToKindle: (chapterIds) =>
-    api.post(`/kindle/send-batch`, { chapter_ids: chapterIds }),
-
-  getKindleStatus: (chapterId) =>
-    api.get(`/kindle/status/${chapterId}`),
-
-  checkKindleConfigured: () =>
-    api.get(`/kindle/can-send`),
-
-  // STK - Send to Kindle API (OAuth2 - supports large files)
+  // STK - Send to Kindle API
   stkGetStatus: () =>
     api.get(`/kindle/stk/status`),
 
@@ -141,6 +119,12 @@ export const mangaApi = {
 
   stkLogout: () =>
     api.post(`/kindle/stk/logout`),
+
+  checkKindleConfigured: () =>
+    api.get(`/kindle/can-send`),
+
+  getKindleStatus: (chapterId) =>
+    api.get(`/kindle/status/${chapterId}`),
 };
 
 export default api;
