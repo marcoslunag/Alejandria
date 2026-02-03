@@ -27,12 +27,12 @@ def write_kcc_config(profile: str):
     try:
         config = {
             "profile": profile,
-            "format": "MOBI"  # MOBI para Kindle nativo
+            "format": "EPUB"  # MOBI para Kindle nativo
         }
         KCC_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(KCC_CONFIG_FILE, 'w') as f:
             json.dump(config, f)
-        logger.info(f"KCC config updated: profile={profile}, format=MOBI")
+        logger.info(f"KCC config updated: profile={profile}, format=EPUB")
     except Exception as e:
         logger.warning(f"Could not write KCC config: {e}")
 
