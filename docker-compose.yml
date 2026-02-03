@@ -41,7 +41,7 @@ services:
       - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-${FROM_EMAIL}}
       - CHECK_INTERVAL_HOURS=${CHECK_INTERVAL_HOURS:-6}
       - KCC_PROFILE=${KCC_PROFILE:-KPW5}
-      - KCC_FORMAT=${KCC_FORMAT:-MOBI}
+      - KCC_FORMAT=${KCC_FORMAT:-EPUB}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       # TeraBox cookies for automatic downloads (see README.md for instructions)
       - TERABOX_COOKIE=${TERABOX_COOKIE:-}
@@ -68,7 +68,7 @@ services:
       - WATCH_DIR=/downloads
       - OUTPUT_DIR=/manga/kindle
       - KCC_PROFILE=${KCC_PROFILE:-KPW5}
-      - KCC_FORMAT=${KCC_FORMAT:-MOBI}
+      - KCC_FORMAT=${KCC_FORMAT:-EPUB}
       - KCC_QUALITY=${KCC_QUALITY:-85}
     volumes:
       - downloads:/downloads
