@@ -1,0 +1,129 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: alejandria-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-manga}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-manga}
+      POSTGRES_DB: ${POSTGRES_DB:-alejandria}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-manga}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - alejandria
+
+  # Backend API
+  backend:
+    build: ./backend
+    container_name: alejandria-backend
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-manga}:${POSTGRES_PASSWORD:-manga}@postgres:5432/${POSTGRES_DB:-alejandria}
+      - DOWNLOAD_DIR=/downloads
+      - MANGA_DIR=/manga
+      - KINDLE_EMAIL=${KINDLE_EMAIL}
+      - SMTP_SERVER=${SMTP_SERVER}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-${FROM_EMAIL}}
+      - CHECK_INTERVAL_HOURS=${CHECK_INTERVAL_HOURS:-6}
+      - KCC_PROFILE=${KCC_PROFILE:-KPW5}
+      - KCC_FORMAT=${KCC_FORMAT:-EPUB}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # TeraBox tokens for automatic downloads (see TERABOX_SETUP.md for instructions)
+      - TERABOX_COOKIE=${TERABOX_COOKIE:-}
+      - TERABOX_JS_TOKEN=${TERABOX_JS_TOKEN:-}
+      - TERABOX_DP_LOGID=${TERABOX_DP_LOGID:-}
+    volumes:
+      - downloads:/downloads
+      - manga:/manga
+      - ./backend:/app
+    ports:
+      - "9878:7878"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - alejandria
+
+  # KCC Converter Worker
+  kcc-converter:
+    build: ./workers/kcc-converter
+    container_name: alejandria-converter
+    environment:
+      - WATCH_DIR=/downloads
+      - OUTPUT_DIR=/manga/kindle
+      - KCC_PROFILE=${KCC_PROFILE:-KPW5}
+      - KCC_FORMAT=${KCC_FORMAT:-EPUB}
+      - KCC_QUALITY=${KCC_QUALITY:-85}
+    volumes:
+      - downloads:/downloads
+      - manga:/manga
+    restart: unless-stopped
+    networks:
+      - alejandria
+
+  # Calibre-Web (Optional - for web reading and library management)
+  calibre-web:
+    image: lscr.io/linuxserver/calibre-web:latest
+    container_name: alejandria-calibre
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Madrid
+      - DOCKER_MODS=linuxserver/mods:universal-calibre
+    volumes:
+      - calibre_config:/config
+      - manga:/books
+    ports:
+      - "8383:8083"
+    restart: unless-stopped
+    networks:
+      - alejandria
+
+  # Frontend Web UI (Kaizoku-style)
+  frontend:
+    build: ./frontend
+    container_name: alejandria-frontend
+    ports:
+      - "8888:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - alejandria
+
+  # Watchtower (Optional - auto-updates containers)
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   container_name: alejandria-watchtower
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   command: --cleanup --interval 86400
+  #   restart: unless-stopped
+  #   networks:
+  #     - alejandria
+
+volumes:
+  postgres_data:
+    driver: local
+  downloads:
+    driver: local
+  manga:
+    driver: local
+  calibre_config:
+    driver: local
+
+networks:
+  alejandria:
+    driver: bridge

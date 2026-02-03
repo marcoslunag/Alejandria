@@ -1,0 +1,49 @@
+# FastAPI and Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Database
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+alembic==1.12.1
+
+# Data Validation
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Web Scraping
+beautifulsoup4==4.12.2
+requests==2.31.0
+lxml==4.9.3
+
+# Async HTTP
+aiohttp==3.9.1
+Brotli==1.1.0
+
+# Link Bypass
+cloudscraper==1.2.71
+bypass-ouo==0.1.1
+
+# Scheduling
+apscheduler==3.10.4
+
+# File Handling
+python-slugify==8.0.1
+
+# MEGA Downloads (optional)
+mega.py==1.0.8
+
+# Environment
+python-dotenv==1.0.0
+
+# Utilities
+python-dateutil==2.8.2
+
+# Browser Automation (TeraBox bypass)
+playwright==1.40.0
+playwright-stealth==1.0.6
+stkclient
+
+# Translation
+deep-translator==1.11.4
