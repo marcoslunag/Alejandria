@@ -16,7 +16,6 @@ import {
   FaSave,
   FaCheck,
   FaTimes,
-  FaBookReader,
   FaAmazon
 } from 'react-icons/fa';
 
@@ -274,7 +273,7 @@ const Settings = () => {
               <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 mb-4">
                 <p className="text-sm text-yellow-300">
                   <strong>Nota:</strong> El envío por email tiene un límite de 25MB por archivo.
-                  Para archivos de manga más grandes, usa <strong>Calibre-Web</strong> (ver abajo).
+                  Para archivos más grandes, usa <strong>Amazon Send to Kindle</strong> (hasta 200MB).
                 </p>
               </div>
 
@@ -583,52 +582,6 @@ const Settings = () => {
             </div>
           </section>
 
-          {/* Calibre-Web para archivos grandes */}
-          <section>
-            <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-              <FaBookReader className="text-blue-500" />
-              Calibre-Web (Alternativa manual)
-            </h2>
-            <div className="card p-6">
-              <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 mb-4">
-                <p className="text-sm text-blue-300">
-                  <strong>Recomendado para manga.</strong> Los archivos de manga suelen ser muy grandes (100-400MB).
-                  Calibre-Web te permite descargar los EPUB directamente y enviarlos a tu Kindle.
-                </p>
-              </div>
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-surface-light rounded-lg">
-                  <div>
-                    <h3 className="font-bold">Calibre-Web</h3>
-                    <p className="text-sm text-gray-400">Accede a tu biblioteca de manga convertido</p>
-                  </div>
-                  <a
-                    href="http://localhost:8383"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn btn-primary flex items-center gap-2"
-                  >
-                    Abrir Calibre-Web
-                    <FaExternalLinkAlt />
-                  </a>
-                </div>
-
-                <div className="text-sm text-gray-400 space-y-2">
-                  <p><strong>Cómo usar:</strong></p>
-                  <ol className="list-decimal list-inside space-y-1">
-                    <li>Abre Calibre-Web en <code className="bg-surface-light px-1 rounded">localhost:8383</code></li>
-                    <li>Configura tu cuenta la primera vez (usuario: <strong>admin</strong>, password: <strong>admin123</strong>)</li>
-                    <li>Ve a Admin → Email Server y configura el SMTP igual que arriba</li>
-                    <li>Ve a Admin → Kindle Email y añade tu email de Kindle</li>
-                    <li>Los manga convertidos aparecerán automáticamente en la biblioteca</li>
-                    <li>Desde cada libro puedes enviarlo directamente a tu Kindle</li>
-                  </ol>
-                </div>
-              </div>
-            </div>
-          </section>
-
           {/* BOTÓN GUARDAR - Al final de todas las configuraciones */}
           <section className="sticky bottom-4 z-10">
             <div className="card p-4 bg-dark-card/95 backdrop-blur border border-gray-700 shadow-lg">
@@ -869,7 +822,7 @@ const Settings = () => {
                 <li>Ve a Amazon → Gestionar contenido → Preferencias → Configuración de documentos personales</li>
                 <li>Añade tu email de Gmail a "Lista de email de envío a Kindle aprobados"</li>
                 <li>Los archivos EPUB se envían directamente. Amazon los convierte automáticamente</li>
-                <li>Para archivos grandes (+25MB), usa Calibre-Web o transfiere por USB</li>
+                <li>Para archivos grandes (+25MB), usa Amazon Send to Kindle (hasta 200MB) o transfiere por USB</li>
               </ul>
             </div>
           </section>

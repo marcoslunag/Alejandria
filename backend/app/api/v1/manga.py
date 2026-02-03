@@ -728,7 +728,10 @@ async def download_chapters(
     db: Session = Depends(get_db)
 ):
     """
-    Queue specific chapters for download
+    Queue specific chapters for download.
+    
+    Automatically deduplicates chapters that share the same download_url
+    (bundled volumes) to avoid downloading the same file multiple times.
     """
     manga = db.query(Manga).filter(Manga.id == manga_id).first()
 
@@ -749,23 +752,47 @@ async def download_chapters(
             detail="Some chapter IDs are invalid or don't belong to this manga"
         )
 
-    # Queue chapters for download
-    queued_count = 0
+    # Deduplicar por download_url para evitar descargar el mismo archivo múltiples veces
+    # Si varios capítulos comparten la misma URL (bundle), solo descargamos uno
+    seen_urls = set()
+    chapters_to_download = []
+    all_chapter_ids = []  # Todos los IDs para marcar como downloading
+    
     for chapter in chapters:
         if chapter.status in ['pending', 'error']:
-            chapter.status = 'pending'
+            all_chapter_ids.append(chapter.id)
+            
+            # Solo añadir a la descarga si no hemos visto esta URL
+            if chapter.download_url:
+                if chapter.download_url not in seen_urls:
+                    seen_urls.add(chapter.download_url)
+                    chapters_to_download.append(chapter)
+            else:
+                # Sin URL, incluir siempre
+                chapters_to_download.append(chapter)
+
+    # Marcar TODOS los capítulos seleccionados como 'downloading'
+    # (incluidos los del bundle que no se descargarán directamente)
+    for chapter in chapters:
+        if chapter.id in all_chapter_ids:
+            chapter.status = 'downloading'
             chapter.retry_count = 0
-            queued_count += 1
 
     db.commit()
 
-    # Trigger background download task
-    background_tasks.add_task(_process_chapter_downloads, manga_id, [c.id for c in chapters])
+    # Trigger background download task solo para capítulos únicos por URL
+    if chapters_to_download:
+        background_tasks.add_task(
+            _process_chapter_downloads, 
+            manga_id, 
+            [c.id for c in chapters_to_download]
+        )
 
     return {
         "status": "queued",
         "manga_id": manga_id,
-        "chapters_queued": queued_count,
+        "chapters_queued": len(all_chapter_ids),
+        "unique_downloads": len(chapters_to_download),
         "total_requested": len(request.chapter_ids)
     }
 

@@ -237,18 +237,24 @@ const Queue = () => {
               }`}
             >
               <div className="flex items-center gap-4">
-                {/* Cover */}
-                {item.manga_cover ? (
-                  <img
-                    src={item.manga_cover}
-                    alt={item.manga_title}
-                    className="w-14 h-20 object-cover rounded flex-shrink-0"
-                  />
-                ) : (
-                  <div className="w-14 h-20 bg-gray-700 rounded flex items-center justify-center flex-shrink-0">
-                    <FaDownload className="text-gray-500" />
+                {/* Cover with volume number overlay */}
+                <div className="relative w-14 h-20 flex-shrink-0">
+                  {item.manga_cover ? (
+                    <img
+                      src={item.manga_cover}
+                      alt={item.manga_title}
+                      className="w-full h-full object-cover rounded"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gray-700 rounded flex items-center justify-center">
+                      <FaDownload className="text-gray-500" />
+                    </div>
+                  )}
+                  {/* Volume number badge */}
+                  <div className="absolute bottom-0 right-0 bg-primary text-white text-xs font-bold px-1.5 py-0.5 rounded-tl rounded-br">
+                    {Math.floor(item.chapter_number)}
                   </div>
-                )}
+                </div>
 
                 {/* Info */}
                 <div className="flex-1 min-w-0">

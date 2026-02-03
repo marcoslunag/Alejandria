@@ -54,10 +54,27 @@ const ChapterList = ({ mangaId }) => {
   };
 
   const handleToggleTomo = (tomoId) => {
+    // Encontrar el tomo seleccionado
+    const tomo = tomos.find(t => t.id === tomoId);
+    if (!tomo) return;
+
+    // Encontrar todos los tomos que comparten la misma download_url (bundle)
+    const bundledTomos = tomo.download_url
+      ? tomos.filter(t =>
+          t.download_url === tomo.download_url &&
+          (t.status === 'pending' || t.status === 'error')
+        )
+      : [tomo];
+
+    const bundledIds = bundledTomos.map(t => t.id);
+
     if (selectedTomos.includes(tomoId)) {
-      setSelectedTomos(selectedTomos.filter(id => id !== tomoId));
+      // Deseleccionar todos los del bundle
+      setSelectedTomos(selectedTomos.filter(id => !bundledIds.includes(id)));
     } else {
-      setSelectedTomos([...selectedTomos, tomoId]);
+      // Seleccionar todos los del bundle
+      const newSelection = [...new Set([...selectedTomos, ...bundledIds])];
+      setSelectedTomos(newSelection);
     }
   };
 
@@ -255,6 +272,18 @@ const ChapterList = ({ mangaId }) => {
         {filteredTomos.map((tomo) => {
           const canSelect = tomo.status === 'pending' || tomo.status === 'error';
           const isSelected = selectedTomos.includes(tomo.id);
+          
+          // Verificar si este tomo está en un bundle con otros seleccionados
+          const isBundled = tomo.download_url && tomos.some(t => 
+            t.id !== tomo.id && 
+            t.download_url === tomo.download_url &&
+            selectedTomos.includes(t.id)
+          );
+          
+          // Contar cuántos tomos comparten esta URL
+          const bundleCount = tomo.download_url 
+            ? tomos.filter(t => t.download_url === tomo.download_url).length 
+            : 1;
 
           return (
             <div
@@ -263,16 +292,16 @@ const ChapterList = ({ mangaId }) => {
                 canSelect
                   ? 'bg-dark-lighter hover:bg-dark-lighter/70 cursor-pointer'
                   : 'bg-dark-lighter/50'
-              } ${isSelected ? 'ring-2 ring-primary' : ''}`}
+              } ${isSelected ? 'ring-2 ring-primary' : ''} ${isBundled && !isSelected ? 'ring-2 ring-primary/50 bg-primary/10' : ''}`}
               onClick={() => canSelect && handleToggleTomo(tomo.id)}
             >
               {/* Checkbox */}
               {canSelect && (
                 <input
                   type="checkbox"
-                  checked={isSelected}
+                  checked={isSelected || isBundled}
                   onChange={() => handleToggleTomo(tomo.id)}
-                  className="w-5 h-5 rounded border-gray-600 text-primary focus:ring-primary"
+                  className={`w-5 h-5 rounded border-gray-600 text-primary focus:ring-primary ${isBundled && !isSelected ? 'opacity-50' : ''}`}
                 />
               )}
 
@@ -287,6 +316,11 @@ const ChapterList = ({ mangaId }) => {
                   <span className="font-medium">Tomo {tomo.number}</span>
                   {tomo.title && (
                     <span className="text-gray-400 truncate">{tomo.title}</span>
+                  )}
+                  {bundleCount > 1 && (
+                    <span className="text-xs px-2 py-0.5 bg-primary/20 text-primary rounded-full">
+                      Bundle ({bundleCount} tomos)
+                    </span>
                   )}
                 </div>
 

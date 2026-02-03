@@ -46,7 +46,7 @@
 - Cancelación de descargas en progreso
 
 ### Conversión
-- Conversión automática a EPUB/MOBI usando KCC (Kindle Comic Converter)
+- Conversión automática a EPUB usando KCC (Kindle Comic Converter)
 - División automática de tomos grandes (>200MB)
 - Perfiles optimizados para diferentes Kindles (KPW5, KO, K11, etc.)
 - Metadatos ComicInfo.xml embebidos
@@ -260,7 +260,7 @@ SMTP_FROM_EMAIL=tu-email@gmail.com
 
 # KCC - Conversión
 KCC_PROFILE=KPW5    # Modelo Kindle: KPW5, KPW4, KO, K11, KS
-KCC_FORMAT=MOBI     # Formato: MOBI o EPUB
+KCC_FORMAT=EPUB     # EPUB (MOBI ya no soportado por Send to Kindle)
 
 # Scheduler
 CHECK_INTERVAL_HOURS=6
@@ -445,7 +445,7 @@ alejandria/
 ### Completado
 - [x] Interfaz web moderna
 - [x] Descarga automática desde TomosManga
-- [x] Conversión a EPUB/MOBI con KCC
+- [x] Conversión a EPUB con KCC
 - [x] Envío a Kindle por email
 - [x] STK para archivos grandes (>25MB)
 - [x] División automática de tomos grandes
