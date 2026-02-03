@@ -31,7 +31,7 @@ RUN cd /tmp && \
     rm -rf rar*
 
 # Verificar instalación
-RUN which 7z && which unrar && which ebook-convert && which kindlegen
+RUN which 7z && which unrar && which ebook-convert
 
 # Instalar dependencias Python
 RUN pip install --no-cache-dir \
