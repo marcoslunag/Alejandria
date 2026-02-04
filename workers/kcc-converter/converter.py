@@ -486,20 +486,31 @@ class ArchiveHandler(FileSystemEventHandler):
         # Si encontramos carpetas de tomos, recolectar imágenes de cada una
         if volumes:
             logger.info(f"Detected {len(volumes)} volume folders: {sorted(volumes.keys())}")
-            image_extensions = ('*.jpg', '*.jpeg', '*.png', '*.webp', '*.gif')
+            # Incluir tanto minúsculas como mayúsculas (Linux es case-sensitive)
+            image_extensions = (
+                '*.jpg', '*.jpeg', '*.png', '*.webp', '*.gif',
+                '*.JPG', '*.JPEG', '*.PNG', '*.WEBP', '*.GIF',
+                '*.Jpg', '*.Jpeg', '*.Png',  # Casos mixtos comunes
+            )
 
             for vol_num, vol_data in volumes.items():
                 folder = vol_data['folder']
+                seen_paths = set()  # Evitar duplicados
                 for ext in image_extensions:
                     for img_path in folder.rglob(ext):
+                        # Evitar duplicados (por si coincide con múltiples patrones)
+                        if img_path in seen_paths:
+                            continue
+                        seen_paths.add(img_path)
+                        
                         if self.should_skip_file(img_path.name):
                             continue
                         if self.validate_image(img_path):
                             size_bytes = img_path.stat().st_size
                             vol_data['images'].append((img_path, size_bytes))
 
-                # Ordenar imágenes por nombre
-                vol_data['images'].sort(key=lambda x: x[0].name)
+                # Ordenar imágenes por nombre (case-insensitive para consistencia)
+                vol_data['images'].sort(key=lambda x: x[0].name.lower())
                 logger.info(f"Volume {vol_num}: {len(vol_data['images'])} images found")
 
             # Filtrar volúmenes sin imágenes
@@ -560,11 +571,22 @@ class ArchiveHandler(FileSystemEventHandler):
 
             # Si solo hay un tomo o no hay estructura de carpetas, proceder normal
             # Colectar imágenes válidas con sus tamaños
-            image_extensions = ('*.jpg', '*.jpeg', '*.png', '*.webp', '*.gif')
+            # Incluir tanto minúsculas como mayúsculas (Linux es case-sensitive)
+            image_extensions = (
+                '*.jpg', '*.jpeg', '*.png', '*.webp', '*.gif',
+                '*.JPG', '*.JPEG', '*.PNG', '*.WEBP', '*.GIF',
+                '*.Jpg', '*.Jpeg', '*.Png',  # Casos mixtos comunes
+            )
             image_files = []
+            seen_paths = set()  # Evitar duplicados
 
             for ext in image_extensions:
                 for img_path in temp_extract_dir.rglob(ext):
+                    # Evitar duplicados
+                    if img_path in seen_paths:
+                        continue
+                    seen_paths.add(img_path)
+                    
                     if self.should_skip_file(img_path.name):
                         continue
                     if self.validate_image(img_path):
@@ -576,8 +598,8 @@ class ArchiveHandler(FileSystemEventHandler):
             if not image_files:
                 raise RuntimeError("No valid images found")
 
-            # Ordenar por nombre
-            image_files.sort(key=lambda x: x[0].name)
+            # Ordenar por nombre (case-insensitive para consistencia)
+            image_files.sort(key=lambda x: x[0].name.lower())
 
             # Calcular tamaño total
             total_size_mb = sum(size for _, size in image_files) / (1024 * 1024)

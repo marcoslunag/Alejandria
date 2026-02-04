@@ -4,6 +4,8 @@ import Home from './pages/Home';
 import Library from './pages/Library';
 import Search from './pages/Search';
 import MangaDetails from './pages/MangaDetails';
+import Comics from './pages/Comics';
+import ComicDetails from './pages/ComicDetails';
 import Queue from './pages/Queue';
 import Settings from './pages/Settings';
 
@@ -18,6 +20,8 @@ function App() {
             <Route path="/library" element={<Library />} />
             <Route path="/search" element={<Search />} />
             <Route path="/manga/:id" element={<MangaDetails />} />
+            <Route path="/comics" element={<Comics />} />
+            <Route path="/comics/:id" element={<ComicDetails />} />
             <Route path="/queue" element={<Queue />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>

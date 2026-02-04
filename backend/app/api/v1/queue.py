@@ -224,19 +224,23 @@ def remove_from_queue(chapter_id: int, db: Session = Depends(get_db)):
 def cancel_download(chapter_id: int, db: Session = Depends(get_db)):
     """
     Cancel a download in progress and clean up partial files.
+    
+    If the chapter is part of a bundle (shares download_url with others),
+    ALL chapters in the bundle will be cancelled.
 
     This endpoint:
-    1. Marks the chapter as 'cancelled' (mapped to 'error' status internally)
-    2. Removes lock files (.downloading)
-    3. Cleans up partial download files
-    4. Removes the item from the download queue
+    1. Finds all chapters in the same bundle (same download_url)
+    2. Marks all bundled chapters as 'cancelled'
+    3. Removes lock files (.downloading)
+    4. Cleans up partial download files
+    5. Removes the items from the download queue
 
     Args:
         chapter_id: Chapter ID
         db: Database session
 
     Returns:
-        Cancellation status
+        Cancellation status with list of all cancelled chapters
     """
     import os
     from pathlib import Path
@@ -254,77 +258,98 @@ def cancel_download(chapter_id: int, db: Session = Depends(get_db)):
             status_code=400,
             detail=f"Cannot cancel chapter with status '{chapter.status}'. Only downloading, pending, converting or error chapters can be cancelled."
         )
+    
+    # Find all chapters in the same bundle (same download_url)
+    chapters_to_cancel = [chapter]
+    if chapter.download_url:
+        bundled_chapters = db.query(Chapter).filter(
+            Chapter.manga_id == chapter.manga_id,
+            Chapter.download_url == chapter.download_url,
+            Chapter.id != chapter_id,
+            Chapter.status.in_(['downloading', 'pending', 'error', 'converting'])
+        ).all()
+        chapters_to_cancel.extend(bundled_chapters)
+        
+        if bundled_chapters:
+            logger.info(f"Found {len(bundled_chapters)} bundled chapters to cancel along with chapter {chapter_id}")
 
     cancelled_files = []
+    cancelled_chapter_ids = []
     download_dir = Path(os.getenv('DOWNLOAD_DIR', '/downloads'))
 
-    # Find and clean up files related to this chapter
-    if manga:
-        # Pattern to find related files
-        # Files are named like: manga-slug_ch00001.0.cbz
-        slug = manga.slug or manga.title.lower().replace(' ', '-')
-        patterns = [
-            f"{slug}_ch{chapter.number:05.1f}*",
-            f"{slug}*tomo*{int(chapter.number)}*",
-            f"{manga.title}*tomo*{int(chapter.number)}*",
-        ]
+    # Process all chapters in the bundle
+    for ch in chapters_to_cancel:
+        cancelled_chapter_ids.append(ch.id)
+        
+        # Find and clean up files related to this chapter
+        if manga:
+            # Pattern to find related files
+            # Files are named like: manga-slug_ch00001.0.cbz
+            slug = manga.slug or manga.title.lower().replace(' ', '-')
+            patterns = [
+                f"{slug}_ch{ch.number:05.1f}*",
+                f"{slug}*tomo*{int(ch.number)}*",
+                f"{manga.title}*tomo*{int(ch.number)}*",
+            ]
 
-        for pattern in patterns:
-            for file_path in download_dir.glob(pattern):
-                try:
-                    if file_path.is_file():
-                        file_path.unlink()
-                        cancelled_files.append(str(file_path))
-                        logger.info(f"Deleted partial file: {file_path}")
-                except Exception as e:
-                    logger.warning(f"Could not delete {file_path}: {e}")
+            for pattern in patterns:
+                for file_path in download_dir.glob(pattern):
+                    try:
+                        if file_path.is_file():
+                            file_path.unlink()
+                            cancelled_files.append(str(file_path))
+                            logger.info(f"Deleted partial file: {file_path}")
+                    except Exception as e:
+                        logger.warning(f"Could not delete {file_path}: {e}")
 
-            # Also delete lock files
-            for lock_file in download_dir.glob(f"{pattern}.downloading"):
-                try:
+                # Also delete lock files
+                for lock_file in download_dir.glob(f"{pattern}.downloading"):
+                    try:
+                        lock_file.unlink()
+                        logger.info(f"Deleted lock file: {lock_file}")
+                    except Exception as e:
+                        logger.warning(f"Could not delete lock file {lock_file}: {e}")
+
+        # Delete specific file if path is set
+        if ch.file_path:
+            try:
+                file_path = Path(ch.file_path)
+                if file_path.exists():
+                    file_path.unlink()
+                    cancelled_files.append(str(file_path))
+                    logger.info(f"Deleted chapter file: {file_path}")
+
+                # Delete associated lock file
+                lock_file = file_path.parent / f"{file_path.name}.downloading"
+                if lock_file.exists():
                     lock_file.unlink()
                     logger.info(f"Deleted lock file: {lock_file}")
-                except Exception as e:
-                    logger.warning(f"Could not delete lock file {lock_file}: {e}")
+            except Exception as e:
+                logger.warning(f"Could not delete chapter file: {e}")
 
-    # Delete specific file if path is set
-    if chapter.file_path:
-        try:
-            file_path = Path(chapter.file_path)
-            if file_path.exists():
-                file_path.unlink()
-                cancelled_files.append(str(file_path))
-                logger.info(f"Deleted chapter file: {file_path}")
+        # Remove from download queue
+        queue_items = db.query(DownloadQueue).filter(
+            DownloadQueue.chapter_id == ch.id
+        ).all()
 
-            # Delete associated lock file
-            lock_file = file_path.parent / f"{file_path.name}.downloading"
-            if lock_file.exists():
-                lock_file.unlink()
-                logger.info(f"Deleted lock file: {lock_file}")
-        except Exception as e:
-            logger.warning(f"Could not delete chapter file: {e}")
+        for item in queue_items:
+            db.delete(item)
 
-    # Remove from download queue
-    queue_items = db.query(DownloadQueue).filter(
-        DownloadQueue.chapter_id == chapter_id
-    ).all()
-
-    for item in queue_items:
-        db.delete(item)
-
-    # Reset chapter status
-    chapter.status = 'pending'
-    chapter.file_path = None
-    chapter.error_message = "Cancelled by user"
-    chapter.downloaded_at = None
+        # Reset chapter status
+        ch.status = 'pending'
+        ch.file_path = None
+        ch.error_message = "Cancelled by user"
+        ch.downloaded_at = None
 
     db.commit()
 
-    logger.info(f"Cancelled download for chapter {chapter_id}, cleaned {len(cancelled_files)} files")
+    logger.info(f"Cancelled download for {len(cancelled_chapter_ids)} chapters (bundle), cleaned {len(cancelled_files)} files")
 
     return {
         "cancelled": True,
         "chapter_id": chapter_id,
+        "cancelled_chapters": cancelled_chapter_ids,
+        "bundle_size": len(cancelled_chapter_ids),
         "files_deleted": cancelled_files,
         "status": "pending"
     }

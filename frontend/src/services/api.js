@@ -127,4 +127,42 @@ export const mangaApi = {
     api.get(`/kindle/status/${chapterId}`),
 };
 
+// Comics API
+export const comicApi = {
+  // Search (ComicVine)
+  search: (query, page = 1, limit = 20) =>
+    api.get(`/comics/search`, { params: { q: query, page, limit } }),
+
+  // Preview from ComicVine
+  getComicVineDetails: (comicvineId) =>
+    api.get(`/comics/comicvine/${comicvineId}`),
+
+  // Library
+  getLibrary: (params = {}) =>
+    api.get(`/comics/`, { params }),
+
+  getComic: (id) =>
+    api.get(`/comics/${id}`),
+
+  getStats: () =>
+    api.get(`/comics/stats`),
+
+  // Add/Update/Delete
+  addComic: (comicvineId) =>
+    api.post(`/comics/`, { comicvine_id: comicvineId }),
+
+  updateComic: (id, data) =>
+    api.patch(`/comics/${id}`, data),
+
+  deleteComic: (id) =>
+    api.delete(`/comics/${id}`),
+
+  refreshComic: (id) =>
+    api.post(`/comics/${id}/refresh`),
+
+  // Issues
+  getIssues: (comicId, params = {}) =>
+    api.get(`/comics/${comicId}/issues`, { params }),
+};
+
 export default api;
