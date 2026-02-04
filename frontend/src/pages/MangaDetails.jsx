@@ -262,12 +262,28 @@ const MangaDetails = () => {
 
             {/* Actions */}
             <div className="flex flex-wrap gap-4">
-              <button
-                onClick={handleToggleMonitored}
-                className={`btn ${manga.monitored ? 'btn-primary' : 'btn-secondary'}`}
-              >
-                {manga.monitored ? 'Monitorizado' : 'No monitorizado'}
-              </button>
+              {/* Solo mostrar monitorización si está en publicación */}
+              {manga.status === 'RELEASING' && (
+                <div className="relative group">
+                  <button
+                    onClick={handleToggleMonitored}
+                    className={`btn ${manga.monitored ? 'btn-primary' : 'btn-secondary'}`}
+                  >
+                    {manga.monitored ? '🔔 Monitorizado' : '🔕 No monitorizado'}
+                  </button>
+                  <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-dark-lighter text-sm text-gray-300 p-2 rounded shadow-lg w-64 z-10">
+                    {manga.monitored 
+                      ? 'Los nuevos tomos se descargarán automáticamente' 
+                      : 'Recibirás una notificación cuando salgan nuevos tomos pero no se descargarán automáticamente'}
+                  </div>
+                </div>
+              )}
+              {/* Mostrar indicador si está finalizado */}
+              {manga.status === 'FINISHED' && (
+                <span className="btn btn-secondary cursor-default opacity-75" title="El manga ha finalizado, no hay nuevos tomos que monitorizar">
+                  📕 Finalizado
+                </span>
+              )}
               <button onClick={handleRefresh} className="btn btn-secondary flex items-center gap-2">
                 <FaSync />
                 Actualizar

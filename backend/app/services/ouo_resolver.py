@@ -1,11 +1,13 @@
 """
 OUO.io Link Resolver
 Resuelve enlaces acortados de OUO.io para obtener el enlace final (generalmente Fireload)
-Usa la librería bypass-ouo para el bypass
+Usa la librería bypass-ouo para el bypass, con fallback manual
 """
 
 import asyncio
 import logging
+import re
+import time
 from typing import Optional, Dict
 from concurrent.futures import ThreadPoolExecutor
 
@@ -15,17 +17,103 @@ logger = logging.getLogger(__name__)
 _executor = ThreadPoolExecutor(max_workers=2)
 
 
+def _bypass_ouo_manual(ouo_url: str) -> Optional[str]:
+    """
+    Bypass manual de OUO.io usando requests y curl_cffi
+    Fallback cuando la librería bypass-ouo falla
+    """
+    try:
+        from curl_cffi import requests as cffi_requests
+        from bs4 import BeautifulSoup
+        import re
+        
+        logger.info(f"OUO: Trying manual bypass for {ouo_url}")
+        
+        session = cffi_requests.Session(impersonate="chrome110")
+        
+        # Primera petición para obtener el formulario
+        resp1 = session.get(ouo_url, timeout=30)
+        
+        if resp1.status_code != 200:
+            logger.warning(f"OUO: First request failed with {resp1.status_code}")
+            return None
+        
+        # Buscar el enlace final directamente en la respuesta
+        # A veces OUO.io tiene el enlace en un meta refresh o redirect
+        html = resp1.text
+        
+        # Buscar patrones comunes de redirección
+        patterns = [
+            r'href=["\']?(https?://(?:www\.)?fireload\.com[^"\'>\s]+)',
+            r'href=["\']?(https?://(?:www\.)?mediafire\.com[^"\'>\s]+)',
+            r'href=["\']?(https?://(?:www\.)?mega\.nz[^"\'>\s]+)',
+            r'href=["\']?(https?://[^"\'>\s]+\.rar[^"\'>\s]*)',
+            r'href=["\']?(https?://[^"\'>\s]+\.zip[^"\'>\s]*)',
+            r'action=["\']?(https?://[^"\'>\s]+)',
+            r'window\.location\s*=\s*["\']?(https?://[^"\'>\s]+)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, html, re.IGNORECASE)
+            if match:
+                url = match.group(1)
+                if 'ouo.io' not in url.lower() and 'ouo.press' not in url.lower():
+                    logger.info(f"OUO: Found direct link via pattern: {url[:60]}...")
+                    return url
+        
+        # Si no encontramos el enlace directo, intentar el flujo normal
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        # Buscar el formulario de bypass
+        form = soup.find('form', {'id': 'form-bypass'}) or soup.find('form')
+        
+        if form:
+            action = form.get('action', '')
+            if action and action.startswith('http') and 'ouo' not in action.lower():
+                logger.info(f"OUO: Found form action: {action[:60]}...")
+                return action
+            
+            # Intentar enviar el formulario
+            form_data = {}
+            for inp in form.find_all('input'):
+                name = inp.get('name')
+                value = inp.get('value', '')
+                if name:
+                    form_data[name] = value
+            
+            if form_data:
+                # Esperar un poco (OUO tiene un timer)
+                time.sleep(2)
+                
+                post_url = action if action.startswith('http') else ouo_url
+                resp2 = session.post(post_url, data=form_data, timeout=30, allow_redirects=True)
+                
+                if resp2.status_code == 200:
+                    # Buscar el enlace final en la respuesta
+                    final_html = resp2.text
+                    for pattern in patterns:
+                        match = re.search(pattern, final_html, re.IGNORECASE)
+                        if match:
+                            url = match.group(1)
+                            if 'ouo.io' not in url.lower():
+                                logger.info(f"OUO: Found link after form submit: {url[:60]}...")
+                                return url
+        
+        logger.warning(f"OUO: Manual bypass could not find final URL")
+        return None
+        
+    except Exception as e:
+        logger.error(f"OUO: Manual bypass error: {e}")
+        return None
+
+
 def _bypass_ouo_sync(ouo_url: str) -> Optional[str]:
     """
     Bypass de OUO.io usando la librería bypass-ouo
     Ejecutado en thread pool porque es síncrono
-
-    La función devuelve un diccionario:
-    {
-        'original_link': 'https://ouo.io/go/XXX',
-        'bypassed_link': 'https://final-url.com'
-    }
+    Con fallback a método manual si la librería falla
     """
+    # Primero intentar con la librería
     try:
         from bypass_ouo import bypass_ouo
 
@@ -44,12 +132,14 @@ def _bypass_ouo_sync(ouo_url: str) -> Optional[str]:
             logger.info(f"OUO: Bypass successful (string): {result[:60]}...")
             return result
 
-        logger.warning(f"OUO: Bypass returned invalid result: {result}")
-        return None
+        logger.warning(f"OUO: Library returned invalid result: {result}")
 
     except Exception as e:
-        logger.error(f"OUO: Bypass error: {e}")
-        return None
+        logger.error(f"OUO: Library bypass error: {e}")
+    
+    # Fallback a método manual
+    logger.info(f"OUO: Trying manual fallback...")
+    return _bypass_ouo_manual(ouo_url)
 
 
 class OUOResolver:

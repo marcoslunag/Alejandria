@@ -39,6 +39,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       # TeraBox cookies for automatic downloads (see README.md for instructions)
       - TERABOX_COOKIE=${TERABOX_COOKIE:-}
+      # ComicVine API for comic metadata (get key at comicvine.gamespot.com/api/)
+      - COMICVINE_API_KEY=${COMICVINE_API_KEY:-}
     volumes:
       - downloads:/downloads
       - manga:/manga

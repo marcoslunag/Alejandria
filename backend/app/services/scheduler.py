@@ -134,15 +134,18 @@ class MangaScheduler:
         logger.info("Scheduler stopped")
 
     async def check_new_chapters(self):
-        """Busca nuevos capítulos para todos los manga monitoreados"""
+        """Busca nuevos capítulos para todos los manga en la biblioteca"""
         logger.info("Checking for new chapters...")
 
         db: Session = SessionLocal()
         try:
-            # Obtener todos los manga monitoreados
-            manga_list = db.query(Manga).filter(Manga.monitored == True).all()
+            # Obtener todos los manga (monitorizados o no) que están en publicación
+            # Para los finalizados no tiene sentido buscar nuevos capítulos
+            manga_list = db.query(Manga).filter(
+                Manga.status.in_(['RELEASING', None])  # En publicación o sin estado definido
+            ).all()
 
-            logger.info(f"Checking {len(manga_list)} monitored manga")
+            logger.info(f"Checking {len(manga_list)} manga for new chapters")
 
             for manga in manga_list:
                 await self._check_manga(manga, db)
@@ -204,24 +207,27 @@ class MangaScheduler:
 
                 db.commit()
 
-                # Añadir a cola de descargas
-                for ch_data in new_chapters:
-                    chapter = db.query(Chapter).filter(
-                        and_(
-                            Chapter.manga_id == manga.id,
-                            Chapter.number == ch_data['number']
-                        )
-                    ).first()
+                # Solo añadir a cola de descargas si el manga está monitorizado
+                if manga.monitored:
+                    for ch_data in new_chapters:
+                        chapter = db.query(Chapter).filter(
+                            and_(
+                                Chapter.manga_id == manga.id,
+                                Chapter.number == ch_data['number']
+                            )
+                        ).first()
 
-                    if chapter:
-                        queue_item = DownloadQueue(
-                            chapter_id=chapter.id,
-                            status='queued'
-                        )
-                        db.add(queue_item)
+                        if chapter:
+                            queue_item = DownloadQueue(
+                                chapter_id=chapter.id,
+                                status='queued'
+                            )
+                            db.add(queue_item)
 
-                db.commit()
-                logger.info(f"Queued {len(new_chapters)} chapters for download")
+                    db.commit()
+                    logger.info(f"Queued {len(new_chapters)} chapters for auto-download (monitored)")
+                else:
+                    logger.info(f"Found {len(new_chapters)} new chapters for {manga.title} (not monitored - manual download required)")
 
             # Actualizar última verificación
             manga.last_check = datetime.utcnow()

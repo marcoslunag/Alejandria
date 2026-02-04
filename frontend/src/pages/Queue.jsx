@@ -50,9 +50,13 @@ const Queue = () => {
   };
 
   const cancelDownload = async (id) => {
-    if (!confirm('¿Cancelar esta descarga? Se eliminarán los archivos parciales.')) return;
+    if (!confirm('¿Cancelar esta descarga? Si forma parte de un bundle, se cancelarán todos los tomos del bundle.')) return;
     try {
-      await mangaApi.cancelDownload(id);
+      const response = await mangaApi.cancelDownload(id);
+      // Mostrar mensaje si se cancelaron múltiples capítulos (bundle)
+      if (response.data?.bundle_size > 1) {
+        alert(`Se han cancelado ${response.data.bundle_size} tomos del bundle.`);
+      }
       loadQueue();
     } catch (error) {
       console.error('Error cancelando descarga:', error);
