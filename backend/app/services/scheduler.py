@@ -11,9 +11,12 @@ from sqlalchemy import and_
 from app.database import SessionLocal
 from app.models.manga import Manga
 from app.models.chapter import Chapter
+from app.models.book import Book
+from app.models.book_chapter import BookChapter
 from app.models.download import DownloadQueue
 from app.services.scraper import TomosMangaScraper
 from app.services.downloader import MangaDownloader
+from app.services.book_downloader import BookDownloader
 from app.services.converter import KCCConverter
 from app.services.stk_kindle_sender import STKKindleSender
 from pathlib import Path
@@ -54,6 +57,7 @@ class MangaScheduler:
         # Initialize services
         self.scraper = TomosMangaScraper()
         self.downloader = MangaDownloader(download_dir=download_dir)
+        self.book_downloader = BookDownloader(download_dir=str(Path(download_dir) / "books"))
         self.converter = KCCConverter(output_dir=str(Path(manga_dir) / "kindle"))
 
         # Tracking
@@ -345,81 +349,25 @@ class MangaScheduler:
             db.close()
 
     async def _process_download(self, queue_id: int):
-        """Procesa una descarga individual"""
+        """Procesa una descarga individual (manga o libro)"""
         db: Session = SessionLocal()
         try:
             item = db.query(DownloadQueue).filter(DownloadQueue.id == queue_id).first()
             if not item:
                 return
 
-            chapter = db.query(Chapter).filter(Chapter.id == item.chapter_id).first()
-            if not chapter:
-                return
+            # Determinar tipo de contenido
+            content_type = item.content_type or 'manga'
 
-            manga = db.query(Manga).filter(Manga.id == chapter.manga_id).first()
-            if not manga:
-                return
-
-            # Actualizar estado
-            item.status = 'downloading'
-            item.started_at = datetime.utcnow()
-            chapter.status = 'downloading'
-            db.commit()
-
-            logger.info(f"Downloading: {manga.title} - Chapter {chapter.number}")
-
-            # Callback de progreso
-            async def on_progress(downloaded, total):
-                if total > 0:
-                    progress = int((downloaded / total) * 100)
-                    item.progress = progress
-                    item.bytes_downloaded = downloaded
-                    item.total_bytes = total
-                    db.commit()
-
-            # Generar nombre de archivo
-            filename = f"{manga.slug}_ch{chapter.number:05.1f}.cbz"
-
-            # Construir lista de backup URLs si existen
-            backup_urls = [chapter.backup_url] if chapter.backup_url else None
-
-            # Descargar con sistema de fallback
-            file_path = await self.downloader.download_chapter(
-                url=chapter.download_url,
-                filename=filename,
-                on_progress=on_progress,
-                backup_urls=backup_urls
-            )
-
-            if file_path and file_path.exists():
-                # Éxito
-                item.status = 'completed'
-                item.completed_at = datetime.utcnow()
-                item.progress = 100
-                chapter.status = 'downloaded'
-                chapter.file_path = str(file_path)
-                chapter.downloaded_at = datetime.utcnow()
-
-                # Guardar metadatos para ComicInfo.xml
-                self._save_manga_metadata(manga, chapter, file_path)
-
-                # Si este capítulo está en un paquete con otros tomos, marcarlos también
-                if chapter.is_bundled and chapter.download_url:
-                    self._mark_bundled_chapters_downloaded(
-                        db, manga.id, chapter.download_url, str(file_path), chapter.id
-                    )
-
-                logger.info(f"Download completed: {filename}")
+            if content_type == 'manga':
+                await self._process_manga_download(db, item)
+            elif content_type == 'book':
+                await self._process_book_download(db, item)
             else:
-                # Fallo
+                logger.error(f"Unknown content_type: {content_type}")
                 item.status = 'failed'
-                item.retry_count += 1
-                item.error_message = "Download failed"
-                chapter.status = 'error'
-
-                logger.error(f"Download failed: {filename}")
-
-            db.commit()
+                item.error_message = f"Unknown content type: {content_type}"
+                db.commit()
 
         except Exception as e:
             logger.error(f"Error in _process_download: {e}")
@@ -430,6 +378,198 @@ class MangaScheduler:
                 db.commit()
         finally:
             db.close()
+
+    async def _process_manga_download(self, db: Session, item: DownloadQueue):
+        """Procesa una descarga de manga"""
+        chapter = db.query(Chapter).filter(Chapter.id == item.chapter_id).first()
+        if not chapter:
+            item.status = 'failed'
+            item.error_message = "Chapter not found"
+            db.commit()
+            return
+
+        manga = db.query(Manga).filter(Manga.id == chapter.manga_id).first()
+        if not manga:
+            item.status = 'failed'
+            item.error_message = "Manga not found"
+            db.commit()
+            return
+
+        # Actualizar estado
+        item.status = 'downloading'
+        item.started_at = datetime.utcnow()
+        chapter.status = 'downloading'
+        db.commit()
+
+        logger.info(f"Downloading manga: {manga.title} - Chapter {chapter.number}")
+
+        # Callback de progreso
+        async def on_progress(downloaded, total):
+            if total > 0:
+                progress = int((downloaded / total) * 100)
+                item.progress = progress
+                item.bytes_downloaded = downloaded
+                item.total_bytes = total
+                db.commit()
+
+        # Generar nombre de archivo
+        filename = f"{manga.slug}_ch{chapter.number:05.1f}.cbz"
+
+        # Construir lista de backup URLs si existen
+        backup_urls = [chapter.backup_url] if chapter.backup_url else None
+
+        # Descargar con sistema de fallback
+        file_path = await self.downloader.download_chapter(
+            url=chapter.download_url,
+            filename=filename,
+            on_progress=on_progress,
+            backup_urls=backup_urls
+        )
+
+        if file_path and file_path.exists():
+            # Éxito
+            item.status = 'completed'
+            item.completed_at = datetime.utcnow()
+            item.progress = 100
+            chapter.status = 'downloaded'
+            chapter.file_path = str(file_path)
+            chapter.downloaded_at = datetime.utcnow()
+
+            # Guardar metadatos para ComicInfo.xml
+            self._save_manga_metadata(manga, chapter, file_path)
+
+            # Si este capítulo está en un paquete con otros tomos, marcarlos también
+            if chapter.is_bundled and chapter.download_url:
+                self._mark_bundled_chapters_downloaded(
+                    db, manga.id, chapter.download_url, str(file_path), chapter.id
+                )
+
+            logger.info(f"Download completed: {filename}")
+        else:
+            # Fallo
+            item.status = 'failed'
+            item.retry_count += 1
+            item.error_message = "Download failed"
+            chapter.status = 'error'
+            logger.error(f"Download failed: {filename}")
+
+        db.commit()
+
+    async def _process_book_download(self, db: Session, item: DownloadQueue):
+        """Procesa una descarga de libro"""
+        book_chapter = db.query(BookChapter).filter(BookChapter.id == item.book_chapter_id).first()
+        if not book_chapter:
+            item.status = 'failed'
+            item.error_message = "Book chapter not found"
+            db.commit()
+            return
+
+        book = db.query(Book).filter(Book.id == book_chapter.book_id).first()
+        if not book:
+            item.status = 'failed'
+            item.error_message = "Book not found"
+            db.commit()
+            return
+
+        # Actualizar estado
+        item.status = 'downloading'
+        item.started_at = datetime.utcnow()
+        book_chapter.status = 'downloading'
+        db.commit()
+
+        logger.info(f"Downloading book: {book.title} - {book_chapter.title or 'Chapter ' + str(book_chapter.number)}")
+
+        # Callback de progreso
+        async def on_progress(downloaded, total):
+            if total > 0:
+                progress = int((downloaded / total) * 100)
+                item.progress = progress
+                item.bytes_downloaded = downloaded
+                item.total_bytes = total
+                db.commit()
+
+        # Generar nombre de archivo
+        filename = f"{book.slug}.epub"
+        if book_chapter.number > 1:
+            filename = f"{book.slug}_vol{book_chapter.number}.epub"
+
+        # Construir lista de backup URLs si existen
+        backup_urls = [book_chapter.backup_url] if book_chapter.backup_url else None
+
+        # Check if URL needs Playwright (antupload, etc)
+        needs_playwright = 'antupload.com' in book_chapter.download_url.lower()
+
+        if needs_playwright:
+            # Use Playwright for antupload downloads
+            logger.info(f"Using Playwright for antupload download: {book_chapter.download_url}")
+            from app.services.book_scrapers.playwright_scraper import get_playwright_scraper
+
+            playwright_scraper = await get_playwright_scraper()
+            page = await playwright_scraper._create_page()
+
+            try:
+                # Navigate to antupload page
+                await page.goto(book_chapter.download_url, wait_until='domcontentloaded', timeout=30000)
+                await asyncio.sleep(2)
+
+                # Find #downloadB button
+                download_btn = await page.query_selector('#downloadB')
+                if download_btn:
+                    btn_href = await download_btn.get_attribute('href')
+                    logger.info(f"Found #downloadB button with href: {btn_href}")
+
+                    # Click and capture download
+                    async with page.expect_download(timeout=30000) as download_info:
+                        await download_btn.click()
+
+                    download = await download_info.value
+
+                    # Save file
+                    download_dir = Path(self.book_downloader.download_dir)
+                    download_dir.mkdir(parents=True, exist_ok=True)
+                    file_path = download_dir / filename
+
+                    await download.save_as(str(file_path))
+                    logger.info(f"✅ Download captured and saved: {file_path}")
+                else:
+                    logger.error("Could not find #downloadB button")
+                    file_path = None
+            except Exception as e:
+                logger.error(f"Playwright download failed: {e}")
+                file_path = None
+            finally:
+                await page.close()
+        else:
+            # Use regular downloader for other hosts
+            file_path = await self.book_downloader.download_book(
+                url=book_chapter.download_url,
+                filename=filename,
+                on_progress=on_progress,
+                backup_urls=backup_urls
+            )
+
+        if file_path and file_path.exists():
+            # Éxito
+            item.status = 'completed'
+            item.completed_at = datetime.utcnow()
+            item.progress = 100
+            book_chapter.status = 'downloaded'
+            book_chapter.file_path = str(file_path)
+            book_chapter.downloaded_at = datetime.utcnow()
+
+            # Obtener tamaño del archivo
+            book_chapter.file_size = file_path.stat().st_size
+
+            logger.info(f"Download completed: {filename}")
+        else:
+            # Fallo
+            item.status = 'failed'
+            item.retry_count += 1
+            item.error_message = "Download failed"
+            book_chapter.status = 'error'
+            logger.error(f"Download failed: {filename}")
+
+        db.commit()
 
     async def process_conversions(self):
         """

@@ -41,6 +41,12 @@ services:
       - TERABOX_COOKIE=${TERABOX_COOKIE:-}
       # ComicVine API for comic metadata (get key at comicvine.gamespot.com/api/)
       - COMICVINE_API_KEY=${COMICVINE_API_KEY:-}
+      # Google Books API for book metadata (get key at console.cloud.google.com/apis/credentials)
+      - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY:-}
+      # Captcha resolver API key (2captcha.com) for resolving shortener captchas
+      - CAPTCHA_API_KEY=${CAPTCHA_API_KEY:-}
+      # FlareSolverr URL for bypassing Cloudflare protection
+      - FLARESOLVERR_URL=${FLARESOLVERR_URL:-}
     volumes:
       - downloads:/downloads
       - manga:/manga
@@ -86,6 +92,20 @@ services:
     restart: unless-stopped
     networks:
       - alejandria
+
+  # FlareSolverr (Optional - for bypassing Cloudflare and shortener captchas)
+  # To enable: uncomment below and set FLARESOLVERR_URL=http://flaresolverr:8191 in .env
+  # flaresolverr:
+  #   image: ghcr.io/flaresolverr/flaresolverr:latest
+  #   container_name: alejandria-flaresolverr
+  #   environment:
+  #     - LOG_LEVEL=info
+  #     - CAPTCHA_SOLVER=none
+  #   ports:
+  #     - "8191:8191"
+  #   restart: unless-stopped
+  #   networks:
+  #     - alejandria
 
   # Watchtower (Optional - auto-updates containers)
   # watchtower:
