@@ -6,6 +6,8 @@ import Search from './pages/Search';
 import MangaDetails from './pages/MangaDetails';
 import Comics from './pages/Comics';
 import ComicDetails from './pages/ComicDetails';
+import Books from './pages/Books';
+import BookDetails from './pages/BookDetails';
 import Queue from './pages/Queue';
 import Settings from './pages/Settings';
 
@@ -22,6 +24,8 @@ function App() {
             <Route path="/manga/:id" element={<MangaDetails />} />
             <Route path="/comics" element={<Comics />} />
             <Route path="/comics/:id" element={<ComicDetails />} />
+            <Route path="/books" element={<Books />} />
+            <Route path="/books/:id" element={<BookDetails />} />
             <Route path="/queue" element={<Queue />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>

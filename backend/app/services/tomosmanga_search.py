@@ -195,8 +195,9 @@ class MangayComicsSearch:
 
             results = []
 
-            # MangayComics tiene una estructura similar
-            entries = soup.select('h2.entry-title, h3.entry-title')
+            # MangayComics usa Elementor - buscar títulos en posts
+            # Probar múltiples selectores por si cambia la estructura
+            entries = soup.select('h2.elementor-post__title, h2.entry-title, h3.entry-title')
 
             for entry in entries:
                 link = entry.find('a')

@@ -1,12 +1,13 @@
 import { Link, NavLink } from 'react-router-dom';
-import { FaHome, FaBook, FaSearch, FaCog, FaDownload, FaMask } from 'react-icons/fa';
+import { FaHome, FaBook, FaSearch, FaCog, FaDownload, FaMask, FaBookReader } from 'react-icons/fa';
 
 const Navbar = () => {
   const navItems = [
     { to: '/', icon: FaHome, label: 'Inicio' },
+    { to: '/search', icon: FaSearch, label: 'Buscar' },
     { to: '/library', icon: FaBook, label: 'Manga' },
     { to: '/comics', icon: FaMask, label: 'Cómics' },
-    { to: '/search', icon: FaSearch, label: 'Buscar' },
+    { to: '/books', icon: FaBookReader, label: 'Libros' },
     { to: '/queue', icon: FaDownload, label: 'Descargas' },
     { to: '/settings', icon: FaCog, label: 'Ajustes' },
   ];

@@ -9,6 +9,8 @@ from typing import List, Optional
 from app.database import get_db
 from app.models.chapter import Chapter
 from app.models.manga import Manga
+from app.models.book import Book
+from app.models.book_chapter import BookChapter
 from app.models.download import DownloadQueue
 from app.schemas.download import DownloadQueueResponse, DownloadQueueDetailResponse
 import logging
@@ -47,20 +49,19 @@ def list_queue(
         'failed': ['error']
     }
 
-    # Query chapters with download activity
-    query = db.query(Chapter).join(Manga)
+    result = []
+
+    # Query MANGA chapters with download activity
+    manga_query = db.query(Chapter).join(Manga)
 
     if status:
         chapter_statuses = status_map.get(status, [status])
-        query = query.filter(Chapter.status.in_(chapter_statuses))
+        manga_query = manga_query.filter(Chapter.status.in_(chapter_statuses))
     else:
-        # Show only REAL activity: downloading, completed, or failed
-        # NOT pending - those are just all chapters that haven't been downloaded
-        query = query.filter(Chapter.status.in_(['downloading', 'downloaded', 'converted', 'sent', 'error']))
+        manga_query = manga_query.filter(Chapter.status.in_(['downloading', 'downloaded', 'converted', 'sent', 'error']))
 
-    # Order: downloading first, then errors, then completed by most recent
     from sqlalchemy import case, desc
-    query = query.order_by(
+    manga_query = manga_query.order_by(
         case(
             (Chapter.status == 'downloading', 0),
             (Chapter.status == 'error', 1),
@@ -70,14 +71,11 @@ def list_queue(
         desc(Chapter.created_at)
     )
 
-    chapters = query.offset(skip).limit(limit).all()
+    manga_chapters = manga_query.all()
 
-    # Format response to match frontend expectations
-    result = []
-    for chapter in chapters:
+    # Format manga chapters
+    for chapter in manga_chapters:
         manga = chapter.manga
-
-        # Map chapter status to queue status for frontend
         queue_status = {
             'downloading': 'downloading',
             'pending': 'pending',
@@ -90,6 +88,7 @@ def list_queue(
         result.append({
             "id": chapter.id,
             "chapter_id": chapter.id,
+            "content_type": "manga",
             "status": queue_status,
             "progress": 100 if chapter.status in ['downloaded', 'converted', 'sent'] else 0,
             "bytes_downloaded": 0,
@@ -107,13 +106,74 @@ def list_queue(
             "chapter_number": chapter.number,
             "chapter_title": chapter.title,
             "download_url": chapter.download_url,
-            # Kindle send fields
             "sent_at": chapter.sent_at.isoformat() if chapter.sent_at else None,
             "has_epub": bool(chapter.converted_path),
             "converted_path": chapter.converted_path
         })
 
-    return result
+    # Query BOOK chapters with download activity
+    book_query = db.query(BookChapter).join(Book)
+
+    if status:
+        chapter_statuses = status_map.get(status, [status])
+        book_query = book_query.filter(BookChapter.status.in_(chapter_statuses))
+    else:
+        book_query = book_query.filter(BookChapter.status.in_(['downloading', 'downloaded', 'converted', 'sent', 'error']))
+
+    book_query = book_query.order_by(
+        case(
+            (BookChapter.status == 'downloading', 0),
+            (BookChapter.status == 'error', 1),
+            else_=2
+        ),
+        desc(BookChapter.downloaded_at),
+        desc(BookChapter.created_at)
+    )
+
+    book_chapters = book_query.all()
+
+    # Format book chapters
+    for chapter in book_chapters:
+        book = chapter.book
+        queue_status = {
+            'downloading': 'downloading',
+            'pending': 'pending',
+            'downloaded': 'completed',
+            'converted': 'completed',
+            'sent': 'completed',
+            'error': 'failed'
+        }.get(chapter.status, chapter.status)
+
+        result.append({
+            "id": f"book_{chapter.id}",
+            "book_chapter_id": chapter.id,
+            "content_type": "book",
+            "status": queue_status,
+            "progress": 100 if chapter.status in ['downloaded', 'converted', 'sent'] else 0,
+            "bytes_downloaded": 0,
+            "total_bytes": 0,
+            "error_message": chapter.error_message,
+            "retry_count": 0,
+            "max_retries": 3,
+            "created_at": chapter.created_at.isoformat() if chapter.created_at else None,
+            "started_at": chapter.downloaded_at.isoformat() if chapter.downloaded_at else None,
+            "completed_at": chapter.downloaded_at.isoformat() if chapter.downloaded_at else None,
+            "priority": 0,
+            "book_id": book.id if book else None,
+            "book_title": book.title if book else None,
+            "book_cover": book.cover_image if book else None,
+            "chapter_number": chapter.number,
+            "chapter_title": chapter.title or book.title,
+            "download_url": chapter.download_url,
+            "sent_at": chapter.sent_at.isoformat() if chapter.sent_at else None,
+            "has_epub": bool(chapter.file_path and chapter.file_path.endswith('.epub')),
+            "file_path": chapter.file_path
+        })
+
+    # Sort combined results by completion date (most recent first)
+    result.sort(key=lambda x: x.get('completed_at') or '', reverse=True)
+
+    return result[skip:skip+limit]
 
 
 @router.post("/reset-stuck")

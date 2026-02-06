@@ -88,6 +88,20 @@ class STKKindleSender:
             logger.error(f"STK authorization failed: {e}")
             return False
 
+    def _is_token_expired_error(self, error_message: str) -> bool:
+        """Check if error is due to expired token"""
+        error_str = str(error_message).lower()
+        return 'deviceinfotoken' in error_str or '403' in error_str or 'forbidden' in error_str
+
+    def _handle_expired_token(self) -> None:
+        """
+        Handle expired token by clearing the session
+
+        STK tokens cannot be refreshed - user must re-authenticate
+        """
+        logger.warning("STK token expired - clearing session, re-authentication required")
+        self.logout()
+
     def get_devices(self) -> List[Dict[str, Any]]:
         """
         Get list of Kindle devices
@@ -119,7 +133,13 @@ class STKKindleSender:
                 })
             return result
         except Exception as e:
-            logger.error(f"Failed to get Kindle devices: {e}")
+            error_msg = str(e)
+            logger.error(f"Failed to get Kindle devices: {error_msg}")
+
+            # If token expired, clear session
+            if self._is_token_expired_error(error_msg):
+                self._handle_expired_token()
+
             return []
 
     def send_file(
@@ -207,7 +227,17 @@ class STKKindleSender:
             }
 
         except Exception as e:
-            logger.error(f"Failed to send to Kindle: {e}")
+            error_msg = str(e)
+            logger.error(f"Failed to send to Kindle: {error_msg}")
+
+            # If token expired, clear session and return specific error
+            if self._is_token_expired_error(error_msg):
+                self._handle_expired_token()
+                return {
+                    'success': False,
+                    'message': 'STK session expired. Please re-authenticate in Settings.'
+                }
+
             return {
                 'success': False,
                 'message': str(e)
