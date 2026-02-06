@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { mangaApi } from '../services/api';
+import { mangaApi, bookApi } from '../services/api';
 import SendToKindleButton from '../components/SendToKindleButton';
+import BookSendToKindleButton from '../components/BookSendToKindleButton';
 import {
   FaDownload,
   FaSync,
@@ -9,8 +10,9 @@ import {
   FaCheckCircle,
   FaExclamationTriangle,
   FaSpinner,
-  FaTabletAlt,
-  FaStop
+  FaStop,
+  FaBook,
+  FaBookReader
 } from 'react-icons/fa';
 
 const Queue = () => {
@@ -40,33 +42,41 @@ const Queue = () => {
     return () => clearInterval(interval);
   }, [autoRefresh, loadQueue]);
 
-  const retryDownload = async (id) => {
+  const retryDownload = async (item) => {
     try {
-      await mangaApi.retryDownload(id);
+      // For now, retry only works for manga
+      if (item.content_type === 'manga') {
+        await mangaApi.retryDownload(item.chapter_id);
+      }
       loadQueue();
     } catch (error) {
       console.error('Error reintentando descarga:', error);
     }
   };
 
-  const cancelDownload = async (id) => {
-    if (!confirm('¿Cancelar esta descarga? Si forma parte de un bundle, se cancelarán todos los tomos del bundle.')) return;
+  const cancelDownload = async (item) => {
+    if (!confirm('Cancelar esta descarga? Si forma parte de un bundle, se cancelaran todos los tomos del bundle.')) return;
     try {
-      const response = await mangaApi.cancelDownload(id);
-      // Mostrar mensaje si se cancelaron múltiples capítulos (bundle)
-      if (response.data?.bundle_size > 1) {
-        alert(`Se han cancelado ${response.data.bundle_size} tomos del bundle.`);
+      if (item.content_type === 'manga') {
+        const response = await mangaApi.cancelDownload(item.chapter_id);
+        if (response.data?.bundle_size > 1) {
+          alert(`Se han cancelado ${response.data.bundle_size} tomos del bundle.`);
+        }
       }
+      // For books, we'd need a similar endpoint
       loadQueue();
     } catch (error) {
       console.error('Error cancelando descarga:', error);
     }
   };
 
-  const deleteDownload = async (id) => {
-    if (!confirm('¿Eliminar este archivo descargado?')) return;
+  const deleteDownload = async (item) => {
+    if (!confirm('Eliminar este archivo descargado?')) return;
     try {
-      await mangaApi.deleteDownloadFile(id);
+      if (item.content_type === 'manga') {
+        await mangaApi.deleteDownloadFile(item.chapter_id);
+      }
+      // For books, we'd need a similar endpoint
       loadQueue();
     } catch (error) {
       console.error('Error eliminando descarga:', error);
@@ -75,7 +85,7 @@ const Queue = () => {
 
   const handleKindleSent = (chapterId, sentAt) => {
     setQueue(prev => prev.map(item =>
-      item.chapter_id === chapterId
+      (item.chapter_id === chapterId || item.book_chapter_id === chapterId)
         ? { ...item, sent_at: sentAt }
         : item
     ));
@@ -111,6 +121,21 @@ const Queue = () => {
       'failed': 'Error'
     };
     return map[status] || status;
+  };
+
+  // Helper to get item display info
+  const getItemInfo = (item) => {
+    const isBook = item.content_type === 'book';
+    return {
+      isBook,
+      title: isBook ? (item.book_title || 'Libro') : (item.manga_title || 'Manga'),
+      cover: isBook ? item.book_cover : item.manga_cover,
+      detailUrl: isBook ? `/books/${item.book_id}` : `/manga/${item.manga_id}`,
+      itemLabel: isBook ? 'Archivo' : 'Tomo',
+      itemId: isBook ? item.book_chapter_id : item.chapter_id,
+      accentColor: isBook ? 'emerald' : 'blue',
+      icon: isBook ? FaBookReader : FaBook
+    };
   };
 
   // Calcular stats del queue actual (solo actividad real)
@@ -219,11 +244,11 @@ const Queue = () => {
         <div className="text-center py-20">
           <FaDownload className="text-6xl text-gray-600 mx-auto mb-4" />
           <h3 className="text-2xl font-bold mb-2">
-            {filter === 'all' ? 'Cola vacía' : `Sin descargas "${getStatusText(filter)}"`}
+            {filter === 'all' ? 'Cola vacia' : `Sin descargas "${getStatusText(filter)}"`}
           </h3>
           <p className="text-gray-400 mb-6">
             {filter === 'all'
-              ? 'No hay descargas activas. Selecciona tomos desde un manga para descargar.'
+              ? 'No hay descargas activas. Selecciona tomos desde un manga o libro para descargar.'
               : 'No hay descargas con este estado.'
             }
           </p>
@@ -233,123 +258,152 @@ const Queue = () => {
         </div>
       ) : (
         <div className="space-y-3">
-          {filteredQueue.map((item) => (
-            <div
-              key={item.id}
-              className={`card p-4 transition-all ${
-                item.status === 'downloading' ? 'ring-2 ring-blue-500' : ''
-              }`}
-            >
-              <div className="flex items-center gap-4">
-                {/* Cover with volume number overlay */}
-                <div className="relative w-14 h-20 flex-shrink-0">
-                  {item.manga_cover ? (
-                    <img
-                      src={item.manga_cover}
-                      alt={item.manga_title}
-                      className="w-full h-full object-cover rounded"
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-gray-700 rounded flex items-center justify-center">
-                      <FaDownload className="text-gray-500" />
-                    </div>
-                  )}
-                  {/* Volume number badge */}
-                  <div className="absolute bottom-0 right-0 bg-primary text-white text-xs font-bold px-1.5 py-0.5 rounded-tl rounded-br">
-                    {Math.floor(item.chapter_number)}
-                  </div>
-                </div>
+          {filteredQueue.map((item) => {
+            const info = getItemInfo(item);
+            const IconComponent = info.icon;
+            const ringColor = item.status === 'downloading'
+              ? (info.isBook ? 'ring-emerald-500' : 'ring-blue-500')
+              : '';
+            const badgeColor = info.isBook ? 'bg-emerald-500' : 'bg-primary';
 
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    {getStatusIcon(item.status)}
-                    <Link
-                      to={`/manga/${item.manga_id}`}
-                      className="font-bold hover:text-primary truncate"
-                    >
-                      {item.manga_title || 'Manga'}
-                    </Link>
-                    <span className="text-gray-500">-</span>
-                    <span className="text-gray-400">Tomo {item.chapter_number}</span>
-                  </div>
-
-                  {/* Barra de progreso para downloading */}
-                  {item.status === 'downloading' && (
-                    <div className="mt-2">
-                      <div className="w-full bg-gray-700 rounded-full h-2">
-                        <div
-                          className="bg-blue-500 h-2 rounded-full transition-all"
-                          style={{ width: `${item.progress || 0}%` }}
-                        />
+            return (
+              <div
+                key={item.id}
+                className={`card p-4 transition-all ${
+                  item.status === 'downloading' ? `ring-2 ${ringColor}` : ''
+                }`}
+              >
+                <div className="flex items-center gap-4">
+                  {/* Cover with volume number overlay */}
+                  <div className="relative w-14 h-20 flex-shrink-0">
+                    {info.cover ? (
+                      <img
+                        src={info.cover}
+                        alt={info.title}
+                        className="w-full h-full object-cover rounded"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gray-700 rounded flex items-center justify-center">
+                        <IconComponent className={`text-gray-500 ${info.isBook ? 'text-emerald-500/50' : ''}`} />
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">{item.progress || 0}%</p>
-                    </div>
-                  )}
-
-                  {/* Error */}
-                  {item.status === 'failed' && item.error_message && (
-                    <p className="text-red-400 text-sm mt-1">{item.error_message}</p>
-                  )}
-
-                  {/* Tiempo */}
-                  <div className="flex gap-4 text-xs text-gray-500 mt-2">
-                    {item.created_at && <span>Creado: {formatTime(item.created_at)}</span>}
-                    {item.completed_at && item.status === 'completed' && (
-                      <span>Completado: {formatTime(item.completed_at)}</span>
                     )}
-                    {item.retry_count > 0 && (
-                      <span className="text-yellow-500">Reintentos: {item.retry_count}</span>
+                    {/* Volume number badge */}
+                    <div className={`absolute bottom-0 right-0 ${badgeColor} text-white text-xs font-bold px-1.5 py-0.5 rounded-tl rounded-br`}>
+                      {Math.floor(item.chapter_number)}
+                    </div>
+                    {/* Content type indicator */}
+                    {info.isBook && (
+                      <div className="absolute top-0 left-0 bg-emerald-500 text-white text-[8px] font-bold px-1 py-0.5 rounded-br rounded-tl">
+                        LIBRO
+                      </div>
                     )}
                   </div>
-                </div>
 
-                {/* Acciones */}
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {/* Send to Kindle button for completed downloads */}
-                  {item.status === 'completed' && item.chapter_id && (
-                    <SendToKindleButton
-                      chapterId={item.chapter_id}
-                      sentAt={item.sent_at}
-                      hasEpub={item.has_epub || item.converted_path}
-                      onSent={handleKindleSent}
-                      size="sm"
-                      showLabel={true}
-                    />
-                  )}
-                  {/* Cancelar descarga en progreso */}
-                  {item.status === 'downloading' && (
-                    <button
-                      onClick={() => cancelDownload(item.chapter_id)}
-                      className="btn btn-sm bg-orange-500 hover:bg-orange-600 text-white"
-                      title="Cancelar descarga"
-                    >
-                      <FaStop />
-                      <span className="ml-1">Cancelar</span>
-                    </button>
-                  )}
-                  {item.status === 'failed' && (
-                    <button
-                      onClick={() => retryDownload(item.chapter_id)}
-                      className="btn btn-sm btn-primary"
-                      title="Reintentar"
-                    >
-                      <FaSync />
-                    </button>
-                  )}
-                  {(item.status === 'completed' || item.status === 'failed') && (
-                    <button
-                      onClick={() => deleteDownload(item.chapter_id)}
-                      className="btn btn-sm bg-red-500 hover:bg-red-600 text-white"
-                      title="Eliminar archivo"
-                    >
-                      <FaTrash />
-                    </button>
-                  )}
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      {getStatusIcon(item.status)}
+                      <Link
+                        to={info.detailUrl}
+                        className={`font-bold hover:${info.isBook ? 'text-emerald-400' : 'text-primary'} truncate`}
+                      >
+                        {info.title}
+                      </Link>
+                      <span className="text-gray-500">-</span>
+                      <span className="text-gray-400">{info.itemLabel} {item.chapter_number}</span>
+                    </div>
+
+                    {/* Barra de progreso para downloading */}
+                    {item.status === 'downloading' && (
+                      <div className="mt-2">
+                        <div className="w-full bg-gray-700 rounded-full h-2">
+                          <div
+                            className={`${info.isBook ? 'bg-emerald-500' : 'bg-blue-500'} h-2 rounded-full transition-all`}
+                            style={{ width: `${item.progress || 0}%` }}
+                          />
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">{item.progress || 0}%</p>
+                      </div>
+                    )}
+
+                    {/* Error */}
+                    {item.status === 'failed' && item.error_message && (
+                      <p className="text-red-400 text-sm mt-1">{item.error_message}</p>
+                    )}
+
+                    {/* Tiempo */}
+                    <div className="flex gap-4 text-xs text-gray-500 mt-2">
+                      {item.created_at && <span>Creado: {formatTime(item.created_at)}</span>}
+                      {item.completed_at && item.status === 'completed' && (
+                        <span>Completado: {formatTime(item.completed_at)}</span>
+                      )}
+                      {item.retry_count > 0 && (
+                        <span className="text-yellow-500">Reintentos: {item.retry_count}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Acciones */}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {/* Send to Kindle button for completed downloads */}
+                    {item.status === 'completed' && (
+                      info.isBook ? (
+                        <BookSendToKindleButton
+                          bookId={item.book_id}
+                          chapterId={item.book_chapter_id}
+                          sentAt={item.sent_at}
+                          hasEpub={item.has_epub || item.file_path}
+                          onSent={handleKindleSent}
+                          size="sm"
+                          showLabel={true}
+                        />
+                      ) : (
+                        item.chapter_id && (
+                          <SendToKindleButton
+                            chapterId={item.chapter_id}
+                            sentAt={item.sent_at}
+                            hasEpub={item.has_epub || item.converted_path}
+                            onSent={handleKindleSent}
+                            size="sm"
+                            showLabel={true}
+                          />
+                        )
+                      )
+                    )}
+                    {/* Cancelar descarga en progreso - solo para manga por ahora */}
+                    {item.status === 'downloading' && item.content_type === 'manga' && (
+                      <button
+                        onClick={() => cancelDownload(item)}
+                        className="btn btn-sm bg-orange-500 hover:bg-orange-600 text-white"
+                        title="Cancelar descarga"
+                      >
+                        <FaStop />
+                        <span className="ml-1">Cancelar</span>
+                      </button>
+                    )}
+                    {item.status === 'failed' && item.content_type === 'manga' && (
+                      <button
+                        onClick={() => retryDownload(item)}
+                        className="btn btn-sm btn-primary"
+                        title="Reintentar"
+                      >
+                        <FaSync />
+                      </button>
+                    )}
+                    {(item.status === 'completed' || item.status === 'failed') && item.content_type === 'manga' && (
+                      <button
+                        onClick={() => deleteDownload(item)}
+                        className="btn btn-sm bg-red-500 hover:bg-red-600 text-white"
+                        title="Eliminar archivo"
+                      >
+                        <FaTrash />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

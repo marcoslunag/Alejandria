@@ -198,6 +198,63 @@ class MangayComicsScraper:
         if not content:
             return volumes
 
+        # NUEVA LÓGICA: Buscar botones de Elementor primero (estructura moderna)
+        elementor_buttons = content.find_all('span', class_='elementor-button-text')
+
+        if elementor_buttons:
+            logger.info(f"Found {len(elementor_buttons)} Elementor buttons, using modern extraction")
+
+            # Diccionario para agrupar links por número de volumen
+            volumes_dict = {}
+
+            for span in elementor_buttons:
+                button_text = span.get_text(strip=True)
+
+                # Solo procesar si tiene "Tomo" o "Tomos"
+                if 'tomo' not in button_text.lower():
+                    continue
+
+                # Buscar el <a> padre
+                parent_a = span.find_parent('a')
+                if not parent_a:
+                    continue
+
+                href = parent_a.get('href', '')
+                if not href:
+                    continue
+
+                # Extraer número de tomo del texto
+                volume_num = self._extract_volume_number(button_text)
+                if not volume_num:
+                    continue
+
+                # Si el volumen ya existe, agregar link; si no, crear nuevo
+                if volume_num not in volumes_dict:
+                    volumes_dict[volume_num] = {
+                        'number': volume_num,
+                        'title': button_text,
+                        'url': base_url,
+                        'download_links': []
+                    }
+
+                # Agregar link al volumen
+                volumes_dict[volume_num]['download_links'].append({
+                    'url': href,
+                    'host': self._get_host(href),
+                    'text': button_text
+                })
+
+            # Convertir dict a lista y seleccionar mejores links
+            for volume_data in volumes_dict.values():
+                self._select_best_download_links(volume_data)
+                volumes.append(volume_data)
+
+            # Ordenar por número y retornar
+            volumes.sort(key=lambda x: x['number'])
+            logger.info(f"Extracted {len(volumes)} volumes from Elementor buttons")
+            return volumes
+
+        # LÓGICA ANTIGUA: Buscar por headers (para sitios con estructura antigua)
         # Buscar secciones de tomos (divs, headers, etc.)
         volume_sections = []
 

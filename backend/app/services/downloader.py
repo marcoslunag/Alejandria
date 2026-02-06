@@ -140,6 +140,28 @@ class MangaDownloader:
             else:
                 raise ValueError("Could not resolve OUO.io link")
 
+        # Resolver uii.io con resolver especializado
+        if 'uii.io' in url_lower or 'wordcount.im' in url_lower:
+            logger.info(f"UII.io shortener detected: {url[:50]}...")
+            resolved_url = await self._resolve_uii_link(url)
+            if resolved_url:
+                logger.info(f"UII.io resolved to: {resolved_url[:60]}...")
+                # Llamar recursivamente con el enlace resuelto
+                return await self._download_single_url(resolved_url, filename, on_progress)
+            else:
+                raise ValueError(f"Could not resolve uii.io link: {url}. Configure CAPTCHA_API_KEY for auto-solving.")
+
+        # Resolver otros acortadores genéricos
+        if 'bit.ly' in url_lower or 'tinyurl.com' in url_lower:
+            logger.info(f"URL shortener detected: {url[:50]}...")
+            resolved_url = await self._resolve_generic_shortener(url)
+            if resolved_url:
+                logger.info(f"Shortener resolved to: {resolved_url[:60]}...")
+                # Llamar recursivamente con el enlace resuelto
+                return await self._download_single_url(resolved_url, filename, on_progress)
+            else:
+                raise ValueError(f"Could not resolve URL shortener: {url}")
+
         # Otros acortadores no soportados
         if 'shrinkme' in url_lower:
             logger.warning(f"Unsupported URL shortener: {url}")
@@ -725,6 +747,106 @@ class MangaDownloader:
             return None
         except Exception as e:
             logger.error(f"Error resolving OUO.io link: {e}")
+            return None
+
+    async def _resolve_generic_shortener(self, short_url: str) -> Optional[str]:
+        """
+        Resuelve un enlace acortado genérico (uii.io, bit.ly, etc.)
+        Intenta primero con HTTP redirects, luego con Playwright
+
+        Args:
+            short_url: URL acortada
+
+        Returns:
+            URL final resuelta o None si falla
+        """
+        # Método 1: Seguir redirects HTTP
+        try:
+            logger.info(f"Attempting HTTP redirect resolution for: {short_url}")
+            async with aiohttp.ClientSession(headers=self.headers) as session:
+                async with session.get(
+                    short_url,
+                    allow_redirects=True,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    # La URL final después de los redirects
+                    final_url = str(response.url)
+
+                    # Verificar que no es la misma URL (redirect loop o sin redirect)
+                    if final_url != short_url and final_url != short_url + '/':
+                        logger.info(f"HTTP redirect resolved to: {final_url[:60]}...")
+                        return final_url
+
+                    logger.warning(f"HTTP redirect did not resolve to different URL")
+        except aiohttp.ClientConnectorError as e:
+            logger.warning(f"HTTP redirect failed (DNS/connection error): {e}")
+        except Exception as e:
+            logger.warning(f"HTTP redirect resolution failed: {e}")
+
+        # Método 2: Usar Playwright si HTTP falló
+        try:
+            logger.info(f"Attempting Playwright resolution for: {short_url}")
+            from app.services.book_scrapers.playwright_scraper import get_playwright_scraper
+
+            playwright_scraper = await get_playwright_scraper()
+            page = await playwright_scraper._create_page()
+
+            try:
+                # Navegar y esperar a que cargue
+                await page.goto(short_url, wait_until='networkidle', timeout=30000)
+
+                # Esperar un poco por si hay redirect JavaScript
+                await asyncio.sleep(2)
+
+                # Obtener URL final
+                final_url = page.url
+
+                if final_url and final_url != short_url and final_url != short_url + '/':
+                    logger.info(f"Playwright resolved to: {final_url[:60]}...")
+                    return final_url
+                else:
+                    logger.warning(f"Playwright did not find redirected URL")
+                    return None
+            finally:
+                await page.close()
+
+        except ImportError:
+            logger.warning("Playwright not available for shortener resolution")
+        except Exception as e:
+            logger.error(f"Playwright resolution failed: {e}")
+
+        logger.error(f"Failed to resolve shortener: {short_url}")
+        return None
+
+    async def _resolve_uii_link(self, uii_url: str) -> Optional[str]:
+        """
+        Resuelve un enlace de uii.io usando el resolver especializado
+
+        Args:
+            uii_url: URL de uii.io
+
+        Returns:
+            URL final resuelta o None si falla
+        """
+        try:
+            from app.services.uii_resolver import resolve_uii_link
+
+            logger.info(f"Resolving UII.io link: {uii_url}")
+            final_url = await resolve_uii_link(uii_url)
+
+            if final_url:
+                logger.info(f"UII.io resolved successfully to: {final_url[:60]}...")
+                return final_url
+            else:
+                logger.error("UII.io resolution failed - no URL returned")
+                return None
+
+        except ImportError as e:
+            logger.error(f"UII resolver not available: {e}")
+            # Fallback al resolver genérico
+            return await self._resolve_generic_shortener(uii_url)
+        except Exception as e:
+            logger.error(f"Error resolving UII.io link: {e}")
             return None
 
     def _verify_archive_integrity(self, file_path: Path) -> bool:

@@ -165,4 +165,55 @@ export const comicApi = {
     api.get(`/comics/${comicId}/issues`, { params }),
 };
 
+// Books API
+export const bookApi = {
+  // Search (Google Books / Open Library)
+  searchGoogleBooks: (query, page = 1, limit = 20, language = null) =>
+    api.get(`/books/search`, { params: { q: query, page, limit, language, source: 'all' } }),
+
+  searchOpenLibrary: (query, page = 1, limit = 20) =>
+    api.get(`/books/search`, { params: { q: query, page, limit, source: 'openlibrary' } }),
+
+  // Library
+  getLibrary: (params = {}) =>
+    api.get(`/books/library`, { params }),
+
+  getBook: (id) =>
+    api.get(`/books/${id}`),
+
+  getBookStats: (id) =>
+    api.get(`/books/${id}/stats`),
+
+  getStats: () =>
+    api.get(`/books/library/stats`),
+
+  // Add books
+  addFromGoogleBooks: (data) =>
+    api.post(`/books/from-google-books`, data),
+
+  addFromUrl: (data) =>
+    api.post(`/books/from-url`, data),
+
+  // Update/Delete
+  updateBook: (id, data) =>
+    api.patch(`/books/${id}`, data),
+
+  deleteBook: (id) =>
+    api.delete(`/books/${id}`),
+
+  refreshBook: (id) =>
+    api.post(`/books/${id}/refresh`),
+
+  // Chapters
+  getChapters: (bookId) =>
+    api.get(`/books/${bookId}/chapters`),
+
+  downloadChapters: (bookId, chapterIds) =>
+    api.post(`/books/${bookId}/chapters/download`, { chapter_ids: chapterIds }),
+
+  // Send to Kindle
+  sendToKindle: (bookId, chapterId) =>
+    api.post(`/books/${bookId}/chapters/${chapterId}/send-to-kindle`),
+};
+
 export default api;
