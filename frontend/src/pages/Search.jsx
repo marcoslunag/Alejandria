@@ -64,8 +64,34 @@ const Search = () => {
 
   const handleAddComic = async (comic) => {
     try {
-      await comicApi.addComic(comic.comicvine_id);
-      alert(`"${comic.title}" añadido a la biblioteca!`);
+      // If comicvine_id is 0 (virtual result), add from scraper URL directly
+      if (comic.comicvine_id === 0 && comic.volume_to_add) {
+        const volume = comic.volume_to_add;
+        await comicApi.addComicFromUrl({
+          title: volume.title,
+          url: volume.url,
+          source: volume.source,
+          issues: volume.issues,
+          cover: volume.cover
+        });
+        alert(`"${volume.title}" añadido a la biblioteca!`);
+      }
+      // Normal ComicVine comic
+      else {
+        const payload = {
+          comicvine_id: comic.comicvine_id
+        };
+
+        if (comic.volume_to_add) {
+          payload.volume_to_add = comic.volume_to_add;
+          await comicApi.addComic(payload);
+          alert(`"${comic.title} Vol ${comic.volume_to_add.number}" añadido a la biblioteca!`);
+        } else {
+          await comicApi.addComic(payload);
+          alert(`"${comic.title}" añadido a la biblioteca!`);
+        }
+      }
+
       const query = searchParams.get('q') || initialQuery;
       if (query) handleSearch(query);
     } catch (error) {
@@ -234,47 +260,118 @@ const Search = () => {
             </div>
           )}
 
-          {activeTab === 'comics' && (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6">
-              {results.map((comic) => (
-                <div key={comic.comicvine_id} className="card overflow-hidden">
-                  <div className="relative aspect-[2/3] overflow-hidden bg-gray-800">
-                    {comic.cover ? (
-                      <img
-                        src={comic.cover}
-                        alt={comic.title}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <FaMask className="text-6xl text-gray-600" />
+          {activeTab === 'comics' && (() => {
+            // Deduplicate volumes across all comics (same volume URL = same volume)
+            const volumeMap = new Map();
+            const regularComics = [];
+
+            results.forEach((comic) => {
+              if (comic.volumes && comic.volumes.length > 0) {
+                // Comic has volumes - add each unique volume
+                comic.volumes.forEach((volume) => {
+                  if (!volumeMap.has(volume.url)) {
+                    volumeMap.set(volume.url, { comic, volume });
+                  }
+                });
+              } else {
+                // Comic without volumes - show as regular card
+                regularComics.push(comic);
+              }
+            });
+
+            const uniqueVolumes = Array.from(volumeMap.values());
+            const allItems = [...uniqueVolumes, ...regularComics.map(comic => ({ comic, volume: null }))];
+
+            return (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6">
+                {allItems.map(({ comic, volume }) => {
+                  if (volume) {
+                    // Volume card - use volume's own cover and title
+                    return (
+                      <div key={`vol-${volume.url}`} className="card overflow-hidden">
+                      <div className="relative aspect-[2/3] overflow-hidden bg-gray-800">
+                        {volume.cover ? (
+                          <img
+                            src={volume.cover}
+                            alt={volume.title}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <FaMask className="text-6xl text-gray-600" />
+                          </div>
+                        )}
+                        {/* Volume badge */}
+                        {volume.number > 0 ? (
+                          <div className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-full font-bold text-sm shadow-lg">
+                            Vol {volume.number}
+                          </div>
+                        ) : (
+                          <div className="absolute top-2 right-2 bg-green-600 text-white px-3 py-1 rounded-full font-bold text-sm shadow-lg">
+                            Colección
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <div className="p-4">
-                    <h3 className="font-bold text-lg mb-2 line-clamp-2">{comic.title}</h3>
-                    {comic.publisher && (
-                      <p className="text-sm text-gray-400 mb-2">{comic.publisher}</p>
-                    )}
-                    {!comic.in_library && (
-                      <button
-                        onClick={() => handleAddComic(comic)}
-                        className="w-full btn btn-primary bg-red-500 hover:bg-red-600 mt-2"
-                      >
-                        Añadir
-                      </button>
-                    )}
-                    {comic.in_library && (
-                      <div className="text-center text-green-500 mt-2">
-                        ✓ En biblioteca
+                      <div className="p-4">
+                        <h3 className="font-bold text-lg mb-2 line-clamp-2">{volume.title}</h3>
+                        <div className="text-xs text-gray-400 mb-2 space-y-1">
+                          <p>📖 {volume.issues} issues</p>
+                          <p>🌐 {volume.source}</p>
+                        </div>
+                        <button
+                          onClick={() => handleAddComic({...comic, volume_to_add: volume})}
+                          className="w-full btn btn-primary bg-red-500 hover:bg-red-600 mt-2"
+                        >
+                          {volume.number > 0 ? `Añadir Vol ${volume.number}` : 'Añadir'}
+                        </button>
                       </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                    </div>
+                    );
+                  }
+
+                  // Regular comic card (no volume)
+                  return (
+                    <div key={comic.comicvine_id} className="card overflow-hidden">
+                      <div className="relative aspect-[2/3] overflow-hidden bg-gray-800">
+                        {comic.cover_image ? (
+                          <img
+                            src={comic.cover_image}
+                            alt={comic.title}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <FaMask className="text-6xl text-gray-600" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-4">
+                        <h3 className="font-bold text-lg mb-2 line-clamp-2">{comic.title}</h3>
+                        {comic.publisher && (
+                          <p className="text-sm text-gray-400 mb-2">{comic.publisher}</p>
+                        )}
+                        {!comic.in_library && (
+                          <button
+                            onClick={() => handleAddComic(comic)}
+                            className="w-full btn btn-primary bg-red-500 hover:bg-red-600 mt-2"
+                          >
+                            Añadir
+                          </button>
+                        )}
+                        {comic.in_library && (
+                          <div className="text-center text-green-500 mt-2">
+                            ✓ En biblioteca
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {activeTab === 'books' && (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6">

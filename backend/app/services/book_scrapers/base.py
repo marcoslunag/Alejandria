@@ -97,9 +97,9 @@ class BookScraperBase(ABC):
 
     # Quality scores for different hosts (0-100)
     HOST_QUALITY = {
-        HostType.MEGA: 95,
-        HostType.GOOGLE_DRIVE: 90,
-        HostType.MEDIAFIRE: 85,
+        HostType.MEGA: 70,  # Lowered from 95 - rate limit issues (~6h/5GB)
+        HostType.GOOGLE_DRIVE: 95,  # Raised from 90 - best option, no severe limits
+        HostType.MEDIAFIRE: 90,  # Raised from 85 - good option
         HostType.FIRELOAD: 75,
         HostType.KRAKENFILES: 70,
         HostType.DIRECT: 70,

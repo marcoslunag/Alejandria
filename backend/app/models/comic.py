@@ -111,18 +111,29 @@ class ComicIssue(Base):
     source = Column(String(50))  # Which scraper found it
     file_path = Column(String(1000))  # Local file path after download
     file_size = Column(Integer)  # Size in bytes
-    
+
+    # Conversion info (KCC)
+    converted_path = Column(String(2000))  # Path(s) to converted file(s), separated by '|' if multiple parts
+    converted_at = Column(DateTime)  # When conversion completed
+
+    # Bundle/Collection info (for TPB, HC, Complete collections)
+    bundle_id = Column(String(64), index=True)  # Unique ID for bundle (hash of download URL)
+    bundle_title = Column(String(255))  # Title of bundle (e.g., "Paper Girls Vol. 6 (TPB)")
+    bundle_range = Column(String(50))  # Issue range covered (e.g., "#26-30")
+    is_bundle_master = Column(Boolean, default=False)  # True if this issue downloads for the whole bundle
+
     # Status
     status = Column(String(50), default="pending", index=True)
-    # pending, downloading, downloaded, converting, converted, error
-    
+    # pending, downloading, downloaded, converting, converted, sent, error
+
     error_message = Column(Text)
     download_attempts = Column(Integer, default=0)
-    
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     downloaded_at = Column(DateTime)
+    sent_at = Column(DateTime)  # When sent to Kindle
 
     # Relationship
     comic = relationship("Comic", back_populates="issues")

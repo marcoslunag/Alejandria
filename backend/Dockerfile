@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     postgresql-client \
     curl \
+    megatools \
     # Playwright/Chromium dependencies
     libnss3 \
     libnspr4 \
@@ -39,7 +40,8 @@ COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir --no-deps mega.py==1.0.8
 
 # Install Playwright browsers (only Chromium to save space)
 RUN playwright install chromium

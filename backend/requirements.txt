@@ -30,8 +30,11 @@ apscheduler==3.10.4
 # File Handling
 python-slugify==8.0.1
 
-# MEGA Downloads (optional)
-mega.py==1.0.8
+# MEGA Downloads (mega.py installed separately in Dockerfile with --no-deps)
+# mega.py==1.0.8 needs tenacity<6.0 but that breaks Python 3.11+
+# So we install mega.py without deps, then tenacity + pycryptodome manually
+tenacity>=8.2
+pycryptodome>=3.9.6
 
 # Environment
 python-dotenv==1.0.0

@@ -1,6 +1,6 @@
 """
-Lectulandia.co EPUB Scraper
-Scrapes books from lectulandia.co
+Lectulandia.com EPUB Scraper
+Scrapes books from lectulandia.com
 """
 
 import aiohttp
@@ -13,13 +13,13 @@ logger = logging.getLogger(__name__)
 
 
 class LectulandiaScraper(BookScraperBase):
-    """Scraper for lectulandia.co"""
+    """Scraper for lectulandia.com"""
 
     name = "lectulandia"
-    base_url = "https://ww3.lectulandia.co"
+    base_url = "https://ww3.lectulandia.com"
 
     async def search(self, query: str, page: int = 1) -> List[Dict]:
-        """Search for books on lectulandia.co using Playwright for better results"""
+        """Search for books on lectulandia.com using Playwright for better results"""
         try:
             # Import Playwright scraper
             from .playwright_scraper import get_playwright_scraper

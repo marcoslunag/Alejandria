@@ -13,6 +13,7 @@ from app.models.manga import Manga
 from app.models.chapter import Chapter
 from app.models.book import Book
 from app.models.book_chapter import BookChapter
+from app.models.comic import Comic, ComicIssue
 from app.models.download import DownloadQueue
 from app.services.scraper import TomosMangaScraper
 from app.services.downloader import MangaDownloader
@@ -585,18 +586,25 @@ class MangaScheduler:
 
         db: Session = SessionLocal()
         try:
-            # Obtener capítulos descargados no convertidos
+            # Obtener capítulos de manga descargados no convertidos
             chapters = db.query(Chapter).filter(
                 Chapter.status.in_(['downloaded', 'converting'])
             ).limit(10).all()
 
-            if not chapters:
-                return
+            if chapters:
+                logger.info(f"Checking conversion status for {len(chapters)} manga chapters")
+                for chapter in chapters:
+                    await self._check_or_convert_chapter(chapter.id)
 
-            logger.info(f"Checking conversion status for {len(chapters)} chapters")
+            # Obtener issues de comics descargados no convertidos
+            comic_issues = db.query(ComicIssue).filter(
+                ComicIssue.status.in_(['downloaded', 'converting'])
+            ).limit(10).all()
 
-            for chapter in chapters:
-                await self._check_or_convert_chapter(chapter.id)
+            if comic_issues:
+                logger.info(f"Checking conversion status for {len(comic_issues)} comic issues")
+                for issue in comic_issues:
+                    await self._check_or_convert_comic_issue(issue.id)
 
         except Exception as e:
             logger.error(f"Error in process_conversions: {e}")
@@ -737,6 +745,126 @@ class MangaScheduler:
         finally:
             db.close()
 
+    async def _check_or_convert_comic_issue(self, issue_id: int):
+        """
+        Verifica si el issue de comic ya fue convertido por KCC Worker.
+        Soporta archivos divididos en partes (ej: "Comic - Issue 001 - Parte 1.epub").
+        """
+        db: Session = SessionLocal()
+        try:
+            issue = db.query(ComicIssue).filter(ComicIssue.id == issue_id).first()
+            if not issue:
+                return
+
+            comic = db.query(Comic).filter(Comic.id == issue.comic_id).first()
+            if not comic:
+                return
+
+            # Buscar archivo convertido en /manga/kindle (output del KCC Worker)
+            kindle_dir = Path(self.converter.output_dir)
+
+            # Extraer número de issue
+            issue_num = issue.issue_number or "1"
+            try:
+                issue_num_int = int(float(issue_num))
+            except (ValueError, TypeError):
+                issue_num_int = 1
+
+            # Crear patrones de nombre basados en el comic y issue
+            # Nombres posibles:
+            # - "Batman - Issue 001.epub"
+            # - "Batman - Issue 001 - Parte 1.epub"
+            # - "Spider-Man - Issue 042.epub"
+            comic_name_lower = comic.title.lower().replace(' ', '').replace('-', '')
+            comic_slug_lower = comic.slug.lower().replace('-', '') if comic.slug else ''
+
+            import re
+
+            # Buscar archivos convertidos (epub y mobi)
+            converted_files = []
+
+            for ext in ['*.epub', '*.mobi']:
+                for conv_file in kindle_dir.glob(ext):
+                    file_name = conv_file.stem
+                    file_name_lower = file_name.lower().replace(' ', '').replace('-', '')
+
+                    # Verificar si contiene el nombre del comic
+                    comic_match = (
+                        comic_name_lower in file_name_lower or
+                        comic_slug_lower in file_name_lower or
+                        (file_name_lower.startswith(comic_slug_lower) if comic_slug_lower else False)
+                    )
+
+                    if not comic_match:
+                        continue
+
+                    # Buscar número de issue en el nombre del archivo
+                    # Patterns: "Issue 001", "Issue001", "#001", "001"
+                    issue_patterns = [
+                        rf'issue\s*0*{issue_num_int}(?:\D|$)',
+                        rf'#\s*0*{issue_num_int}(?:\D|$)',
+                        rf'(?:^|\D)0*{issue_num_int}(?:\D|$)',
+                    ]
+
+                    for pattern in issue_patterns:
+                        if re.search(pattern, file_name_lower):
+                            converted_files.append(conv_file)
+                            break
+
+            # Ordenar archivos para mantener el orden de las partes
+            def extract_part_number(f):
+                match = re.search(r'parte\s*(\d+)', f.name.lower())
+                return int(match.group(1)) if match else 0
+
+            converted_files.sort(key=lambda f: (f.name.lower(), extract_part_number(f)))
+
+            # Si encontramos archivos convertidos, actualizar DB
+            if converted_files:
+                issue.status = 'converted'
+                issue.converted_path = '|'.join(str(f) for f in converted_files)
+                issue.converted_at = datetime.utcnow()
+                db.commit()
+
+                if len(converted_files) == 1:
+                    logger.info(f"Found converted file: {converted_files[0].name} for {comic.title} Issue {issue_num}")
+                else:
+                    logger.info(f"Found {len(converted_files)} converted parts for {comic.title} Issue {issue_num}")
+                return
+
+            # Si no hay archivo convertido, verificar si el fuente existe
+            if issue.file_path:
+                input_file = Path(issue.file_path)
+
+                if not input_file.exists():
+                    # El archivo fuente fue procesado por KCC Worker
+                    if issue.status == 'downloaded':
+                        logger.info(f"Source file processed, waiting for conversion output: {input_file.name}")
+                        issue.status = 'converting'
+                        db.commit()
+                    return
+
+                # Archivo fuente existe pero no hay convertido:
+                # Marcar como 'converting' y esperar a KCC Worker
+                if issue.status == 'downloaded':
+                    issue.status = 'converting'
+                    db.commit()
+                    logger.info(f"Waiting for KCC Worker to convert: {input_file.name}")
+                    return
+
+            # Si lleva mucho tiempo en 'converting', marcar como error
+            if issue.status == 'converting':
+                time_in_converting = datetime.utcnow() - (issue.downloaded_at or datetime.utcnow())
+                if time_in_converting.total_seconds() > 3600:  # 1 hora
+                    logger.error(f"Conversion timeout for {comic.title} Issue {issue_num}")
+                    issue.status = 'error'
+                    issue.error_message = "Conversion timeout - check KCC Worker"
+                    db.commit()
+
+        except Exception as e:
+            logger.error(f"Error in _check_or_convert_comic_issue: {e}")
+        finally:
+            db.close()
+
     async def _convert_chapter_local(self, chapter_id: int):
         """Convierte un capítulo usando KCC local (fallback)"""
         db: Session = SessionLocal()
@@ -808,18 +936,25 @@ class MangaScheduler:
                 logger.debug("STK device not configured, skipping")
                 return
 
-            # Obtener capítulos convertidos no enviados
+            # Obtener capítulos de manga convertidos no enviados
             chapters = db.query(Chapter).filter(
                 Chapter.status == 'converted'
             ).limit(3).all()
 
-            if not chapters:
-                return
+            if chapters:
+                logger.info(f"Sending {len(chapters)} manga chapters to Kindle via STK")
+                for chapter in chapters:
+                    await self._send_chapter_to_kindle(chapter.id, settings)
 
-            logger.info(f"Sending {len(chapters)} chapters to Kindle via STK")
+            # Obtener issues de comic convertidos no enviados
+            comic_issues = db.query(ComicIssue).filter(
+                ComicIssue.status == 'converted'
+            ).limit(3).all()
 
-            for chapter in chapters:
-                await self._send_chapter_to_kindle(chapter.id, settings)
+            if comic_issues:
+                logger.info(f"Sending {len(comic_issues)} comic issues to Kindle via STK")
+                for issue in comic_issues:
+                    await self._send_comic_issue_to_kindle(issue.id, settings)
 
         except Exception as e:
             logger.error(f"Error in send_to_kindle: {e}")
@@ -903,6 +1038,86 @@ class MangaScheduler:
 
         except Exception as e:
             logger.error(f"Error in _send_chapter_to_kindle: {e}")
+        finally:
+            db.close()
+
+    async def _send_comic_issue_to_kindle(self, issue_id: int, settings=None):
+        """
+        Envía un issue de comic al Kindle usando STK.
+        Soporta archivos divididos en partes (rutas separadas por '|' en converted_path).
+        """
+        db: Session = SessionLocal()
+        try:
+            issue = db.query(ComicIssue).filter(ComicIssue.id == issue_id).first()
+            if not issue or not issue.converted_path:
+                return
+
+            comic = db.query(Comic).filter(Comic.id == issue.comic_id).first()
+            if not comic:
+                return
+
+            # Manejar múltiples archivos (partes) separados por '|'
+            file_paths = [Path(p.strip()) for p in issue.converted_path.split('|') if p.strip()]
+
+            # Verificar que todos los archivos existen
+            missing_files = [f for f in file_paths if not f.exists()]
+            if missing_files:
+                logger.error(f"Converted files not found: {[str(f) for f in missing_files]}")
+                return
+
+            issue_num = issue.issue_number or "?"
+            if len(file_paths) > 1:
+                logger.info(f"Sending {len(file_paths)} parts for {comic.title} Issue {issue_num}")
+
+            # Get settings from DB if not provided
+            if not settings:
+                from app.models.settings import AppSettings
+                settings = db.query(AppSettings).first()
+                if not settings:
+                    logger.error("No settings configured")
+                    return
+
+            if not settings.stk_device_serial:
+                logger.error("STK device not configured")
+                return
+
+            # Send via STK
+            stk_sender = STKKindleSender()
+
+            all_success = True
+            for idx, file_path in enumerate(file_paths):
+                file_size_mb = file_path.stat().st_size / (1024 * 1024)
+                part_info = f" (Part {idx + 1}/{len(file_paths)})" if len(file_paths) > 1 else ""
+                logger.info(f"Sending to Kindle via STK: {file_path.name}{part_info} ({file_size_mb:.1f}MB)")
+
+                try:
+                    success = await stk_sender.send_file(
+                        file_path=str(file_path),
+                        device_serial=settings.stk_device_serial
+                    )
+
+                    if success:
+                        logger.info(f"Sent via STK: {file_path.name}")
+                    else:
+                        logger.error(f"Failed to send via STK: {file_path.name}")
+                        all_success = False
+
+                except Exception as e:
+                    logger.error(f"STK send failed for {file_path.name}: {e}")
+                    all_success = False
+
+            # Marcar como enviado solo si todas las partes se enviaron correctamente
+            if all_success:
+                issue.status = 'sent'
+                issue.sent_at = datetime.utcnow()
+                logger.info(f"Successfully sent all parts to Kindle for {comic.title} Issue {issue_num}")
+            else:
+                logger.error(f"Some parts failed to send for {comic.title} Issue {issue_num}")
+
+            db.commit()
+
+        except Exception as e:
+            logger.error(f"Error in _send_comic_issue_to_kindle: {e}")
         finally:
             db.close()
 

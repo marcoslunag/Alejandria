@@ -353,3 +353,39 @@ def get_recent_logs(lines: int = 50):
         "message": "Log endpoint not implemented yet",
         "lines": lines
     }
+
+
+@router.post("/translate")
+def translate_text(text: str, source: str = "en", target: str = "es"):
+    """
+    Translate text using deep-translator (Google Translate)
+
+    Args:
+        text: Text to translate
+        source: Source language code (default: en)
+        target: Target language code (default: es)
+
+    Returns:
+        Translated text
+    """
+    from app.services.translator import get_translator
+
+    if not text or len(text.strip()) == 0:
+        return {"translated": "", "original": text}
+
+    try:
+        translator = get_translator()
+        translated = translator.translate_text(text)
+        return {
+            "translated": translated,
+            "original": text,
+            "source": source,
+            "target": target
+        }
+    except Exception as e:
+        logger.error(f"Translation error: {e}")
+        return {
+            "translated": text,
+            "original": text,
+            "error": str(e)
+        }

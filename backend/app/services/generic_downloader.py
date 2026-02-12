@@ -80,6 +80,9 @@ class GenericDownloader:
         if 'fireload' in url_lower:
             return await self._download_fireload(url)
         elif 'mediafire' in url_lower:
+            # Detect folder vs file
+            if '/folder/' in url_lower:
+                return await self._list_mediafire_folder(url)
             return await self._download_mediafire(url)
         elif '1fichier' in url_lower:
             return await self._download_1fichier(url)
@@ -364,6 +367,81 @@ class GenericDownloader:
             if page:
                 await page.close()
 
+    async def _list_mediafire_folder(self, url: str) -> Dict:
+        """
+        Lista archivos en una carpeta de MediaFire usando Playwright.
+        Devuelve una lista de archivos con sus URLs individuales.
+
+        Returns:
+            Dict con {ok, is_folder: True, files: [{url, name}]} o error
+        """
+        page = None
+        try:
+            page = await self._create_page()
+            logger.info(f"MediaFire Folder: Accediendo a {url}")
+
+            await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            await asyncio.sleep(3)
+
+            # Extraer links individuales de archivos
+            file_links = await page.query_selector_all('a[href*="mediafire.com/file/"]')
+
+            seen_urls = set()
+            files = []
+
+            for link in file_links:
+                href = await link.get_attribute('href')
+                text = (await link.inner_text()).strip()
+                if href and href not in seen_urls and text and len(text) > 3:
+                    seen_urls.add(href)
+                    files.append({
+                        'url': href,
+                        'name': text
+                    })
+
+            if files:
+                logger.info(f"MediaFire Folder: Found {len(files)} files")
+                for f in files:
+                    logger.info(f"  - {f['name'][:60]}")
+                return {
+                    "ok": True,
+                    "is_folder": True,
+                    "files": files,
+                    "folder_url": url
+                }
+
+            # Si no encontramos links con el selector, intentar extraer del HTML
+            html_content = await page.content()
+            file_pattern = r'https?://(?:www\.)?mediafire\.com/file/[^\s"\'<>]+'
+            matches = re.findall(file_pattern, html_content)
+            unique_matches = list(dict.fromkeys(matches))  # Deduplicate preserving order
+
+            if unique_matches:
+                for match_url in unique_matches:
+                    if match_url not in seen_urls:
+                        seen_urls.add(match_url)
+                        # Extract filename from URL
+                        name = match_url.split('/')[-2] if match_url.endswith('/file') else match_url.split('/')[-1]
+                        name = name.replace('_', ' ').replace('%20', ' ').replace('%255B', '[').replace('%255D', ']')
+                        files.append({'url': match_url, 'name': name})
+
+                logger.info(f"MediaFire Folder: Found {len(files)} files via regex")
+                return {
+                    "ok": True,
+                    "is_folder": True,
+                    "files": files,
+                    "folder_url": url
+                }
+
+            return {"ok": False, "error": "No files found in MediaFire folder"}
+
+        except Exception as e:
+            logger.error(f"MediaFire Folder error: {e}")
+            return {"ok": False, "error": str(e)}
+        finally:
+            if page:
+                await page.close()
+
     async def _download_1fichier(self, url: str) -> Dict:
         """Descarga de 1fichier.com"""
         page = None
@@ -430,6 +508,91 @@ class GenericDownloader:
             "file_size": "unknown",
             "requires_tool": "megatools"
         }
+
+    async def _list_mega_folder(self, url: str) -> Dict:
+        """
+        Lista archivos en una carpeta compartida de MEGA usando Playwright.
+        Navega a la URL de la carpeta y extrae handles de archivos del objeto M.d de JS.
+
+        Returns:
+            Dict con {ok, is_folder, files: [{url, name, size, handle}], folder_url} o error
+        """
+        page = None
+        try:
+            page = await self._create_page()
+            logger.info(f"MEGA Folder: Accediendo a {url}")
+
+            await page.goto(url, wait_until='domcontentloaded', timeout=60000)
+
+            # Wait for MEGA to load and decrypt the folder contents
+            # M.d is populated after MEGA's JS processes the folder key
+            for attempt in range(30):
+                await asyncio.sleep(2)
+                has_data = await page.evaluate("typeof M !== 'undefined' && M.d && Object.keys(M.d).length > 0")
+                if has_data:
+                    break
+
+            if not has_data:
+                return {"ok": False, "error": "MEGA folder did not load (M.d empty after 60s)"}
+
+            # Extract file entries from M.d
+            # M.d contains: {handle: {h: handle, name: filename, s: size, t: 0=file/1=folder}}
+            files_data = await page.evaluate("""
+                () => {
+                    const files = [];
+                    for (const key of Object.keys(M.d)) {
+                        const entry = M.d[key];
+                        if (entry.t === 0 && entry.name) {
+                            files.push({
+                                handle: entry.h,
+                                name: entry.name,
+                                size: entry.s || 0
+                            });
+                        }
+                    }
+                    return files;
+                }
+            """)
+
+            if not files_data:
+                return {"ok": False, "error": "No files found in MEGA folder"}
+
+            # Build individual file URLs
+            # Format: https://mega.nz/folder/FOLDER_ID#FOLDER_KEY/file/FILE_HANDLE
+            # Strip trailing slash from base URL
+            base_url = url.rstrip('/')
+
+            files = []
+            for fd in files_data:
+                file_url = f"{base_url}/file/{fd['handle']}"
+                files.append({
+                    'url': file_url,
+                    'name': fd['name'],
+                    'size': fd['size'],
+                    'handle': fd['handle']
+                })
+
+            # Sort by name
+            files.sort(key=lambda f: f['name'])
+
+            logger.info(f"MEGA Folder: Found {len(files)} files")
+            for f in files:
+                size_mb = f['size'] / 1024 / 1024
+                logger.info(f"  - {f['name']} ({size_mb:.1f} MB)")
+
+            return {
+                "ok": True,
+                "is_folder": True,
+                "files": files,
+                "folder_url": url
+            }
+
+        except Exception as e:
+            logger.error(f"MEGA Folder error: {e}")
+            return {"ok": False, "error": str(e)}
+        finally:
+            if page:
+                await page.close()
 
     async def _download_gdrive(self, url: str) -> Dict:
         """Descarga de Google Drive"""
@@ -511,3 +674,32 @@ async def get_direct_download_link(url: str) -> Dict:
     """
     downloader = await get_generic_downloader()
     return await downloader.get_direct_link(url)
+
+
+async def list_mediafire_folder(url: str) -> Dict:
+    """
+    Lista archivos en una carpeta de MediaFire.
+
+    Args:
+        url: URL de la carpeta de MediaFire
+
+    Returns:
+        Dict con {ok, is_folder, files: [{url, name}]} o error
+    """
+    downloader = await get_generic_downloader()
+    return await downloader._list_mediafire_folder(url)
+
+
+async def list_mega_folder(url: str) -> Dict:
+    """
+    Lista archivos en una carpeta compartida de MEGA usando Playwright.
+    Extrae handles de archivos del objeto M.d de JavaScript.
+
+    Args:
+        url: URL de la carpeta MEGA (https://mega.nz/folder/ID#KEY)
+
+    Returns:
+        Dict con {ok, is_folder, files: [{url, name, size, handle}], folder_url} o error
+    """
+    downloader = await get_generic_downloader()
+    return await downloader._list_mega_folder(url)

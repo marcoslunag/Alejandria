@@ -62,8 +62,9 @@ SKIP_FILES = {'.ds_store', 'thumbs.db', 'desktop.ini', '._.ds_store', '__macosx'
 
 def generate_comicinfo_xml(metadata: dict, part_number: int = None) -> str:
     """
-    Genera ComicInfo.xml desde metadatos del manga
+    Genera ComicInfo.xml desde metadatos del manga o comic
     Formato compatible con ComicRack/KCC
+    Detecta automáticamente si es manga o comic americano basado en los metadatos
     """
     import xml.etree.ElementTree as ET
     from xml.dom import minidom
@@ -77,16 +78,32 @@ def generate_comicinfo_xml(metadata: dict, part_number: int = None) -> str:
             elem = ET.SubElement(root, name)
             elem.text = str(value)
 
+    # Detectar si es comic americano (tiene comicvine_id o publisher) o manga (tiene anilist_id)
+    is_comic = bool(metadata.get('comicvine_id') or metadata.get('publisher'))
+    is_manga = bool(metadata.get('anilist_id') or metadata.get('country') in ['JP', 'KR', 'CN', 'TW'])
+
     # Serie
     add_elem("Series", metadata.get('title', 'Unknown'))
 
-    # Volumen
+    # Volumen/Número
     volume = metadata.get('volume_number', 1)
-    add_elem("Volume", str(volume))
-    add_elem("Number", str(volume))
+    issue_number = metadata.get('issue_number')
 
-    # Titulo
-    title = metadata.get('chapter_title') or f"Tomo {volume}"
+    if is_comic and issue_number:
+        # Para comics americanos, usar issue_number
+        add_elem("Number", str(issue_number))
+        add_elem("Volume", "1")  # La mayoría de comics son volumen 1
+    else:
+        # Para manga, usar volume_number como antes
+        add_elem("Volume", str(volume))
+        add_elem("Number", str(volume))
+
+    # Título
+    if is_comic:
+        title = metadata.get('chapter_title') or f"Issue #{issue_number or volume}"
+    else:
+        title = metadata.get('chapter_title') or f"Tomo {volume}"
+
     if part_number:
         title = f"{title} - Parte {part_number}"
     add_elem("Title", title)
@@ -94,10 +111,9 @@ def generate_comicinfo_xml(metadata: dict, part_number: int = None) -> str:
     # Sinopsis
     if metadata.get('description'):
         desc = metadata['description'].replace('\r\n', '\n').replace('\r', '\n')
-        # Limpiar tags HTML basicos
         import re
         desc = re.sub(r'<[^>]+>', '', desc)
-        add_elem("Summary", desc[:2000])  # Limitar longitud
+        add_elem("Summary", desc[:2000])
 
     # Autores/Artistas
     if metadata.get('authors'):
@@ -110,37 +126,65 @@ def generate_comicinfo_xml(metadata: dict, part_number: int = None) -> str:
     elif metadata.get('authors'):
         add_elem("Penciller", ", ".join(metadata['authors'][:3]))
 
-    # Generos
+    # Coloristas (principalmente para comics)
+    if metadata.get('colorists'):
+        add_elem("Colorist", ", ".join(metadata['colorists'][:3]))
+
+    # Géneros
     if metadata.get('genres'):
         add_elem("Genre", ", ".join(metadata['genres'][:5]))
 
-    # Fecha
-    start_date = metadata.get('start_date')
-    if start_date:
+    # Fecha - usar release_date del issue si está disponible, si no start_date
+    release_date = metadata.get('release_date') or metadata.get('start_date')
+    if release_date:
         try:
-            if len(start_date) >= 4:
-                add_elem("Year", start_date[:4])
-            if len(start_date) >= 7:
-                add_elem("Month", start_date[5:7])
-            if len(start_date) >= 10:
-                add_elem("Day", start_date[8:10])
+            release_date = str(release_date)
+            if len(release_date) >= 4:
+                add_elem("Year", release_date[:4])
+            if len(release_date) >= 7:
+                add_elem("Month", release_date[5:7])
+            if len(release_date) >= 10:
+                add_elem("Day", release_date[8:10])
         except (ValueError, IndexError):
             pass
 
     # Idioma
-    add_elem("LanguageISO", "es")
+    if is_comic:
+        add_elem("LanguageISO", "en")  # Comics americanos en inglés
+    else:
+        add_elem("LanguageISO", "es")  # Manga traducido al español
 
-    # Formato manga
-    add_elem("Manga", "Yes")
-    add_elem("BlackAndWhite", "Yes")
+    # Formato manga vs comic
+    if is_manga and not is_comic:
+        add_elem("Manga", "Yes")
+        add_elem("BlackAndWhite", "Yes")
+    else:
+        add_elem("Manga", "No")
+        # Comics suelen ser a color
+        add_elem("BlackAndWhite", "No")
 
     # URL de referencia
-    if metadata.get('anilist_url'):
+    if metadata.get('comicvine_url'):
+        add_elem("Web", metadata['comicvine_url'])
+    elif metadata.get('anilist_url'):
         add_elem("Web", metadata['anilist_url'])
 
+    # Editorial
+    if metadata.get('publisher'):
+        add_elem("Publisher", metadata['publisher'])
+    elif metadata.get('country'):
+        country = metadata['country']
+        country_names = {'JP': 'Japón', 'KR': 'Corea del Sur', 'CN': 'China', 'TW': 'Taiwan', 'US': 'USA'}
+        add_elem("Publisher", country_names.get(country, country))
+
     # Notas
-    score = metadata.get('average_score')
-    notes = f"Importado de AniList. Score: {score}/100" if score else "Importado de AniList"
+    if is_comic:
+        notes = "Importado de ComicVine"
+        if metadata.get('comicvine_id'):
+            notes += f" (ID: {metadata['comicvine_id']})"
+    else:
+        score = metadata.get('average_score')
+        notes = f"Importado de AniList. Score: {score}/100" if score else "Importado de AniList"
     add_elem("Notes", notes)
 
     # Tags
@@ -148,19 +192,18 @@ def generate_comicinfo_xml(metadata: dict, part_number: int = None) -> str:
         tags = metadata['tags'][:10]
         add_elem("Tags", ", ".join(str(t) for t in tags))
 
-    # Clasificacion de edad
+    # Personajes (principalmente para comics)
+    if metadata.get('characters'):
+        chars = metadata['characters'][:10]
+        add_elem("Characters", ", ".join(str(c) for c in chars))
+
+    # Clasificación de edad
     if metadata.get('is_adult'):
         add_elem("AgeRating", "Adults Only 18+")
     elif metadata.get('genres'):
         genres_lower = [g.lower() for g in metadata['genres']]
-        if any(g in genres_lower for g in ['ecchi', 'gore', 'violencia']):
+        if any(g in genres_lower for g in ['ecchi', 'gore', 'violencia', 'mature', 'adult']):
             add_elem("AgeRating", "Mature 17+")
-
-    # Pais/Editorial
-    country = metadata.get('country')
-    if country:
-        country_names = {'JP': 'Japon', 'KR': 'Corea del Sur', 'CN': 'China', 'TW': 'Taiwan'}
-        add_elem("Publisher", country_names.get(country, country))
 
     # Formatear XML
     xml_str = ET.tostring(root, encoding='unicode')
@@ -282,7 +325,7 @@ class ArchiveHandler(FileSystemEventHandler):
                     part_stem = normalized_file.stem.replace('.clean', '')
 
                     logger.info(f"Starting conversion: {normalized_file.name}")
-                    success = self.convert_with_kcc(normalized_file)
+                    success = self.convert_with_kcc(normalized_file, metadata=metadata)
 
                     if success:
                         # KCC genera: [part_stem].clean.[ext]
@@ -603,14 +646,18 @@ class ArchiveHandler(FileSystemEventHandler):
 
             # Calcular tamaño total
             total_size_mb = sum(size for _, size in image_files) / (1024 * 1024)
-            # Estimamos que el EPUB será ~1.1x el tamaño de las imágenes (compresión + metadatos)
-            estimated_epub_size = total_size_mb * 1.1
 
-            logger.info(f"Total images: {len(image_files)}, Size: {total_size_mb:.1f}MB, Estimated EPUB: {estimated_epub_size:.1f}MB")
+            # Comics a color generan EPUBs ~2.5x más grandes que las imágenes extraídas
+            # Manga B/N es ~1.3x. Usar metadata para detectar tipo
+            # Si el output excede 180MB, el retry loop en process_file() lo divide automáticamente
+            is_comic = bool(metadata and (metadata.get('comicvine_id') or metadata.get('publisher')))
+            size_factor = 2.5 if is_comic else 1.3
+            estimated_epub_size = total_size_mb * size_factor
+
+            logger.info(f"Total images: {len(image_files)}, Size: {total_size_mb:.1f}MB, Estimated EPUB: {estimated_epub_size:.1f}MB ({'comic' if is_comic else 'manga'} factor={size_factor}x)")
 
             # Determinar si necesitamos dividir
-            # Usar factor 1.3 para ser más conservador con la estimación
-            estimated_output_size = total_size_mb * 1.3
+            estimated_output_size = total_size_mb * size_factor
             num_parts = max(min_parts, int(estimated_output_size / MAX_OUTPUT_SIZE_MB) + 1)
 
             if num_parts == 1 and min_parts == 1:
@@ -954,9 +1001,13 @@ class ArchiveHandler(FileSystemEventHandler):
             logger.warning(f"Error detecting archive format: {e}")
             return 'unknown'
 
-    def convert_with_kcc(self, input_file: Path) -> bool:
+    def convert_with_kcc(self, input_file: Path, metadata: dict = None) -> bool:
         # Recargar configuración antes de cada conversión
         load_kcc_config()
+
+        # Detectar si es comic americano (no usar manga mode)
+        is_comic = bool(metadata and (metadata.get('comicvine_id') or metadata.get('publisher')))
+        is_manga = not is_comic
 
         cmd = [
             'kcc-c2e',
@@ -965,10 +1016,15 @@ class ArchiveHandler(FileSystemEventHandler):
             '-f', KCC_FORMAT,
             '-o', str(OUTPUT_DIR),
             '--jpeg-quality', KCC_QUALITY,
-            '-m',
             '-q',
             '--forcecolor'
         ]
+
+        # Solo agregar -m (manga mode: derecha→izquierda) para manga
+        if is_manga:
+            cmd.append('-m')
+        else:
+            logger.info(f"Comic mode: skipping manga flag (-m) for {input_file.name}")
 
         try:
             result = subprocess.run(

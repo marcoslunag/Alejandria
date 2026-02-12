@@ -75,6 +75,10 @@ export const mangaApi = {
   getSystemStats: () =>
     api.get(`/system/stats`),
 
+  // Translation
+  translateText: (text) =>
+    api.post(`/system/translate`, null, { params: { text } }),
+
   // Queue
   getQueue: (params = {}) =>
     api.get(`/queue/`, { params }),
@@ -129,9 +133,9 @@ export const mangaApi = {
 
 // Comics API
 export const comicApi = {
-  // Search (ComicVine)
+  // Search (ComicVine) with cross-filtering
   search: (query, page = 1, limit = 20) =>
-    api.get(`/comics/search`, { params: { q: query, page, limit } }),
+    api.get(`/comics/search`, { params: { q: query, page, limit, check_availability: true } }),
 
   // Preview from ComicVine
   getComicVineDetails: (comicvineId) =>
@@ -148,8 +152,16 @@ export const comicApi = {
     api.get(`/comics/stats`),
 
   // Add/Update/Delete
-  addComic: (comicvineId) =>
-    api.post(`/comics/`, { comicvine_id: comicvineId }),
+  addComic: (payload) => {
+    // Support both old format (just ID) and new format (object with volume_to_add)
+    const data = typeof payload === 'number'
+      ? { comicvine_id: payload }
+      : payload;
+    return api.post(`/comics/`, data);
+  },
+
+  addComicFromUrl: (data) =>
+    api.post(`/comics/from-url`, null, { params: data }),
 
   updateComic: (id, data) =>
     api.patch(`/comics/${id}`, data),
@@ -163,6 +175,22 @@ export const comicApi = {
   // Issues
   getIssues: (comicId, params = {}) =>
     api.get(`/comics/${comicId}/issues`, { params }),
+
+  // Stats
+  getComicStats: (id) =>
+    api.get(`/comics/${id}/stats`),
+
+  // Download
+  downloadIssues: (comicId, issueIds) =>
+    api.post(`/comics/${comicId}/issues/download`, { issue_ids: issueIds }),
+
+  // Search sources (GetComics)
+  searchSources: (comicId) =>
+    api.post(`/comics/${comicId}/search-sources`),
+
+  // Send to Kindle
+  sendToKindle: (comicId, issueId) =>
+    api.post(`/comics/${comicId}/issues/${issueId}/send-to-kindle`),
 };
 
 // Books API

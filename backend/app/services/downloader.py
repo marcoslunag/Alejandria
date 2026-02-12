@@ -326,7 +326,9 @@ class MangaDownloader:
         on_progress: Optional[Callable[[int, int], None]] = None
     ) -> Optional[Path]:
         """
-        Descarga desde MEGA usando mega.py
+        Descarga desde MEGA usando mega.py (requiere tenacity>=8.2 para Python 3.11+)
+        Downloads to temp dir first, then moves to final location with lock file.
+        This prevents KCC from detecting mega.py's temp file with the original name.
 
         Args:
             url: MEGA URL
@@ -336,42 +338,170 @@ class MangaDownloader:
         Returns:
             Path to downloaded file or None
         """
+        import tempfile
+        import shutil
+
+        output_path = self.download_dir / filename
+        lock_file = self.download_dir / f"{filename}.downloading"
+
         try:
             from mega import Mega
 
-            output_path = self.download_dir / filename
-
-            logger.info(f"Downloading from MEGA: {filename}")
+            logger.info(f"MEGA: Starting download for {filename}")
 
             mega = Mega()
             m = mega.login()  # Anonymous login
 
-            # mega.py es síncrono, ejecutar en thread pool
-            loop = asyncio.get_event_loop()
+            # Download to temp dir to avoid KCC detecting the original filename
+            temp_dir = Path(tempfile.mkdtemp(prefix="mega_"))
 
-            # Download to temp location
+            loop = asyncio.get_event_loop()
             downloaded_file = await loop.run_in_executor(
                 None,
-                lambda: m.download_url(url, str(self.download_dir))
+                lambda: m.download_url(url, str(temp_dir))
             )
 
-            # Rename to correct filename if needed
-            if downloaded_file and Path(downloaded_file).exists():
-                downloaded_path = Path(downloaded_file)
-                if downloaded_path != output_path:
-                    downloaded_path.rename(output_path)
-
-                logger.info(f"MEGA download completed: {filename}")
-                return output_path
-            else:
-                logger.error(f"MEGA download failed: file not found")
+            if not downloaded_file or not Path(downloaded_file).exists():
+                logger.error(f"MEGA: File not found after download")
+                shutil.rmtree(temp_dir, ignore_errors=True)
                 return None
 
+            downloaded_path = Path(downloaded_file)
+            file_size_mb = downloaded_path.stat().st_size / 1024 / 1024
+            logger.info(f"MEGA: Downloaded to temp: {downloaded_path.name} ({file_size_mb:.1f} MB)")
+
+            # Create lock file, then move to final location
+            lock_file.touch()
+
+            if output_path.exists():
+                output_path.unlink()
+            shutil.move(str(downloaded_path), str(output_path))
+
+            # Verify archive integrity
+            if not self._verify_archive_integrity(output_path):
+                logger.error(f"MEGA: Archive integrity check failed: {filename}")
+                output_path.unlink(missing_ok=True)
+                lock_file.unlink(missing_ok=True)
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return None
+
+            # Remove lock file - download complete and verified
+            lock_file.unlink(missing_ok=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            logger.info(f"MEGA: Download completed: {filename} ({file_size_mb:.1f} MB)")
+            return output_path
+
         except ImportError:
-            logger.error("mega.py not installed. Install with: pip install mega.py")
+            lock_file.unlink(missing_ok=True)
+            logger.error("MEGA: mega.py not installed. Install with: pip install mega.py tenacity>=8.2")
             return None
         except Exception as e:
+            lock_file.unlink(missing_ok=True)
             logger.error(f"MEGA download error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+
+    async def _download_megatools(
+        self,
+        url: str,
+        filename: str,
+        on_progress: Optional[Callable[[int, int], None]] = None
+    ) -> Optional[Path]:
+        """
+        Download from MEGA shared folder using megatools CLI (megadl).
+        mega.py can't handle shared folder file URLs (EACCESS error).
+        megatools supports: mega.nz/folder/ID#KEY/file/HANDLE
+
+        Downloads to temp dir first, then moves to final location with lock file.
+
+        Args:
+            url: MEGA shared folder file URL
+            filename: Output filename
+            on_progress: Progress callback
+
+        Returns:
+            Path to downloaded file or None
+        """
+        import tempfile
+        import shutil
+        import subprocess
+
+        output_path = self.download_dir / filename
+        lock_file = self.download_dir / f"{filename}.downloading"
+
+        try:
+            logger.info(f"MEGATOOLS: Starting download for {filename}")
+            logger.info(f"MEGATOOLS: URL = {url[:80]}...")
+
+            # Download to temp dir to avoid KCC detecting temp files
+            temp_dir = Path(tempfile.mkdtemp(prefix="megatools_"))
+
+            # Run megadl in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+
+            def _run_megadl():
+                result = subprocess.run(
+                    ['megadl', '--path', str(temp_dir), url],
+                    capture_output=True,
+                    text=True,
+                    timeout=1800  # 30 min timeout
+                )
+                return result
+
+            result = await loop.run_in_executor(None, _run_megadl)
+
+            if result.returncode != 0:
+                logger.error(f"MEGATOOLS: megadl failed (code {result.returncode})")
+                logger.error(f"MEGATOOLS: stderr = {result.stderr[:500]}")
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return None
+
+            # Find the downloaded file in temp dir
+            downloaded_files = list(temp_dir.iterdir())
+            if not downloaded_files:
+                logger.error("MEGATOOLS: No file found after download")
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return None
+
+            downloaded_path = downloaded_files[0]
+            file_size_mb = downloaded_path.stat().st_size / 1024 / 1024
+            logger.info(f"MEGATOOLS: Downloaded to temp: {downloaded_path.name} ({file_size_mb:.1f} MB)")
+
+            # Create lock file, then move to final location
+            lock_file.touch()
+
+            if output_path.exists():
+                output_path.unlink()
+            shutil.move(str(downloaded_path), str(output_path))
+
+            # Verify archive integrity
+            if not self._verify_archive_integrity(output_path):
+                logger.error(f"MEGATOOLS: Archive integrity check failed: {filename}")
+                output_path.unlink(missing_ok=True)
+                lock_file.unlink(missing_ok=True)
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return None
+
+            # Remove lock file - download complete and verified
+            lock_file.unlink(missing_ok=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            logger.info(f"MEGATOOLS: Download completed: {filename} ({file_size_mb:.1f} MB)")
+            return output_path
+
+        except subprocess.TimeoutExpired:
+            lock_file.unlink(missing_ok=True)
+            logger.error(f"MEGATOOLS: Download timed out (30 min): {filename}")
+            return None
+        except FileNotFoundError:
+            lock_file.unlink(missing_ok=True)
+            logger.error("MEGATOOLS: megadl not found. Install with: apt-get install megatools")
+            return None
+        except Exception as e:
+            lock_file.unlink(missing_ok=True)
+            logger.error(f"MEGATOOLS download error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
 
     async def _download_mediafire(
@@ -931,6 +1061,55 @@ class MangaDownloader:
         except Exception as e:
             logger.warning(f"Error detecting archive format: {e}")
             return 'unknown'
+
+    async def resolve_url(self, url: str) -> Optional[str]:
+        """
+        Resolve URL shorteners (ouo.io, uii.io) without downloading.
+        Returns the final destination URL.
+        """
+        url_lower = url.lower()
+
+        if 'ouo.io' in url_lower or 'ouo.press' in url_lower:
+            return await self._resolve_ouo_link(url)
+        elif 'uii.io' in url_lower or 'wordcount.im' in url_lower:
+            return await self._resolve_uii_link(url)
+        elif 'bit.ly' in url_lower or 'tinyurl.com' in url_lower:
+            return await self._resolve_generic_shortener(url)
+        return url
+
+    async def download_file_with_name(
+        self,
+        page_url: str,
+        final_filename: str,
+        on_progress: Optional[Callable[[int, int], None]] = None
+    ) -> Optional[Path]:
+        """
+        Download a file from a host page (MediaFire, etc.) with a specific final filename.
+        Uses lock files like manga to prevent KCC from processing before download completes.
+
+        Args:
+            page_url: URL of the file page (e.g., MediaFire file page)
+            final_filename: The exact filename to save as (e.g., "Star Wars - Issue 1.cbr")
+            on_progress: Progress callback
+
+        Returns:
+            Path to downloaded file or None
+        """
+        from app.services.generic_downloader import get_direct_download_link
+
+        logger.info(f"Getting direct link for: {page_url[:80]}")
+
+        link_result = await get_direct_download_link(page_url)
+        if not link_result.get("ok") or not link_result.get("download_link"):
+            logger.error(f"Could not get direct link: {link_result.get('error', 'unknown')}")
+            return None
+
+        direct_link = link_result["download_link"]
+        logger.info(f"Direct link obtained, downloading as: {final_filename}")
+
+        # _download_direct handles lock files automatically (.downloading)
+        # KCC converter will wait for the lock to be released before processing
+        return await self._download_direct(direct_link, final_filename, on_progress)
 
     def get_filename_from_url(self, url: str) -> str:
         """

@@ -9,17 +9,18 @@ from app.database import Base
 
 
 class DownloadQueue(Base):
-    """Download queue model for managing chapter downloads (manga and books)"""
+    """Download queue model for managing chapter downloads (manga, books, and comics)"""
 
     __tablename__ = "download_queue"
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # Support both manga chapters and book chapters
+    # Support manga chapters, book chapters, and comic issues
     chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=True, index=True)  # Manga chapters
     book_chapter_id = Column(Integer, ForeignKey("book_chapters.id"), nullable=True, index=True)  # Book chapters
+    comic_issue_id = Column(Integer, ForeignKey("comic_issues.id"), nullable=True, index=True)  # Comic issues
 
-    # Content type: 'manga' or 'book'
+    # Content type: 'manga', 'book', or 'comic'
     content_type = Column(String(20), default="manga", index=True)
 
     # Status: queued, downloading, completed, failed

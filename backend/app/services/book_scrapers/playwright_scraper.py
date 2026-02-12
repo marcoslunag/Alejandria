@@ -122,7 +122,7 @@ class PlaywrightBookScraper(BookScraperBase):
 
                     # Hacer absoluto si es relativo
                     if href.startswith('/'):
-                        href = f"https://ww3.lectulandia.co{href}"
+                        href = f"https://ww3.lectulandia.com{href}"
 
                     logger.info(f"Lectulandia: Resolviendo {href}")
 

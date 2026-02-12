@@ -11,6 +11,7 @@ from app.models.chapter import Chapter
 from app.models.manga import Manga
 from app.models.book import Book
 from app.models.book_chapter import BookChapter
+from app.models.comic import Comic, ComicIssue
 from app.models.download import DownloadQueue
 from app.schemas.download import DownloadQueueResponse, DownloadQueueDetailResponse
 import logging
@@ -168,6 +169,67 @@ def list_queue(
             "sent_at": chapter.sent_at.isoformat() if chapter.sent_at else None,
             "has_epub": bool(chapter.file_path and chapter.file_path.endswith('.epub')),
             "file_path": chapter.file_path
+        })
+
+    # Query COMIC issues with download activity
+    comic_query = db.query(ComicIssue).join(Comic)
+
+    if status:
+        chapter_statuses = status_map.get(status, [status])
+        comic_query = comic_query.filter(ComicIssue.status.in_(chapter_statuses))
+    else:
+        comic_query = comic_query.filter(ComicIssue.status.in_(['downloading', 'downloaded', 'converted', 'sent', 'error']))
+
+    comic_query = comic_query.order_by(
+        case(
+            (ComicIssue.status == 'downloading', 0),
+            (ComicIssue.status == 'error', 1),
+            else_=2
+        ),
+        desc(ComicIssue.downloaded_at),
+        desc(ComicIssue.created_at)
+    )
+
+    comic_issues = comic_query.all()
+
+    # Format comic issues
+    for issue in comic_issues:
+        comic = issue.comic
+        queue_status = {
+            'downloading': 'downloading',
+            'pending': 'pending',
+            'downloaded': 'completed',
+            'converted': 'completed',
+            'sent': 'completed',
+            'error': 'failed'
+        }.get(issue.status, issue.status)
+
+        result.append({
+            "id": f"comic_{issue.id}",
+            "comic_issue_id": issue.id,
+            "content_type": "comic",
+            "status": queue_status,
+            "progress": 100 if issue.status in ['downloaded', 'converted', 'sent'] else 0,
+            "bytes_downloaded": 0,
+            "total_bytes": 0,
+            "error_message": issue.error_message,
+            "retry_count": issue.download_attempts or 0,
+            "max_retries": 3,
+            "created_at": issue.created_at.isoformat() if issue.created_at else None,
+            "started_at": issue.downloaded_at.isoformat() if issue.downloaded_at else None,
+            "completed_at": issue.downloaded_at.isoformat() if issue.downloaded_at else None,
+            "priority": 0,
+            "comic_id": comic.id if comic else None,
+            "comic_title": comic.title if comic else None,
+            "comic_cover": comic.cover_image if comic else None,
+            "issue_number": issue.issue_number,
+            "issue_title": issue.title,
+            "download_url": issue.download_url,
+            "sent_at": issue.sent_at.isoformat() if issue.sent_at else None,
+            "has_cbz": bool(issue.file_path),
+            "has_epub": bool(issue.converted_path),
+            "converted_path": issue.converted_path,
+            "file_path": issue.file_path
         })
 
     # Sort combined results by completion date (most recent first)

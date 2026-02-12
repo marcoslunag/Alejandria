@@ -1,17 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { comicApi } from '../services/api';
-import { 
-  FaBook, 
-  FaFilter, 
-  FaSync, 
-  FaSortAmountDown, 
+import ComicGrid from '../components/ComicGrid';
+import {
+  FaMask,
+  FaFilter,
+  FaSync,
+  FaSortAmountDown,
   FaSearch,
   FaPlus,
-  FaStar,
   FaSpinner,
-  FaCheck,
-  FaTimes
+  FaCheck
 } from 'react-icons/fa';
 
 const Comics = () => {
@@ -122,20 +121,20 @@ const Comics = () => {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-4xl font-bold flex items-center gap-3">
-              <FaBook className="text-red-500" />
-              Cómics
+              <FaMask className="text-red-500" />
+              Comics
             </h1>
             <p className="text-gray-400 mt-2">
-              Gestiona tu colección de cómics americanos
+              Gestiona tu coleccion de comics americanos
             </p>
           </div>
           <div className="flex gap-2">
             <button
               onClick={() => setShowSearch(!showSearch)}
-              className="btn btn-primary flex items-center gap-2"
+              className="btn bg-red-500 hover:bg-red-600 text-white flex items-center gap-2"
             >
               <FaSearch />
-              <span>Buscar Cómics</span>
+              <span>Buscar Comics</span>
             </button>
             <button
               onClick={loadLibrary}
@@ -170,24 +169,24 @@ const Comics = () => {
 
         {/* Search Panel */}
         {showSearch && (
-          <div className="card p-6 mb-6">
+          <div className="card p-6 mb-6" style={{ borderTop: '4px solid #EF4444' }}>
             <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-              <FaSearch className="text-primary" />
+              <FaSearch className="text-red-500" />
               Buscar en ComicVine
             </h3>
             <div className="flex gap-2 mb-4">
               <input
                 type="text"
-                placeholder="Buscar cómics (ej: Spider-Man, Batman, X-Men)..."
+                placeholder="Buscar comics (ej: Spider-Man, Batman, X-Men)..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                className="input flex-1"
+                className="input flex-1 focus:border-red-500"
               />
               <button
                 onClick={handleSearch}
                 disabled={searching || !searchQuery.trim()}
-                className="btn btn-primary"
+                className="btn bg-red-500 hover:bg-red-600 text-white"
               >
                 {searching ? <FaSpinner className="animate-spin" /> : <FaSearch />}
               </button>
@@ -211,7 +210,7 @@ const Comics = () => {
                         />
                       ) : (
                         <div className="w-full h-full bg-gray-700 rounded flex items-center justify-center">
-                          <FaBook className="text-gray-500" />
+                          <FaMask className="text-gray-500" />
                         </div>
                       )}
                     </div>
@@ -223,7 +222,7 @@ const Comics = () => {
                         {comic.publisher && <span>{comic.publisher}</span>}
                         {comic.start_year && <span>({comic.start_year})</span>}
                         {comic.count_of_issues && (
-                          <span className="text-primary">{comic.count_of_issues} issues</span>
+                          <span className="text-red-400">{comic.count_of_issues} issues</span>
                         )}
                       </div>
                       {comic.description && (
@@ -243,12 +242,12 @@ const Comics = () => {
                         <button
                           onClick={() => handleAddComic(comic.comicvine_id)}
                           disabled={addingComic === comic.comicvine_id}
-                          className="btn btn-primary"
+                          className="btn bg-red-500 hover:bg-red-600 text-white"
                         >
                           {addingComic === comic.comicvine_id ? (
                             <FaSpinner className="animate-spin" />
                           ) : (
-                            <><FaPlus /> Añadir</>
+                            <><FaPlus /> Anadir</>
                           )}
                         </button>
                       )}
@@ -337,76 +336,22 @@ const Comics = () => {
 
       {/* Comics Grid */}
       {loading ? (
-        <div className="text-center py-20">
-          <FaSpinner className="animate-spin text-4xl text-primary mx-auto mb-4" />
-          <p className="text-gray-400">Cargando biblioteca...</p>
-        </div>
+        <ComicGrid comics={[]} loading={true} />
       ) : sortedComics.length > 0 ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {sortedComics.map((comic) => (
-            <div
-              key={comic.id}
-              onClick={() => navigate(`/comics/${comic.id}`)}
-              className="card overflow-hidden cursor-pointer hover:scale-105 transition-transform group"
-            >
-              {/* Cover */}
-              <div className="aspect-[2/3] relative">
-                {comic.cover_image ? (
-                  <img
-                    src={comic.cover_image}
-                    alt={comic.title}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-gray-700 flex items-center justify-center">
-                    <FaBook className="text-4xl text-gray-500" />
-                  </div>
-                )}
-                
-                {/* Overlay on hover */}
-                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  <span className="text-white font-bold">Ver detalles</span>
-                </div>
-
-                {/* Monitored badge */}
-                {comic.monitored && (
-                  <div className="absolute top-2 right-2 bg-green-500 text-white px-2 py-1 rounded text-xs">
-                    Monitored
-                  </div>
-                )}
-              </div>
-
-              {/* Info */}
-              <div className="p-3">
-                <h3 className="font-bold text-sm truncate" title={comic.title}>
-                  {comic.title}
-                </h3>
-                <div className="flex items-center justify-between text-xs text-gray-400 mt-1">
-                  <span>{comic.publisher || 'Unknown'}</span>
-                  {comic.start_year && <span>{comic.start_year}</span>}
-                </div>
-                <div className="flex items-center justify-between text-xs mt-2">
-                  <span className="text-primary">
-                    {comic.downloaded_issues}/{comic.total_issues || comic.count_of_issues || '?'} issues
-                  </span>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <ComicGrid comics={sortedComics.map(c => ({ ...c, in_library: true }))} loading={false} />
       ) : (
         <div className="text-center py-20">
-          <FaBook className="text-6xl text-gray-600 mx-auto mb-4" />
-          <h3 className="text-2xl font-bold mb-2">Tu biblioteca de cómics está vacía</h3>
+          <FaMask className="text-6xl text-gray-600 mx-auto mb-4" />
+          <h3 className="text-2xl font-bold mb-2">Tu biblioteca de comics esta vacia</h3>
           <p className="text-gray-400 mb-6">
-            Busca y añade cómics desde ComicVine usando el botón de búsqueda
+            Busca y anade comics desde ComicVine usando el boton de busqueda
           </p>
-          <button 
+          <button
             onClick={() => setShowSearch(true)}
-            className="btn btn-primary"
+            className="btn bg-red-500 hover:bg-red-600 text-white"
           >
             <FaSearch className="mr-2" />
-            Buscar Cómics
+            Buscar Comics
           </button>
         </div>
       )}
