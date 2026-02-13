@@ -12,6 +12,7 @@ from typing import List, Dict, Optional
 from urllib.parse import quote, urljoin
 
 from .base import ComicScraperBase, ComicScraperResult, HostType, DownloadLink
+from .title_parser import extract_issue_number, extract_year, extract_file_size
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +73,7 @@ class ZonaComicsScraper(ComicScraperBase):
                     if img_elem:
                         cover = img_elem.get("src") or img_elem.get("data-src") or img_elem.get("data-lazy-src")
 
-                    year = None
-                    year_match = re.search(r"\b(19|20)\d{2}\b", title)
-                    if year_match:
-                        year = int(year_match.group())
+                    year = extract_year(title)
 
                     results.append({
                         "title": title,
@@ -215,23 +213,17 @@ class ZonaComicsScraper(ComicScraperBase):
                     fallback_link = DownloadLink(
                         url=ouo_info['url'],
                         host=ouo_info['detected_host'],
-                        quality_score=self.get_quality_score(ouo_info['detected_host'])
+                        quality_score=self.get_quality_score(ouo_info['detected_host']),
+                        link_status='shortener'
                     )
                     if not any(existing.url == fallback_link.url for existing in download_links):
                         download_links.append(fallback_link)
 
             # Extract file size from HTML
-            file_size = None
-            if html_content:
-                size_match = re.search(r"(\d+(?:\.\d+)?)\s*(MB|GB)", html_content, re.IGNORECASE)
-                if size_match:
-                    file_size = size_match.group(0)
+            file_size = extract_file_size(html_content) if html_content else None
 
             # Extract year
-            year = None
-            year_match = re.search(r"\b(19|20)\d{2}\b", title)
-            if year_match:
-                year = int(year_match.group())
+            year = extract_year(title)
 
             # Sort by quality
             download_links.sort(key=lambda x: x.quality_score, reverse=True)
@@ -286,7 +278,8 @@ class ZonaComicsScraper(ComicScraperBase):
                 return DownloadLink(
                     url=ouo_info['url'],
                     host=ouo_info['detected_host'],
-                    quality_score=self.get_quality_score(ouo_info['detected_host'])
+                    quality_score=self.get_quality_score(ouo_info['detected_host']),
+                    link_status='shortener'
                 )
 
         tasks = [resolve_one(ouo_info) for ouo_info in ouo_links]
@@ -446,22 +439,8 @@ class ZonaComicsScraper(ComicScraperBase):
     def _extract_issue_number(self, link_text: str, parent_text: str) -> Optional[str]:
         """Extract issue number from link/parent text"""
         combined = f"{link_text} {parent_text}"
-
-        # Patterns: #1, #01, [#1], Issue 1, Numero 1
-        patterns = [
-            r'#\s*(\d+)',
-            r'\[(\d+)\]',
-            r'issue\s+(\d+)',
-            r'numero\s+(\d+)',
-            r'n[uú]mero\s+(\d+)',
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, combined, re.IGNORECASE)
-            if match:
-                return match.group(1)
-
-        return None
+        result = extract_issue_number(combined)
+        return str(result) if result else None
 
     async def search_for_issue(self, comic_title: str, issue_number: str) -> Optional[Dict]:
         """Search for a specific issue of a comic"""

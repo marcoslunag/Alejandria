@@ -191,6 +191,16 @@ export const comicApi = {
   // Send to Kindle
   sendToKindle: (comicId, issueId) =>
     api.post(`/comics/${comicId}/issues/${issueId}/send-to-kindle`),
+
+  // Queue actions
+  cancelDownload: (issueId) =>
+    api.post(`/queue/comic/${issueId}/cancel`),
+
+  retryDownload: (issueId) =>
+    api.post(`/queue/comic/${issueId}/retry`),
+
+  deleteFile: (issueId) =>
+    api.delete(`/queue/comic/${issueId}/file`),
 };
 
 // Books API

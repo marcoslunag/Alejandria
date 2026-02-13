@@ -16,7 +16,9 @@ import {
   FaSortAmountDown,
   FaSortAmountUp,
   FaTabletAlt,
-  FaBox
+  FaBox,
+  FaLink,
+  FaLock
 } from 'react-icons/fa';
 
 const ComicIssueList = ({ comicId }) => {
@@ -359,6 +361,19 @@ const ComicIssueList = ({ comicId }) => {
                 {/* Download URL */}
                 {issue.download_url ? (
                   <div className="flex items-center gap-2 mt-1">
+                    {/* Link status indicator */}
+                    {issue.link_status === 'shortener' && (
+                      <span className="text-xs px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded flex items-center gap-1" title="Link acortado (ouo.io) - se resuelve al descargar">
+                        <FaLink className="text-[9px]" />
+                        Shortener
+                      </span>
+                    )}
+                    {issue.link_status === 'needs_captcha' && (
+                      <span className="text-xs px-1.5 py-0.5 bg-orange-500/20 text-orange-400 rounded flex items-center gap-1" title="Requiere resolver captcha manualmente">
+                        <FaLock className="text-[9px]" />
+                        Captcha
+                      </span>
+                    )}
                     <a
                       href={issue.download_url}
                       target="_blank"

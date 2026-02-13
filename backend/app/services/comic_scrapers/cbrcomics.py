@@ -8,6 +8,7 @@ import re
 from typing import List, Dict, Optional
 from bs4 import BeautifulSoup
 from .base import ComicScraperBase, ComicScraperResult, DownloadLink, HostType
+from .title_parser import extract_year, extract_volume_number, extract_issue_number, extract_range
 
 logger = logging.getLogger(__name__)
 
@@ -209,22 +210,9 @@ class CBRComicsScraper(ComicScraperBase):
         # Sort by quality
         download_links.sort(key=lambda x: x.quality_score, reverse=True)
 
-        # Extract metadata
+        # Extract metadata using centralized parser
         file_size = None
-        year = None
-
-        # Try to find year in title
-        year_match = re.search(r'\((\d{4})\)', title)
-        if year_match:
-            year = int(year_match.group(1))
-
-        # Try to find volume/issue info
-        # Look for patterns like "Vol. 1" or "#1-41"
-        volume_pattern = r'vol\.?\s*(\d+)'
-        issue_pattern = r'#(\d+)(?:-(\d+))?'
-
-        vol_match = re.search(volume_pattern, title, re.IGNORECASE)
-        issue_match = re.search(issue_pattern, title, re.IGNORECASE)
+        year = extract_year(title)
 
         result = ComicScraperResult(
             title=title,

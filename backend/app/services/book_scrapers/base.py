@@ -36,6 +36,7 @@ class DownloadLink:
     host: HostType
     quality_score: int = 50  # 0-100, higher is better
     file_size: Optional[str] = None
+    link_status: str = "resolved"  # resolved, shortener, needs_captcha, failed
 
     def __lt__(self, other):
         return self.quality_score < other.quality_score

@@ -116,6 +116,15 @@ class MangaScheduler:
             replace_existing=True
         )
 
+        # Buscar fuentes de cómics cada 6 horas
+        self.scheduler.add_job(
+            self.check_comic_sources,
+            IntervalTrigger(hours=self.check_interval_hours),
+            id='check_comic_sources',
+            replace_existing=True,
+            max_instances=1
+        )
+
         # Reintentar descargas fallidas cada hora
         self.scheduler.add_job(
             self.retry_failed_downloads,
@@ -242,6 +251,192 @@ class MangaScheduler:
             logger.error(f"Error checking {manga.title}: {e}")
             db.rollback()
 
+    async def check_comic_sources(self):
+        """
+        Busca fuentes de descarga para cómics monitorizados.
+        - Cómics sin fuentes buscadas (sources_searched=False)
+        - Cómics con issues sin download_url
+        Después de buscar, crea DownloadQueue items para issues con URL.
+        """
+        logger.info("Checking comic sources...")
+
+        db: Session = SessionLocal()
+        try:
+            from app.services.comic_service import search_scrapers_for_comic
+            from sqlalchemy import and_
+
+            # Find monitored comics that need source searching
+            comics = db.query(Comic).filter(
+                and_(
+                    Comic.monitored == True,
+                    Comic.sources_searched == False
+                )
+            ).all()
+
+            if not comics:
+                # Also check comics with issues missing download URLs
+                comics_with_missing = db.query(Comic).join(ComicIssue).filter(
+                    and_(
+                        Comic.monitored == True,
+                        ComicIssue.download_url == None,
+                        ComicIssue.status == 'pending'
+                    )
+                ).distinct().limit(5).all()
+                comics = comics_with_missing
+
+            if not comics:
+                logger.info("No comics need source searching")
+                return
+
+            logger.info(f"Searching sources for {len(comics)} comics")
+
+            for comic in comics:
+                try:
+                    logger.info(f"Searching sources for: {comic.title}")
+                    await search_scrapers_for_comic(comic.id, comic.title)
+
+                    # Mark as searched
+                    comic.sources_searched = True
+                    comic.last_check = datetime.utcnow()
+                    db.commit()
+
+                    # Queue downloads for issues that now have URLs
+                    if comic.auto_download:
+                        issues_with_urls = db.query(ComicIssue).filter(
+                            and_(
+                                ComicIssue.comic_id == comic.id,
+                                ComicIssue.download_url != None,
+                                ComicIssue.status == 'pending'
+                            )
+                        ).all()
+
+                        queued = 0
+                        for issue in issues_with_urls:
+                            # Skip non-master bundle issues
+                            if issue.bundle_id and not issue.is_bundle_master:
+                                continue
+
+                            # Check if already in queue
+                            existing = db.query(DownloadQueue).filter(
+                                and_(
+                                    DownloadQueue.comic_issue_id == issue.id,
+                                    DownloadQueue.status.in_(['queued', 'downloading'])
+                                )
+                            ).first()
+                            if existing:
+                                continue
+
+                            queue_item = DownloadQueue(
+                                comic_issue_id=issue.id,
+                                content_type='comic',
+                                status='queued',
+                                priority=0
+                            )
+                            db.add(queue_item)
+                            issue.status = 'downloading'
+                            queued += 1
+
+                        if queued > 0:
+                            db.commit()
+                            logger.info(f"Queued {queued} issues for auto-download: {comic.title}")
+
+                except Exception as e:
+                    logger.error(f"Error searching sources for {comic.title}: {e}")
+                    db.rollback()
+
+                # Small delay between comics
+                await asyncio.sleep(2)
+
+            # Enrich metadata: retry ComicVine for comics with publisher="Unknown"
+            await self._enrich_comic_metadata(db)
+
+            logger.info("Comic source check completed")
+
+        except Exception as e:
+            logger.error(f"Error in check_comic_sources: {e}")
+        finally:
+            db.close()
+
+    async def _enrich_comic_metadata(self, db: Session):
+        """
+        Retry ComicVine search for comics with publisher='Unknown' that haven't been searched yet.
+        Updates metadata (description, publisher, cover, etc.) if found.
+        """
+        from app.services.comic_service import translate_comic_title
+        from app.services.comicvine import get_comicvine_service
+        from sqlalchemy import and_, or_
+
+        comics = db.query(Comic).filter(
+            and_(
+                Comic.monitored == True,
+                Comic.comicvine_search_attempted == False,
+                or_(
+                    Comic.publisher == "Unknown",
+                    Comic.publisher == None,
+                    Comic.comicvine_id == None
+                )
+            )
+        ).limit(5).all()
+
+        if not comics:
+            return
+
+        comicvine = get_comicvine_service()
+        logger.info(f"Enriching metadata for {len(comics)} comics with missing ComicVine data")
+
+        for comic in comics:
+            try:
+                translated = translate_comic_title(comic.title)
+
+                # Try multiple queries
+                search_queries = []
+                if translated.lower() != comic.title.lower():
+                    search_queries.append(translated)
+                search_queries.append(comic.title)
+
+                # Fuzzy: first 2-3 significant words
+                skip_words = {'el', 'la', 'los', 'las', 'de', 'del', 'the', 'a', 'an', 'of', 'en', 'y', 'and'}
+                words = [w for w in translated.split() if w.lower() not in skip_words]
+                if len(words) >= 2:
+                    fuzzy = ' '.join(words[:3])
+                    if fuzzy.lower() not in [q.lower() for q in search_queries]:
+                        search_queries.append(fuzzy)
+
+                found = False
+                for query in search_queries:
+                    logger.info(f"ComicVine enrichment: searching '{query}' for comic '{comic.title}'")
+                    result = await comicvine.search_volumes(query, page=1, per_page=5)
+
+                    if result.get('results'):
+                        for cv_result in result['results'][:3]:
+                            details = await comicvine.get_volume(cv_result['comicvine_id'])
+                            if details:
+                                comic.comicvine_id = details['comicvine_id']
+                                comic.title_original = details.get('title')
+                                comic.description = details.get('description') or comic.description
+                                comic.publisher = details.get('publisher') or comic.publisher
+                                comic.start_year = details.get('start_year') or comic.start_year
+                                comic.writers = details.get('writers') or comic.writers
+                                comic.artists = details.get('artists') or comic.artists
+                                comic.comicvine_url = details.get('comicvine_url')
+                                if not comic.cover_image and details.get('cover_image'):
+                                    comic.cover_image = details['cover_image']
+                                found = True
+                                logger.info(f"Enriched '{comic.title}' with ComicVine: {details['title']} ({details.get('publisher', 'N/A')})")
+                                break
+                    if found:
+                        break
+
+                comic.comicvine_search_attempted = True
+                db.commit()
+
+                await asyncio.sleep(1)  # Rate limit
+
+            except Exception as e:
+                logger.error(f"Error enriching metadata for '{comic.title}': {e}")
+                comic.comicvine_search_attempted = True
+                db.commit()
+
     def _mark_bundled_chapters_downloaded(
         self, db: Session, manga_id: int, download_url: str, file_path: str, exclude_chapter_id: int
     ):
@@ -364,6 +559,8 @@ class MangaScheduler:
                 await self._process_manga_download(db, item)
             elif content_type == 'book':
                 await self._process_book_download(db, item)
+            elif content_type == 'comic':
+                await self._process_comic_download(db, item)
             else:
                 logger.error(f"Unknown content_type: {content_type}")
                 item.status = 'failed'
@@ -569,6 +766,51 @@ class MangaScheduler:
             item.error_message = "Download failed"
             book_chapter.status = 'error'
             logger.error(f"Download failed: {filename}")
+
+        db.commit()
+
+    async def _process_comic_download(self, db: Session, item: DownloadQueue):
+        """Procesa una descarga de comic issue via DownloadQueue"""
+        from app.services.comic_service import download_comic_issue
+
+        issue = db.query(ComicIssue).filter(ComicIssue.id == item.comic_issue_id).first()
+        if not issue:
+            item.status = 'failed'
+            item.error_message = "Comic issue not found"
+            db.commit()
+            return
+
+        comic = db.query(Comic).filter(Comic.id == issue.comic_id).first()
+        if not comic:
+            item.status = 'failed'
+            item.error_message = "Comic not found"
+            db.commit()
+            return
+
+        # Update queue status
+        item.status = 'downloading'
+        item.started_at = datetime.utcnow()
+        db.commit()
+
+        issue_num = issue.issue_number or "?"
+        logger.info(f"Downloading comic: {comic.title} - Issue #{issue_num}")
+
+        # Call the existing download function (manages its own DB session)
+        await download_comic_issue(issue.id)
+
+        # Reload issue to check result
+        db.refresh(issue)
+
+        if issue.status == 'downloaded':
+            item.status = 'completed'
+            item.completed_at = datetime.utcnow()
+            item.progress = 100
+            logger.info(f"Comic download completed: {comic.title} Issue #{issue_num}")
+        else:
+            item.status = 'failed'
+            item.error_message = issue.error_message or "Download failed"
+            item.retry_count += 1
+            logger.error(f"Comic download failed: {comic.title} Issue #{issue_num}")
 
         db.commit()
 

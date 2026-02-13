@@ -626,6 +626,177 @@ def delete_downloaded_file(chapter_id: int, db: Session = Depends(get_db)):
     }
 
 
+# ============================================================================
+# COMIC ISSUE QUEUE ACTIONS
+# ============================================================================
+
+@router.post("/comic/{issue_id}/cancel")
+def cancel_comic_download(issue_id: int, db: Session = Depends(get_db)):
+    """
+    Cancel a comic issue download in progress and clean up partial files.
+    If the issue is part of a bundle, ALL bundle issues will be cancelled.
+    """
+    import os
+    from pathlib import Path
+
+    issue = db.query(ComicIssue).filter(ComicIssue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Comic issue not found")
+
+    comic = db.query(Comic).filter(Comic.id == issue.comic_id).first()
+
+    if issue.status not in ['downloading', 'pending', 'error', 'converting']:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot cancel issue with status '{issue.status}'"
+        )
+
+    # Find all issues in the same bundle
+    issues_to_cancel = [issue]
+    if issue.bundle_id:
+        bundled = db.query(ComicIssue).filter(
+            ComicIssue.bundle_id == issue.bundle_id,
+            ComicIssue.id != issue_id,
+            ComicIssue.status.in_(['downloading', 'pending', 'error', 'converting'])
+        ).all()
+        issues_to_cancel.extend(bundled)
+
+    cancelled_files = []
+    cancelled_ids = []
+
+    for ci in issues_to_cancel:
+        cancelled_ids.append(ci.id)
+
+        # Delete downloaded file if exists
+        if ci.file_path:
+            try:
+                fp = Path(ci.file_path)
+                if fp.exists():
+                    fp.unlink()
+                    cancelled_files.append(str(fp))
+                # Delete lock file
+                lock = fp.parent / f"{fp.name}.downloading"
+                if lock.exists():
+                    lock.unlink()
+                # Delete metadata
+                meta = fp.with_suffix('.metadata.json')
+                if meta.exists():
+                    meta.unlink()
+            except Exception as e:
+                logger.warning(f"Could not delete comic file: {e}")
+
+        # Remove from download queue
+        db.query(DownloadQueue).filter(
+            DownloadQueue.comic_issue_id == ci.id
+        ).delete()
+
+        # Reset issue status
+        ci.status = 'pending'
+        ci.file_path = None
+        ci.error_message = "Cancelled by user"
+        ci.downloaded_at = None
+
+    db.commit()
+    logger.info(f"Cancelled {len(cancelled_ids)} comic issue(s), cleaned {len(cancelled_files)} files")
+
+    return {
+        "cancelled": True,
+        "issue_id": issue_id,
+        "cancelled_issues": cancelled_ids,
+        "bundle_size": len(cancelled_ids),
+        "files_deleted": cancelled_files
+    }
+
+
+@router.post("/comic/{issue_id}/retry")
+def retry_comic_download(issue_id: int, db: Session = Depends(get_db)):
+    """Retry a failed comic issue download"""
+    issue = db.query(ComicIssue).filter(ComicIssue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Comic issue not found")
+
+    if issue.status != 'error':
+        raise HTTPException(status_code=400, detail="Only failed downloads can be retried")
+
+    # Reset issue status
+    issue.status = 'downloading'
+    issue.error_message = None
+    issue.download_attempts = (issue.download_attempts or 0) + 1
+
+    # Create new queue item
+    queue_item = DownloadQueue(
+        comic_issue_id=issue.id,
+        content_type='comic',
+        status='queued',
+        priority=0
+    )
+    db.add(queue_item)
+    db.commit()
+
+    logger.info(f"Queued retry for comic issue {issue_id}")
+    return {"id": issue.id, "status": "downloading", "retry_count": issue.download_attempts}
+
+
+@router.delete("/comic/{issue_id}/file")
+def delete_comic_file(issue_id: int, db: Session = Depends(get_db)):
+    """Delete downloaded comic file and reset issue status"""
+    import os
+    from pathlib import Path
+
+    issue = db.query(ComicIssue).filter(ComicIssue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Comic issue not found")
+
+    if issue.status not in ['downloaded', 'converted', 'sent', 'error', 'converting']:
+        raise HTTPException(status_code=400, detail="Issue has no downloaded file")
+
+    deleted_files = []
+
+    # Delete source file
+    if issue.file_path:
+        try:
+            fp = Path(issue.file_path)
+            if fp.exists():
+                fp.unlink()
+                deleted_files.append(str(fp))
+            # Delete metadata
+            meta = fp.with_suffix('.metadata.json')
+            if meta.exists():
+                meta.unlink()
+        except Exception as e:
+            logger.error(f"Error deleting comic file {issue.file_path}: {e}")
+
+    # Delete converted files (may be multi-part separated by '|')
+    if issue.converted_path:
+        for conv_path in issue.converted_path.split('|'):
+            conv_path = conv_path.strip()
+            if conv_path:
+                try:
+                    if os.path.exists(conv_path):
+                        os.remove(conv_path)
+                        deleted_files.append(conv_path)
+                except Exception as e:
+                    logger.error(f"Error deleting converted file {conv_path}: {e}")
+
+    # Reset issue status
+    issue.status = 'pending'
+    issue.file_path = None
+    issue.converted_path = None
+    issue.downloaded_at = None
+    issue.converted_at = None
+    issue.sent_at = None
+    issue.error_message = None
+
+    db.commit()
+
+    return {
+        "deleted": len(deleted_files) > 0,
+        "issue_id": issue_id,
+        "files_deleted": deleted_files,
+        "count": len(deleted_files)
+    }
+
+
 @router.get("/stats")
 def get_queue_stats(db: Session = Depends(get_db)):
     """

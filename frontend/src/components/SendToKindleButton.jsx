@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { mangaApi } from '../services/api';
+import { mangaApi, comicApi } from '../services/api';
 import {
   FaTabletAlt,
   FaSpinner,
@@ -25,7 +25,9 @@ const SendToKindleButton = ({
   hasEpub = false,
   onSent,
   size = 'md',
-  showLabel = true
+  showLabel = true,
+  comicId = null,
+  isComic = false
 }) => {
   const [status, setStatus] = useState('idle'); // idle, sending, success, error
   const [errorMessage, setErrorMessage] = useState('');
@@ -45,10 +47,12 @@ const SendToKindleButton = ({
         throw new Error('STK no autenticado. Ve a Ajustes para conectar tu cuenta de Amazon.');
       }
 
-      // Send via STK
-      const response = await mangaApi.stkSendToKindle(chapterId);
+      // Send via STK (manga) or comic API
+      const response = isComic && comicId
+        ? await comicApi.sendToKindle(comicId, chapterId)
+        : await mangaApi.stkSendToKindle(chapterId);
 
-      if (response.data.ok) {
+      if (response.data.ok || response.data.success) {
         setStatus('success');
         if (onSent) {
           onSent(chapterId, response.data.sent_at);

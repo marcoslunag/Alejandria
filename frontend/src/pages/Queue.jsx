@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { mangaApi, bookApi } from '../services/api';
+import { mangaApi, bookApi, comicApi } from '../services/api';
 import SendToKindleButton from '../components/SendToKindleButton';
 import BookSendToKindleButton from '../components/BookSendToKindleButton';
 import {
@@ -12,7 +12,8 @@ import {
   FaSpinner,
   FaStop,
   FaBook,
-  FaBookReader
+  FaBookReader,
+  FaMask
 } from 'react-icons/fa';
 
 const Queue = () => {
@@ -44,9 +45,10 @@ const Queue = () => {
 
   const retryDownload = async (item) => {
     try {
-      // For now, retry only works for manga
       if (item.content_type === 'manga') {
         await mangaApi.retryDownload(item.chapter_id);
+      } else if (item.content_type === 'comic') {
+        await comicApi.retryDownload(item.comic_issue_id);
       }
       loadQueue();
     } catch (error) {
@@ -55,15 +57,19 @@ const Queue = () => {
   };
 
   const cancelDownload = async (item) => {
-    if (!confirm('Cancelar esta descarga? Si forma parte de un bundle, se cancelaran todos los tomos del bundle.')) return;
+    if (!confirm('Cancelar esta descarga? Si forma parte de un bundle, se cancelaran todos los issues del bundle.')) return;
     try {
       if (item.content_type === 'manga') {
         const response = await mangaApi.cancelDownload(item.chapter_id);
         if (response.data?.bundle_size > 1) {
           alert(`Se han cancelado ${response.data.bundle_size} tomos del bundle.`);
         }
+      } else if (item.content_type === 'comic') {
+        const response = await comicApi.cancelDownload(item.comic_issue_id);
+        if (response.data?.bundle_size > 1) {
+          alert(`Se han cancelado ${response.data.bundle_size} issues del bundle.`);
+        }
       }
-      // For books, we'd need a similar endpoint
       loadQueue();
     } catch (error) {
       console.error('Error cancelando descarga:', error);
@@ -75,8 +81,9 @@ const Queue = () => {
     try {
       if (item.content_type === 'manga') {
         await mangaApi.deleteDownloadFile(item.chapter_id);
+      } else if (item.content_type === 'comic') {
+        await comicApi.deleteFile(item.comic_issue_id);
       }
-      // For books, we'd need a similar endpoint
       loadQueue();
     } catch (error) {
       console.error('Error eliminando descarga:', error);
@@ -85,7 +92,7 @@ const Queue = () => {
 
   const handleKindleSent = (chapterId, sentAt) => {
     setQueue(prev => prev.map(item =>
-      (item.chapter_id === chapterId || item.book_chapter_id === chapterId)
+      (item.chapter_id === chapterId || item.book_chapter_id === chapterId || item.comic_issue_id === chapterId)
         ? { ...item, sent_at: sentAt }
         : item
     ));
@@ -125,16 +132,46 @@ const Queue = () => {
 
   // Helper to get item display info
   const getItemInfo = (item) => {
-    const isBook = item.content_type === 'book';
+    if (item.content_type === 'comic') {
+      return {
+        isBook: false,
+        isComic: true,
+        title: item.comic_title || 'Comic',
+        cover: item.comic_cover,
+        detailUrl: `/comics/${item.comic_id}`,
+        itemLabel: 'Issue',
+        itemNumber: item.issue_number || '?',
+        itemId: item.comic_issue_id,
+        accentColor: 'red',
+        icon: FaMask
+      };
+    }
+    if (item.content_type === 'book') {
+      return {
+        isBook: true,
+        isComic: false,
+        title: item.book_title || 'Libro',
+        cover: item.book_cover,
+        detailUrl: `/books/${item.book_id}`,
+        itemLabel: 'Archivo',
+        itemNumber: item.chapter_number,
+        itemId: item.book_chapter_id,
+        accentColor: 'emerald',
+        icon: FaBookReader
+      };
+    }
+    // manga (default)
     return {
-      isBook,
-      title: isBook ? (item.book_title || 'Libro') : (item.manga_title || 'Manga'),
-      cover: isBook ? item.book_cover : item.manga_cover,
-      detailUrl: isBook ? `/books/${item.book_id}` : `/manga/${item.manga_id}`,
-      itemLabel: isBook ? 'Archivo' : 'Tomo',
-      itemId: isBook ? item.book_chapter_id : item.chapter_id,
-      accentColor: isBook ? 'emerald' : 'blue',
-      icon: isBook ? FaBookReader : FaBook
+      isBook: false,
+      isComic: false,
+      title: item.manga_title || 'Manga',
+      cover: item.manga_cover,
+      detailUrl: `/manga/${item.manga_id}`,
+      itemLabel: 'Tomo',
+      itemNumber: item.chapter_number,
+      itemId: item.chapter_id,
+      accentColor: 'blue',
+      icon: FaBook
     };
   };
 
@@ -261,10 +298,10 @@ const Queue = () => {
           {filteredQueue.map((item) => {
             const info = getItemInfo(item);
             const IconComponent = info.icon;
-            const ringColor = item.status === 'downloading'
-              ? (info.isBook ? 'ring-emerald-500' : 'ring-blue-500')
-              : '';
-            const badgeColor = info.isBook ? 'bg-emerald-500' : 'bg-primary';
+            const ringColorMap = { emerald: 'ring-emerald-500', red: 'ring-red-500', blue: 'ring-blue-500' };
+            const ringColor = item.status === 'downloading' ? (ringColorMap[info.accentColor] || 'ring-blue-500') : '';
+            const badgeColorMap = { emerald: 'bg-emerald-500', red: 'bg-red-500', blue: 'bg-primary' };
+            const badgeColor = badgeColorMap[info.accentColor] || 'bg-primary';
 
             return (
               <div
@@ -287,14 +324,14 @@ const Queue = () => {
                         <IconComponent className={`text-gray-500 ${info.isBook ? 'text-emerald-500/50' : ''}`} />
                       </div>
                     )}
-                    {/* Volume number badge */}
+                    {/* Volume/Issue number badge */}
                     <div className={`absolute bottom-0 right-0 ${badgeColor} text-white text-xs font-bold px-1.5 py-0.5 rounded-tl rounded-br`}>
-                      {Math.floor(item.chapter_number)}
+                      {info.isComic ? `#${info.itemNumber}` : Math.floor(info.itemNumber || 0)}
                     </div>
                     {/* Content type indicator */}
-                    {info.isBook && (
-                      <div className="absolute top-0 left-0 bg-emerald-500 text-white text-[8px] font-bold px-1 py-0.5 rounded-br rounded-tl">
-                        LIBRO
+                    {(info.isBook || info.isComic) && (
+                      <div className={`absolute top-0 left-0 ${badgeColor} text-white text-[8px] font-bold px-1 py-0.5 rounded-br rounded-tl`}>
+                        {info.isComic ? 'COMIC' : 'LIBRO'}
                       </div>
                     )}
                   </div>
@@ -310,7 +347,7 @@ const Queue = () => {
                         {info.title}
                       </Link>
                       <span className="text-gray-500">-</span>
-                      <span className="text-gray-400">{info.itemLabel} {item.chapter_number}</span>
+                      <span className="text-gray-400">{info.itemLabel} {info.isComic ? `#${info.itemNumber}` : info.itemNumber}</span>
                     </div>
 
                     {/* Barra de progreso para downloading */}
@@ -318,7 +355,7 @@ const Queue = () => {
                       <div className="mt-2">
                         <div className="w-full bg-gray-700 rounded-full h-2">
                           <div
-                            className={`${info.isBook ? 'bg-emerald-500' : 'bg-blue-500'} h-2 rounded-full transition-all`}
+                            className={`${info.accentColor === 'emerald' ? 'bg-emerald-500' : info.accentColor === 'red' ? 'bg-red-500' : 'bg-blue-500'} h-2 rounded-full transition-all`}
                             style={{ width: `${item.progress || 0}%` }}
                           />
                         </div>
@@ -357,6 +394,19 @@ const Queue = () => {
                           size="sm"
                           showLabel={true}
                         />
+                      ) : info.isComic ? (
+                        item.comic_issue_id && (
+                          <SendToKindleButton
+                            chapterId={item.comic_issue_id}
+                            sentAt={item.sent_at}
+                            hasEpub={item.has_epub || item.converted_path}
+                            onSent={handleKindleSent}
+                            size="sm"
+                            showLabel={true}
+                            comicId={item.comic_id}
+                            isComic={true}
+                          />
+                        )
                       ) : (
                         item.chapter_id && (
                           <SendToKindleButton
@@ -370,8 +420,8 @@ const Queue = () => {
                         )
                       )
                     )}
-                    {/* Cancelar descarga en progreso - solo para manga por ahora */}
-                    {item.status === 'downloading' && item.content_type === 'manga' && (
+                    {/* Cancelar descarga en progreso */}
+                    {item.status === 'downloading' && (item.content_type === 'manga' || item.content_type === 'comic') && (
                       <button
                         onClick={() => cancelDownload(item)}
                         className="btn btn-sm bg-orange-500 hover:bg-orange-600 text-white"
@@ -381,7 +431,7 @@ const Queue = () => {
                         <span className="ml-1">Cancelar</span>
                       </button>
                     )}
-                    {item.status === 'failed' && item.content_type === 'manga' && (
+                    {item.status === 'failed' && (item.content_type === 'manga' || item.content_type === 'comic') && (
                       <button
                         onClick={() => retryDownload(item)}
                         className="btn btn-sm btn-primary"
@@ -390,7 +440,7 @@ const Queue = () => {
                         <FaSync />
                       </button>
                     )}
-                    {(item.status === 'completed' || item.status === 'failed') && item.content_type === 'manga' && (
+                    {(item.status === 'completed' || item.status === 'failed') && (item.content_type === 'manga' || item.content_type === 'comic') && (
                       <button
                         onClick={() => deleteDownload(item)}
                         className="btn btn-sm bg-red-500 hover:bg-red-600 text-white"

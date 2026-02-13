@@ -56,6 +56,8 @@ class Comic(Base):
     # System fields
     monitored = Column(Boolean, default=True, index=True)
     auto_download = Column(Boolean, default=True)
+    sources_searched = Column(Boolean, default=False)  # True after scrapers have been searched
+    comicvine_search_attempted = Column(Boolean, default=False)  # True after ComicVine search attempted
     last_check = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -109,6 +111,7 @@ class ComicIssue(Base):
     download_url = Column(String(1000))  # Direct download URL
     backup_url = Column(String(1000))  # Backup download URL
     source = Column(String(50))  # Which scraper found it
+    link_status = Column(String(20), default="resolved")  # resolved, shortener, needs_captcha, failed
     file_path = Column(String(1000))  # Local file path after download
     file_size = Column(Integer)  # Size in bytes
 

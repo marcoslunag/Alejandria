@@ -24,6 +24,20 @@ from app.schemas.download import (
     DownloadQueueBase,
     DownloadQueueResponse
 )
+from app.schemas.comic import (
+    VolumeInfo,
+    ComicSearchResult,
+    ComicSearchResponse,
+    VolumeToAdd,
+    ComicCreate,
+    ComicResponse,
+    ComicDetailResponse,
+    IssueResponse,
+    ComicUpdate,
+    ComicStats,
+    ComicIssueStats,
+    IssueDownloadRequest,
+)
 
 __all__ = [
     "MangaCreateFromAnilist",
@@ -44,4 +58,16 @@ __all__ = [
     "ChapterResponse",
     "DownloadQueueBase",
     "DownloadQueueResponse",
+    "VolumeInfo",
+    "ComicSearchResult",
+    "ComicSearchResponse",
+    "VolumeToAdd",
+    "ComicCreate",
+    "ComicResponse",
+    "ComicDetailResponse",
+    "IssueResponse",
+    "ComicUpdate",
+    "ComicStats",
+    "ComicIssueStats",
+    "IssueDownloadRequest",
 ]

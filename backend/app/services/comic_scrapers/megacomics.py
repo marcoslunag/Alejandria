@@ -20,6 +20,7 @@ from .base import (
     DownloadLink,
     HostType
 )
+from .title_parser import parse_title, extract_range, extract_file_size, extract_year, clean_title
 
 logger = logging.getLogger(__name__)
 
@@ -95,20 +96,19 @@ class MegaComicsScraper(ComicScraperBase):
                     if img_elem:
                         cover = img_elem.get('src', '') or img_elem.get('data-src', '')
 
-                    # Parse title for issue info: [X/Y], [X/Y?], [X/Y??] or [Volumen X Al Y]
-                    issues_match = re.search(r'\[(\d+)/(\d+\?*)\]', title)
-                    issues = f"{issues_match.group(1)}/{issues_match.group(2)}" if issues_match else None
-
-                    if not issues:
-                        vol_match = re.search(r'Volumen\s+(\d+)\s+Al\s+(\d+)', title, re.IGNORECASE)
-                        if vol_match:
-                            issues = f"Vol {vol_match.group(1)}-{vol_match.group(2)}"
+                    # Parse title for issue info using centralized parser
+                    title_info = parse_title(title)
+                    issues = None
+                    if title_info.range_start is not None and title_info.range_end is not None:
+                        issues = f"{title_info.range_start}/{title_info.range_end}"
+                    elif title_info.total_issues:
+                        issues = f"1/{title_info.total_issues}"
 
                     # Clean title (remove brackets info)
-                    clean_title = re.sub(r'\s*\[.*?\]', '', title).strip()
+                    cleaned_title = title_info.clean_title
 
                     results.append({
-                        'title': clean_title,
+                        'title': cleaned_title,
                         'full_title': title,
                         'url': url,
                         'cover': cover,
@@ -149,7 +149,7 @@ class MegaComicsScraper(ComicScraperBase):
             # Get title
             title_elem = soup.select_one('h1, h3.post-title, .post-title, .entry-title')
             title = title_elem.get_text(strip=True) if title_elem else "Unknown"
-            clean_title = re.sub(r'\s*\[.*?\]', '', title).strip()
+            title_clean = clean_title(title)
 
             # Get cover image
             cover = None
@@ -160,16 +160,8 @@ class MegaComicsScraper(ComicScraperBase):
                     cover = img_elem.get('src', '')
 
             # Extract file info
-            file_size = None
-            year = None
-
-            size_match = re.search(r'Tama[ñn]o\s*:\s*([\d.,]+\s*[GMK]?B)', html, re.IGNORECASE)
-            if size_match:
-                file_size = size_match.group(1)
-
-            year_match = re.search(r'A[ñn]o\s*:\s*(\d{4})', html, re.IGNORECASE)
-            if year_match:
-                year = int(year_match.group(1))
+            file_size = extract_file_size(html)
+            year = extract_year(html)
 
             # Extract ALL links from the page
             all_links = soup.find_all('a', href=True)
@@ -238,7 +230,8 @@ class MegaComicsScraper(ComicScraperBase):
                             url=ouo_info['url'],
                             host=host,
                             quality_score=self.get_quality_score(host),
-                            file_size=file_size
+                            file_size=file_size,
+                            link_status='shortener'
                         ))
 
             # Save uii.io links as-is with host hint (need captcha solver)
@@ -249,7 +242,8 @@ class MegaComicsScraper(ComicScraperBase):
                     url=uii_info['url'],
                     host=host,
                     quality_score=40,  # Low score: unresolved, needs captcha
-                    file_size=file_size
+                    file_size=file_size,
+                    link_status='needs_captcha'
                 ))
 
             # Deduplicate by URL
@@ -262,11 +256,13 @@ class MegaComicsScraper(ComicScraperBase):
             download_links = unique_links
 
             # Parse issues from title
-            issues_match = re.search(r'\[(\d+)/(\d+\??)\]', title)
-            issues = f"{issues_match.group(1)}/{issues_match.group(2)}" if issues_match else None
+            title_info = parse_title(title)
+            issues = None
+            if title_info.range_start is not None and title_info.range_end is not None:
+                issues = f"{title_info.range_start}/{title_info.range_end}"
 
             result = ComicScraperResult(
-                title=clean_title,
+                title=title_clean,
                 source=self.name,
                 source_url=url,
                 issue_number=issues,
@@ -281,7 +277,7 @@ class MegaComicsScraper(ComicScraperBase):
                 error=None if download_links else "No download links found"
             )
 
-            logger.info(f"MegaComics scraped '{clean_title}': {len(download_links)} links found")
+            logger.info(f"MegaComics scraped '{title_clean}': {len(download_links)} links found")
             return result
 
         except Exception as e:
@@ -318,7 +314,8 @@ class MegaComicsScraper(ComicScraperBase):
                 return DownloadLink(
                     url=ouo_info['url'],
                     host=host,
-                    quality_score=self.get_quality_score(host)
+                    quality_score=self.get_quality_score(host),
+                    link_status='shortener'
                 )
 
         tasks = [resolve_one(ouo_info) for ouo_info in ouo_links]
