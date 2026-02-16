@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { mangaApi } from '../services/api';
-import MangaGrid from '../components/MangaGrid';
+import ContentGrid from '../components/ContentGrid';
 import { FaFire, FaStar, FaSortAmountDown } from 'react-icons/fa';
 
 const Home = () => {
@@ -133,8 +133,9 @@ const Home = () => {
             <FaFire className="text-orange-500" />
             Tendencias Actuales
           </h2>
-          <MangaGrid
-            manga={sortManga(trending)}
+          <ContentGrid
+            items={sortManga(trending)}
+            type="manga"
             loading={loadingTrending}
             showAddButton={true}
             onAdd={handleAddManga}
@@ -148,8 +149,9 @@ const Home = () => {
             <FaStar className="text-yellow-500" />
             Más Populares
           </h2>
-          <MangaGrid
-            manga={sortManga(popular)}
+          <ContentGrid
+            items={sortManga(popular)}
+            type="manga"
             loading={loadingPopular}
             showAddButton={true}
             onAdd={handleAddManga}

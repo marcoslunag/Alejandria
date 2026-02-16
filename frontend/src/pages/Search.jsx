@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { mangaApi, comicApi, bookApi } from '../services/api';
 import SearchBar from '../components/SearchBar';
-import MangaCard from '../components/MangaCard';
-import BookCard from '../components/BookCard';
+import ContentCard from '../components/ContentCard';
 import { FaSearch, FaBook, FaMask, FaBookReader } from 'react-icons/fa';
 
 const Search = () => {
@@ -250,9 +249,10 @@ const Search = () => {
           {activeTab === 'manga' && (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6">
               {results.map((manga) => (
-                <MangaCard
+                <ContentCard
                   key={manga.anilist_id}
-                  manga={manga}
+                  item={manga}
+                  type="manga"
                   showAddButton={true}
                   onAdd={handleAddManga}
                 />
@@ -376,9 +376,10 @@ const Search = () => {
           {activeTab === 'books' && (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6">
               {results.map((book) => (
-                <BookCard
+                <ContentCard
                   key={book.google_books_id}
-                  book={book}
+                  item={book}
+                  type="book"
                   showAddButton={true}
                   onAdd={handleAddBook}
                 />

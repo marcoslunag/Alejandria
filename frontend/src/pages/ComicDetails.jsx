@@ -1,23 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { comicApi, mangaApi } from '../services/api';
+import ContentDetailPage from '../components/ContentDetailPage';
 import ComicIssueList from '../components/ComicIssueList';
 import {
-  FaMask,
   FaBuilding,
   FaUser,
   FaPaintBrush,
   FaPalette,
   FaSync,
   FaTrash,
-  FaArrowLeft,
-  FaExternalLinkAlt,
   FaSpinner,
-  FaCheck,
   FaSearch,
   FaEye,
   FaEyeSlash,
-  FaLanguage
+  FaCalendar,
 } from 'react-icons/fa';
 
 const ComicDetails = () => {
@@ -42,7 +39,6 @@ const ComicDetails = () => {
       const response = await comicApi.getComic(id);
       setComic(response.data);
 
-      // Auto-translate description if available
       if (response.data.description) {
         translateDescription(response.data.description);
       }
@@ -58,7 +54,6 @@ const ComicDetails = () => {
 
   const translateDescription = async (text) => {
     if (!text) return;
-
     try {
       setTranslating(true);
       const cleanText = text.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, '');
@@ -77,7 +72,6 @@ const ComicDetails = () => {
     try {
       setRefreshing(true);
       await comicApi.refreshComic(id);
-      // Wait a bit for background task to start
       setTimeout(() => loadComic(), 2000);
     } catch (error) {
       console.error('Error refreshing:', error);
@@ -91,7 +85,6 @@ const ComicDetails = () => {
       setSearchingSources(true);
       await comicApi.searchSources(id);
       alert('Buscando fuentes de descarga en segundo plano...');
-      // Reload after a delay
       setTimeout(() => loadComic(), 3000);
     } catch (error) {
       console.error('Error searching sources:', error);
@@ -112,7 +105,6 @@ const ComicDetails = () => {
 
   const handleDelete = async () => {
     if (!confirm(`Eliminar "${comic.title}" de la biblioteca?`)) return;
-
     try {
       setDeleting(true);
       await comicApi.deleteComic(id);
@@ -123,233 +115,95 @@ const ComicDetails = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="container mx-auto px-4 py-8 text-center">
-        <FaSpinner className="animate-spin text-4xl text-red-500 mx-auto mb-4" />
-        <p className="text-gray-400">Cargando comic...</p>
-      </div>
-    );
+  // Build props
+  const totalIssues = comic?.count_of_issues || comic?.total_issues || 0;
+  const downloadedIssues = comic?.downloaded_issues || 0;
+
+  const badges = [];
+  if (comic?.publisher) {
+    badges.push({ label: comic.publisher, className: 'px-3 py-1 bg-dark-lighter rounded flex items-center gap-2' });
+  }
+  if (comic?.start_year) {
+    badges.push({ label: `${comic.start_year}` });
   }
 
-  if (!comic) {
-    return (
-      <div className="container mx-auto px-4 py-8 text-center">
-        <p className="text-gray-400">Comic no encontrado</p>
-      </div>
-    );
-  }
+  const infoGrid = [];
+  if (totalIssues) infoGrid.push({ label: 'Tomos totales', value: totalIssues });
+  if (downloadedIssues) infoGrid.push({ label: 'Descargados', value: downloadedIssues });
+  if (comic?.start_year) infoGrid.push({ label: 'Año inicio', value: comic.start_year, icon: <FaCalendar /> });
+
+  const creators = [];
+  if (comic?.writers?.length > 0) creators.push({ role: 'Escritores', names: comic.writers });
+  if (comic?.artists?.length > 0) creators.push({ role: 'Artistas', names: comic.artists });
+  if (comic?.colorists?.length > 0) creators.push({ role: 'Coloristas', names: comic.colorists });
+
+  const externalLinks = [];
+  if (comic?.comicvine_url) externalLinks.push({ label: 'ComicVine', url: comic.comicvine_url });
+
+  const actions = [];
+  actions.push({
+    label: comic?.monitored ? 'Monitorizado' : 'No monitorizado',
+    onClick: handleToggleMonitored,
+    className: `btn ${comic?.monitored ? 'bg-red-500 hover:bg-red-600 text-white' : 'btn-secondary'} flex items-center gap-2`,
+    icon: comic?.monitored ? <FaEye /> : <FaEyeSlash />,
+    tooltip: comic?.monitored
+      ? 'Se buscarán fuentes automáticamente'
+      : 'No se buscarán fuentes automáticamente',
+  });
+  actions.push({
+    label: searchingSources ? 'Buscando...' : 'Buscar Fuentes',
+    onClick: handleSearchSources,
+    disabled: searchingSources,
+    className: 'btn bg-red-500 hover:bg-red-600 text-white flex items-center gap-2',
+    icon: searchingSources ? <FaSpinner className="animate-spin" /> : <FaSearch />,
+  });
+  actions.push({
+    label: 'Actualizar',
+    onClick: handleRefresh,
+    disabled: refreshing,
+    className: 'btn btn-secondary flex items-center gap-2',
+    icon: <FaSync className={refreshing ? 'animate-spin' : ''} />,
+  });
+  actions.push({
+    label: 'Eliminar',
+    onClick: handleDelete,
+    disabled: deleting,
+    className: 'btn btn-secondary text-red-500 hover:bg-red-500/20 flex items-center gap-2',
+    icon: deleting ? <FaSpinner className="animate-spin" /> : <FaTrash />,
+  });
+
+  const statsCards = totalIssues > 0 ? [
+    { label: 'Tomos totales', value: totalIssues, color: 'text-red-500' },
+    { label: 'Descargados', value: downloadedIssues, color: 'text-green-500' },
+    { label: 'Monitorizado', value: comic?.monitored ? 'Si' : 'No' },
+    { label: 'Año inicio', value: comic?.start_year || '-' },
+  ] : [];
+
+  const progressData = totalIssues > 0
+    ? { current: downloadedIssues, total: totalIssues, color: '#EF4444' }
+    : null;
 
   return (
-    <div className="min-h-screen">
-      {/* Banner with blur background */}
-      <div className="relative h-64 md:h-80 overflow-hidden">
-        {comic.cover_image ? (
-          <>
-            <img
-              src={comic.cover_image}
-              alt=""
-              className="absolute inset-0 w-full h-full object-cover blur-xl scale-110 opacity-50"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-dark via-dark/80 to-transparent" />
-          </>
-        ) : (
-          <div className="absolute inset-0 bg-gradient-to-t from-dark to-red-900/30" />
-        )}
-      </div>
-
-      <div className="container mx-auto px-4 -mt-32 relative z-10">
-        {/* Back button */}
-        <button
-          onClick={() => navigate('/comics')}
-          className="btn btn-secondary mb-6 flex items-center gap-2"
-        >
-          <FaArrowLeft />
-          Volver a Comics
-        </button>
-
-        {/* Header with cover and info */}
-        <div className="card overflow-hidden mb-8" style={{ borderTop: '4px solid #EF4444' }}>
-          <div className="md:flex">
-            {/* Cover */}
-            <div className="md:w-64 flex-shrink-0">
-              {comic.cover_image ? (
-                <img
-                  src={comic.cover_image}
-                  alt={comic.title}
-                  className="w-full h-auto md:h-96 object-cover"
-                />
-              ) : (
-                <div className="w-full h-64 md:h-96 bg-gray-700 flex items-center justify-center">
-                  <FaMask className="text-6xl text-gray-500" />
-                </div>
-              )}
-            </div>
-
-            {/* Info */}
-            <div className="p-6 flex-1">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h1 className="text-3xl font-bold mb-2">{comic.title}</h1>
-                  {comic.publisher && (
-                    <div className="flex items-center gap-2 text-gray-400 mb-2">
-                      <FaBuilding />
-                      <span>{comic.publisher}</span>
-                      {comic.start_year && <span>({comic.start_year})</span>}
-                    </div>
-                  )}
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleToggleMonitored}
-                    className={`btn ${comic.monitored ? 'bg-red-500 hover:bg-red-600 text-white' : 'btn-secondary'}`}
-                    title={comic.monitored ? 'Dejar de monitorizar' : 'Monitorizar'}
-                  >
-                    {comic.monitored ? <FaEye /> : <FaEyeSlash />}
-                  </button>
-                  <button
-                    onClick={handleRefresh}
-                    disabled={refreshing}
-                    className="btn btn-secondary"
-                    title="Actualizar metadatos"
-                  >
-                    <FaSync className={refreshing ? 'animate-spin' : ''} />
-                  </button>
-                  <button
-                    onClick={handleDelete}
-                    disabled={deleting}
-                    className="btn btn-secondary text-red-500 hover:bg-red-500/20"
-                    title="Eliminar de biblioteca"
-                  >
-                    {deleting ? <FaSpinner className="animate-spin" /> : <FaTrash />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Description */}
-              {comic.description && (
-                <div className="mb-4">
-                  {translating ? (
-                    <div className="flex items-center gap-2 text-gray-400">
-                      <FaSpinner className="animate-spin" />
-                      <span>Traduciendo...</span>
-                    </div>
-                  ) : (
-                    <p className="text-gray-300 line-clamp-4">
-                      {translatedDescription || comic.description.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, '')}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Stats */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                <div className="bg-surface-light rounded-lg p-3 text-center">
-                  <p className="text-2xl font-bold text-red-500">
-                    {comic.count_of_issues || comic.total_issues || 0}
-                  </p>
-                  <p className="text-sm text-gray-400">Tomos totales</p>
-                </div>
-                <div className="bg-surface-light rounded-lg p-3 text-center">
-                  <p className="text-2xl font-bold text-green-500">
-                    {comic.downloaded_issues || 0}
-                  </p>
-                  <p className="text-sm text-gray-400">Descargados</p>
-                </div>
-                <div className="bg-surface-light rounded-lg p-3 text-center">
-                  <p className="text-2xl font-bold">
-                    {comic.monitored ? (
-                      <FaCheck className="text-green-500 mx-auto" />
-                    ) : (
-                      <span className="text-gray-500">-</span>
-                    )}
-                  </p>
-                  <p className="text-sm text-gray-400">Monitorizado</p>
-                </div>
-                <div className="bg-surface-light rounded-lg p-3 text-center">
-                  <p className="text-2xl font-bold">
-                    {comic.start_year || '-'}
-                  </p>
-                  <p className="text-sm text-gray-400">Ano inicio</p>
-                </div>
-              </div>
-
-              {/* Creators */}
-              <div className="space-y-2 text-sm">
-                {comic.writers?.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <FaUser className="text-gray-500" />
-                    <span className="text-gray-400">Escritores:</span>
-                    <span>{comic.writers.join(', ')}</span>
-                  </div>
-                )}
-                {comic.artists?.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <FaPaintBrush className="text-gray-500" />
-                    <span className="text-gray-400">Artistas:</span>
-                    <span>{comic.artists.join(', ')}</span>
-                  </div>
-                )}
-                {comic.colorists?.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <FaPalette className="text-gray-500" />
-                    <span className="text-gray-400">Coloristas:</span>
-                    <span>{comic.colorists.join(', ')}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* External link */}
-              {comic.comicvine_url && (
-                <a
-                  href={comic.comicvine_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-red-400 hover:text-red-300 hover:underline mt-4"
-                >
-                  <FaExternalLinkAlt />
-                  Ver en ComicVine
-                </a>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Search Sources Button */}
-        <div className="card p-6 mb-8" style={{ borderTop: '4px solid #EF4444' }}>
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-bold">Buscar Fuentes de Descarga</h3>
-              <p className="text-sm text-gray-400">
-                Busca links de descarga en GetComics y otras fuentes
-              </p>
-            </div>
-            <button
-              onClick={handleSearchSources}
-              disabled={searchingSources}
-              className="btn bg-red-500 hover:bg-red-600 text-white flex items-center gap-2"
-            >
-              {searchingSources ? (
-                <>
-                  <FaSpinner className="animate-spin" />
-                  Buscando...
-                </>
-              ) : (
-                <>
-                  <FaSearch />
-                  Buscar Fuentes
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Issues list using ComicIssueList component */}
-        <ComicIssueList comicId={id} />
-      </div>
-    </div>
+    <ContentDetailPage
+      accentColor="#EF4444"
+      coverImage={comic?.cover_image}
+      title={comic?.title}
+      badges={badges}
+      description={comic?.description}
+      translatedDescription={translatedDescription}
+      translating={translating}
+      infoGrid={infoGrid}
+      creators={creators}
+      externalLinks={externalLinks}
+      actions={actions}
+      stats={statsCards}
+      progress={progressData}
+      loading={loading}
+      notFoundMessage="Comic no encontrado"
+      backLink={{ to: '/comics', label: 'Volver a Comics' }}
+    >
+      <ComicIssueList comicId={id} />
+    </ContentDetailPage>
   );
 };
 

@@ -20,6 +20,7 @@ const Queue = () => {
   const [queue, setQueue] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   const loadQueue = useCallback(async () => {
@@ -182,10 +183,19 @@ const Queue = () => {
     failed: queue.filter(d => d.status === 'failed').length
   };
 
-  // Filtrar queue
-  const filteredQueue = filter === 'all'
-    ? queue
-    : queue.filter(item => item.status === filter);
+  // Filtrar queue por estado y tipo
+  const filteredQueue = queue.filter(item => {
+    if (filter !== 'all' && item.status !== filter) return false;
+    if (typeFilter !== 'all' && item.content_type !== typeFilter) return false;
+    return true;
+  });
+
+  // Stats por tipo
+  const typeStats = {
+    manga: queue.filter(d => d.content_type === 'manga').length,
+    comic: queue.filter(d => d.content_type === 'comic').length,
+    book: queue.filter(d => d.content_type === 'book').length,
+  };
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -254,9 +264,10 @@ const Queue = () => {
         </div>
 
         {/* Filtros */}
-        <div className="card p-4">
+        <div className="card p-4 space-y-3">
+          {/* Filtro por estado */}
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-gray-400">Filtrar:</span>
+            <span className="text-gray-400">Estado:</span>
             {['all', 'downloading', 'completed', 'failed'].map((f) => (
               <button
                 key={f}
@@ -267,6 +278,34 @@ const Queue = () => {
                 {f !== 'all' && ` (${stats[f]})`}
               </button>
             ))}
+          </div>
+          {/* Filtro por tipo */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-gray-400">Tipo:</span>
+            <button
+              onClick={() => setTypeFilter('all')}
+              className={`btn btn-sm ${typeFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+            >
+              Todos
+            </button>
+            <button
+              onClick={() => setTypeFilter('manga')}
+              className={`btn btn-sm flex items-center gap-1 ${typeFilter === 'manga' ? 'bg-blue-500 text-white' : 'btn-secondary'}`}
+            >
+              <FaBook className="text-xs" /> Manga {typeStats.manga > 0 && `(${typeStats.manga})`}
+            </button>
+            <button
+              onClick={() => setTypeFilter('comic')}
+              className={`btn btn-sm flex items-center gap-1 ${typeFilter === 'comic' ? 'bg-red-500 text-white' : 'btn-secondary'}`}
+            >
+              <FaMask className="text-xs" /> Comics {typeStats.comic > 0 && `(${typeStats.comic})`}
+            </button>
+            <button
+              onClick={() => setTypeFilter('book')}
+              className={`btn btn-sm flex items-center gap-1 ${typeFilter === 'book' ? 'bg-emerald-500 text-white' : 'btn-secondary'}`}
+            >
+              <FaBookReader className="text-xs" /> Libros {typeStats.book > 0 && `(${typeStats.book})`}
+            </button>
           </div>
         </div>
       </div>

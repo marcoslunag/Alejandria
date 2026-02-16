@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { bookApi } from '../services/api';
-import BookGrid from '../components/BookGrid';
+import ContentGrid from '../components/ContentGrid';
 import {
   FaBookReader,
   FaSync,
@@ -179,7 +179,7 @@ const Books = () => {
       </div>
 
       {/* Books Grid */}
-      <BookGrid books={sortedBooks} loading={loading} />
+      <ContentGrid items={sortedBooks} type="book" loading={loading} />
 
       {/* Empty state */}
       {!loading && books.length === 0 && (

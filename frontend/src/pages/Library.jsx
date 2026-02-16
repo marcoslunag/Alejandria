@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { mangaApi } from '../services/api';
-import MangaGrid from '../components/MangaGrid';
+import ContentGrid from '../components/ContentGrid';
 import { FaBook, FaFilter, FaSync, FaSortAmountDown } from 'react-icons/fa';
 
 const Library = () => {
@@ -179,7 +179,7 @@ const Library = () => {
       </div>
 
       {/* Manga Grid */}
-      <MangaGrid manga={sortedManga} loading={loading} />
+      <ContentGrid items={sortedManga} type="manga" loading={loading} />
 
       {/* Empty state */}
       {!loading && manga.length === 0 && (

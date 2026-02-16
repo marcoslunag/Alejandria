@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { comicApi } from '../services/api';
-import ComicGrid from '../components/ComicGrid';
+import ContentGrid from '../components/ContentGrid';
 import {
   FaMask,
   FaFilter,
@@ -336,9 +336,9 @@ const Comics = () => {
 
       {/* Comics Grid */}
       {loading ? (
-        <ComicGrid comics={[]} loading={true} />
+        <ContentGrid items={[]} type="comic" loading={true} />
       ) : sortedComics.length > 0 ? (
-        <ComicGrid comics={sortedComics.map(c => ({ ...c, in_library: true }))} loading={false} />
+        <ContentGrid items={sortedComics.map(c => ({ ...c, in_library: true }))} type="comic" loading={false} />
       ) : (
         <div className="text-center py-20">
           <FaMask className="text-6xl text-gray-600 mx-auto mb-4" />
