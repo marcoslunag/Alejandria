@@ -163,88 +163,133 @@ class MegaComicsScraper(ComicScraperBase):
             file_size = extract_file_size(html)
             year = extract_year(html)
 
-            # Extract ALL links from the page
-            all_links = soup.find_all('a', href=True)
-            ouo_links = []
-            uii_links = []
-            direct_links = []
+            # Strategy: Parse download table to get issue-to-link mapping
+            # MegaComics uses a <table> with rows: <td>#1 - #2</td><td>[MEGA][MF]</td>
+            download_links = []
+            table_rows = self._parse_download_table(soup)
 
-            for link in all_links:
-                href = link.get('href', '').strip()
-                if not href or href.startswith('#') or 'javascript:' in href:
-                    continue
+            if table_rows:
+                logger.info(f"MegaComics: Found download table with {len(table_rows)} rows")
+                ouo_links_with_issues = []
+                uii_links_with_issues = []
 
-                # Get context for host detection (image alt text, link text, parent text)
-                link_text = link.get_text(strip=True)
-                img_in_link = link.select_one('img')
-                img_alt = img_in_link.get('alt', '') if img_in_link else ''
-                img_src = img_in_link.get('src', '') if img_in_link else ''
-                context = f"{link_text} {img_alt} {img_src}".lower()
+                for row in table_rows:
+                    issue_label = row['issue_label']  # e.g. "#1 - #2", "#3"
+                    for link_info in row['links']:
+                        link_info['issue_label'] = issue_label
 
-                # Detect host from context
-                detected_host = self._detect_host_from_context(context)
+                        if 'ouo.io' in link_info['url'] or 'ouo.press' in link_info['url']:
+                            ouo_links_with_issues.append(link_info)
+                        elif 'uii.io' in link_info['url']:
+                            uii_links_with_issues.append(link_info)
+                        else:
+                            host = self.detect_host(link_info['url'])
+                            if host != HostType.UNKNOWN:
+                                dl = self.create_download_link(link_info['url'], file_size)
+                                dl.issue_range = issue_label
+                                download_links.append(dl)
 
-                if 'ouo.io' in href or 'ouo.press' in href:
-                    ouo_links.append({
-                        'url': href,
-                        'detected_host': detected_host,
-                        'context': context
-                    })
-                elif 'uii.io' in href:
-                    uii_links.append({
-                        'url': href,
-                        'detected_host': detected_host,
-                        'context': context
-                    })
-                else:
-                    # Check for direct host links
-                    host = self.detect_host(href)
-                    if host in [HostType.MEGA, HostType.MEDIAFIRE, HostType.GOOGLE_DRIVE,
-                                HostType.TERABOX, HostType.FIRELOAD]:
-                        if not any(dl.url == href for dl in direct_links):
-                            direct_links.append(self.create_download_link(href, file_size))
+                logger.info(
+                    f"MegaComics: Table links: {len(ouo_links_with_issues)} ouo.io, "
+                    f"{len(uii_links_with_issues)} uii.io, {len(download_links)} direct"
+                )
 
-            download_links = list(direct_links)
+                # Resolve ouo.io links via Playwright (up to 10)
+                if ouo_links_with_issues:
+                    links_to_resolve = ouo_links_with_issues[:10]
+                    try:
+                        playwright_scraper = await self._get_playwright_scraper()
+                        resolved = await self._resolve_ouo_links_batch(
+                            links_to_resolve, playwright_scraper
+                        )
+                        # Transfer issue_range from the original ouo link info
+                        for i, resolved_link in enumerate(resolved):
+                            if i < len(links_to_resolve):
+                                resolved_link.issue_range = links_to_resolve[i].get('issue_label')
+                        download_links.extend(resolved)
+                        logger.info(f"MegaComics: Resolved {len(resolved)}/{len(links_to_resolve)} ouo.io links")
+                    except Exception as e:
+                        logger.error(f"MegaComics: Playwright resolution failed: {e}")
+                        for ouo_info in links_to_resolve:
+                            host = ouo_info.get('detected_host', HostType.MEGA)
+                            download_links.append(DownloadLink(
+                                url=ouo_info['url'],
+                                host=host,
+                                quality_score=self.get_quality_score(host),
+                                file_size=file_size,
+                                link_status='shortener',
+                                issue_range=ouo_info.get('issue_label')
+                            ))
 
-            logger.info(
-                f"MegaComics: Found {len(ouo_links)} ouo.io, "
-                f"{len(uii_links)} uii.io, {len(direct_links)} direct links"
-            )
+                # Save uii.io links as-is (need captcha)
+                for uii_info in uii_links_with_issues:
+                    host = uii_info.get('detected_host', HostType.MEDIAFIRE)
+                    download_links.append(DownloadLink(
+                        url=uii_info['url'],
+                        host=host,
+                        quality_score=40,
+                        file_size=file_size,
+                        link_status='needs_captcha',
+                        issue_range=uii_info.get('issue_label')
+                    ))
 
-            # Resolve ouo.io links via Playwright (up to 10)
-            if ouo_links:
-                links_to_resolve = ouo_links[:10]
-                try:
-                    playwright_scraper = await self._get_playwright_scraper()
-                    resolved = await self._resolve_ouo_links_batch(
-                        links_to_resolve, playwright_scraper
-                    )
-                    download_links.extend(resolved)
-                    logger.info(f"MegaComics: Resolved {len(resolved)}/{len(links_to_resolve)} ouo.io links")
-                except Exception as e:
-                    logger.error(f"MegaComics: Playwright resolution failed: {e}")
-                    # Fallback: save ouo.io links with host hint
-                    for ouo_info in links_to_resolve:
-                        host = ouo_info.get('detected_host', HostType.MEGA)
-                        download_links.append(DownloadLink(
-                            url=ouo_info['url'],
-                            host=host,
-                            quality_score=self.get_quality_score(host),
-                            file_size=file_size,
-                            link_status='shortener'
-                        ))
+            else:
+                # Fallback: no table found, extract all links without issue mapping
+                logger.info("MegaComics: No download table found, extracting links without issue mapping")
+                all_links = soup.find_all('a', href=True)
+                ouo_links = []
+                uii_links = []
 
-            # Save uii.io links as-is with host hint (need captcha solver)
-            # Score much lower than resolved links since they need manual captcha
-            for uii_info in uii_links:
-                host = uii_info.get('detected_host', HostType.MEDIAFIRE)
-                download_links.append(DownloadLink(
-                    url=uii_info['url'],
-                    host=host,
-                    quality_score=40,  # Low score: unresolved, needs captcha
-                    file_size=file_size,
-                    link_status='needs_captcha'
-                ))
+                for link in all_links:
+                    href = link.get('href', '').strip()
+                    if not href or href.startswith('#') or 'javascript:' in href:
+                        continue
+
+                    link_text = link.get_text(strip=True)
+                    img_in_link = link.select_one('img')
+                    img_alt = img_in_link.get('alt', '') if img_in_link else ''
+                    img_src = img_in_link.get('src', '') if img_in_link else ''
+                    context = f"{link_text} {img_alt} {img_src}".lower()
+                    detected_host = self._detect_host_from_context(context)
+
+                    if 'ouo.io' in href or 'ouo.press' in href:
+                        ouo_links.append({'url': href, 'detected_host': detected_host, 'context': context})
+                    elif 'uii.io' in href:
+                        uii_links.append({'url': href, 'detected_host': detected_host, 'context': context})
+                    else:
+                        host = self.detect_host(href)
+                        if host in [HostType.MEGA, HostType.MEDIAFIRE, HostType.GOOGLE_DRIVE,
+                                    HostType.TERABOX, HostType.FIRELOAD]:
+                            if not any(dl.url == href for dl in download_links):
+                                download_links.append(self.create_download_link(href, file_size))
+
+                logger.info(
+                    f"MegaComics: Fallback links: {len(ouo_links)} ouo.io, "
+                    f"{len(uii_links)} uii.io, {len(download_links)} direct"
+                )
+
+                if ouo_links:
+                    links_to_resolve = ouo_links[:10]
+                    try:
+                        playwright_scraper = await self._get_playwright_scraper()
+                        resolved = await self._resolve_ouo_links_batch(links_to_resolve, playwright_scraper)
+                        download_links.extend(resolved)
+                    except Exception as e:
+                        logger.error(f"MegaComics: Playwright resolution failed: {e}")
+                        for ouo_info in links_to_resolve:
+                            host = ouo_info.get('detected_host', HostType.MEGA)
+                            download_links.append(DownloadLink(
+                                url=ouo_info['url'], host=host,
+                                quality_score=self.get_quality_score(host),
+                                file_size=file_size, link_status='shortener'
+                            ))
+
+                for uii_info in uii_links:
+                    host = uii_info.get('detected_host', HostType.MEDIAFIRE)
+                    download_links.append(DownloadLink(
+                        url=uii_info['url'], host=host,
+                        quality_score=40, file_size=file_size, link_status='needs_captcha'
+                    ))
 
             # Deduplicate by URL
             seen_urls = set()
@@ -441,6 +486,60 @@ class MegaComicsScraper(ComicScraperBase):
         finally:
             if page:
                 await page.close()
+
+    def _parse_download_table(self, soup: BeautifulSoup) -> List[Dict]:
+        """
+        Parse the download table from MegaComics pages.
+        Structure: <table> with rows like:
+          <tr><td>#1 - #2</td><td>[MEGA link][MediaFire link]</td></tr>
+          <tr><td>#3</td><td>[MEGA link][MediaFire link]</td></tr>
+
+        Returns list of: [{"issue_label": "#1 - #2", "links": [{"url": ..., "detected_host": ...}]}]
+        """
+        rows = []
+
+        # Find the download table (inside .secciones or .datagrid)
+        table = soup.select_one('.secciones table, .datagrid table, table')
+        if not table:
+            return rows
+
+        for tr in table.find_all('tr'):
+            tds = tr.find_all('td')
+            if len(tds) < 2:
+                continue
+
+            # First column: issue label (e.g. "#1 - #2", "#3")
+            issue_label = tds[0].get_text(strip=True)
+            if not issue_label or not re.search(r'#?\d', issue_label):
+                continue
+
+            # Second column: download links
+            links = []
+            for a in tds[1].find_all('a', href=True):
+                href = a['href'].strip()
+                if not href or href.startswith('#'):
+                    continue
+
+                # Detect host from img alt or link context
+                img = a.find('img')
+                img_alt = img.get('alt', '') if img else ''
+                context = f"{a.get_text(strip=True)} {img_alt}".lower()
+                detected_host = self._detect_host_from_context(context)
+
+                links.append({
+                    'url': href,
+                    'detected_host': detected_host,
+                    'context': context
+                })
+
+            if links:
+                rows.append({
+                    'issue_label': issue_label,
+                    'links': links
+                })
+                logger.debug(f"MegaComics table row: {issue_label} -> {len(links)} links")
+
+        return rows
 
     def _detect_host_from_context(self, context: str) -> HostType:
         """Detect the download host from surrounding text/image context."""

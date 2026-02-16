@@ -19,6 +19,12 @@ Alejandría es una plataforma de gestión automatizada de contenido digital (man
   - Google Books (metadata de libros)
   - STK (Send to Kindle)
 
+### Docker & Naming
+- **Volumen de datos**: `library` (montado en `/library`)
+- **Base de datos**: usuario `alejandria`, db `alejandria`
+- **Clase scheduler**: `ContentScheduler` (param `library_dir`)
+- **Migración desde versiones anteriores**: Ver `scripts/migrate-volumes.sh` y `scripts/migrate-db-user.sql`
+
 ### Estructura de Directorios
 ```
 backend/
@@ -35,9 +41,17 @@ workers/
 frontend/
   src/
     pages/         # Páginas React
-    components/    # Componentes reutilizables
+    components/    # Componentes compartidos (ContentDetailPage, ContentCard, ContentGrid)
     services/      # Cliente API
 ```
+
+### Frontend Unificado (V2)
+Componentes compartidos por manga, cómics y libros:
+- **ContentDetailPage**: Layout de detalle unificado (banner, cover, info, badges, acciones, stats, progreso)
+- **ContentCard**: Card con config por tipo (colores: manga=#3B82F6, comics=#EF4444, books=#10B981)
+- **ContentGrid**: Grid con skeletons, empty states, y key extraction por tipo
+- Las páginas de detalle (MangaDetails, ComicDetails, BookDetails) construyen props y pasan a ContentDetailPage
+- Queue.jsx tiene filtros por tipo de contenido (Manga/Comics/Libros)
 
 ## 🎨 Filosofía del Proyecto
 
@@ -67,13 +81,18 @@ frontend/
 - **Formato**: EPUB directo
 - **Envío**: STK (Send to Kindle)
 
-### 3. Cómics (🚧 En Desarrollo - 95%)
+### 3. Cómics (✅ Funcional)
 - **Metadata**: ComicVine
 - **Scrapers**:
   - ✅ ZonaComics (Playwright + resolución ouo.io automática)
-  - ✅ CBRComics (aiohttp, basic + Playwright data-link decode)
-  - ✅ MegaComics/MegaComicsTV3 (aiohttp search + Playwright ouo.io resolution)
+  - ✅ CBRComics (aiohttp + cbrcomicsweb.space redirect resolution)
+  - ✅ MegaComics/MegaComicsTV3 (aiohttp search + table parsing + Playwright ouo.io)
   - ⏸️ Marmota (pendiente)
+- **Link Assignment**:
+  - ✅ Smart: `issue_range` metadata from scraper tables (e.g., "#1 - #2" → bundle)
+  - ✅ Sequential: 1:1 mapping when enough resolved links without issue_range
+  - ✅ Bundle: All issues share best link when few resolved links
+  - ✅ NO auto-download: User must manually trigger downloads
 - **Download**:
   - ✅ MediaFire (individual + folders via Playwright)
   - ✅ MEGA individual (mega.py --no-deps + tenacity>=8.2)
@@ -94,6 +113,11 @@ Los cómics vienen en colecciones (TPB, HC, "Completo"):
 - **Auto-detección**: Si múltiples issues comparten la misma download_url, se crea bundle automáticamente
   - En `_search_scrapers_for_comic()` (post-procesamiento)
   - En `download_issues()` endpoint (al momento de descargar)
+  - Via `issue_range` metadata: MegaComics table parsing (e.g., "#1 - #2" → same link → bundle)
+- **Smart Link Assignment** (`fetch_volume_from_scraper`):
+  1. Si links tienen `issue_range` → asigna por rango (bundles para multi-issue)
+  2. Si hay suficientes links sin issue_range → asigna 1:1 secuencialmente
+  3. Si pocos links → bundle todos los issues con el mejor link
 - **Frontend (como manga)**: Seleccionar un issue del bundle selecciona TODOS
   - Badge morado "Bundle (X issues)" en cada issue
   - Highlight visual en issues del mismo bundle al seleccionar uno
@@ -120,22 +144,24 @@ docker compose up -d
 
 # Ver logs
 docker compose logs backend --tail 100
-docker compose logs scheduler --tail 100
 docker compose logs kcc-converter --tail 100
 
 # Reiniciar servicios
 docker compose restart backend
-docker compose restart scheduler
 
-# Base de datos
-docker compose exec -T postgres psql -U manga manga_arr -c "SELECT * FROM comics LIMIT 5;"
+# Base de datos (user: alejandria, db: alejandria)
+docker compose exec -T postgres psql -U alejandria alejandria -c "SELECT * FROM comics LIMIT 5;"
 
 # Ver bundles
-docker compose exec -T postgres psql -U manga manga_arr -c \
+docker compose exec -T postgres psql -U alejandria alejandria -c \
   "SELECT c.title, ci.issue_number, ci.bundle_title, ci.is_bundle_master
    FROM comic_issues ci JOIN comics c ON ci.comic_id = c.id
    WHERE ci.bundle_id IS NOT NULL
    ORDER BY c.id, ci.issue_number::int;"
+
+# Migración (solo instalaciones existentes)
+bash scripts/migrate-volumes.sh        # Volumen manga → library
+docker compose exec -T postgres psql -U manga alejandria < scripts/migrate-db-user.sql  # Usuario manga → alejandria
 ```
 
 ## 📖 Flujo de Trabajo
@@ -153,16 +179,16 @@ docker compose exec -T postgres psql -U manga manga_arr -c \
    - Crea comic + issues en DB
 5. Scheduler (background):
    - Busca fuentes en scrapers
-   - Detecta bundles
-   - Descarga (solo bundle masters)
-   - Marca todos los issues del bundle
-6. KCC Worker:
+   - Detecta bundles y asigna links (smart assignment con issue_range)
+   - NO auto-descarga: usuario debe iniciar descargas manualmente
+6. Usuario inicia descarga manualmente desde el frontend
+7. KCC Worker:
    - Detecta archivos descargados (respeta lock files `.downloading`)
    - Comic mode: sin flag `-m` (izquierda→derecha), factor estimación 2.5x
    - Manga mode: con flag `-m` (derecha→izquierda), factor estimación 1.3x
    - Convierte CBZ/CBR → EPUB
    - Si >180MB, divide automáticamente en partes
-7. Scheduler:
+8. Scheduler:
    - Detecta EPUBs convertidos
    - Envía a Kindle via STK
 
@@ -177,11 +203,13 @@ docker compose exec -T postgres psql -U manga manga_arr -c \
 - Auto-crear bundles cuando múltiples issues comparten la misma download_url
 
 ### DON'Ts ❌
+- NO auto-descargar comics al encontrar links (usuario decide cuándo descargar)
 - NO verificar links de acortadores con HEAD requests
 - NO usar MEGA como prioridad (rate limits ~6h/5GB)
 - NO crear comics sin intentar traducir primero
 - NO duplicar volumes en frontend (deduplicate por URL)
 - NO forzar verificaciones que rompen el flujo
+- NO guardar URLs de páginas de scrapers como download_url (resolver a MEGA/MediaFire real)
 
 ## 📝 Variables de Entorno Importantes
 

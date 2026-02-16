@@ -53,7 +53,7 @@ COPY . .
 RUN chmod +x start.sh
 
 # Create necessary directories
-RUN mkdir -p /downloads /manga /manga/kindle
+RUN mkdir -p /downloads /library /library/kindle
 
 # Expose port
 EXPOSE 7878

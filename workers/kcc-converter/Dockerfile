@@ -42,14 +42,14 @@ RUN pip install --no-cache-dir \
     Pillow
 
 # Crear directorios necesarios
-RUN mkdir -p /downloads /manga/kindle && chmod 777 /downloads /manga/kindle
+RUN mkdir -p /downloads /library/kindle && chmod 777 /downloads /library/kindle
 
 # Copiar script
 COPY converter.py .
 
 # Variables de entorno por defecto
 ENV WATCH_DIR=/downloads
-ENV OUTPUT_DIR=/manga/kindle
+ENV OUTPUT_DIR=/library/kindle
 ENV KCC_PROFILE=KPW5
 ENV KCC_FORMAT=EPUB
 ENV KCC_QUALITY=95

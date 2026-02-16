@@ -283,6 +283,7 @@ async def add_comic_from_url(
     source: str,
     issues: int = 0,
     cover: str = None,
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -389,45 +390,25 @@ async def add_comic_from_url(
     if issues > 0:
         db.flush()
 
-    # Create a bundle for all issues pointing to the scraper URL
-    if issues > 0:
-        bundle_id = hashlib.md5(url.encode()).hexdigest()[:16]
-        bundle_title = title
-        bundle_range = f"#1-{issues}" if issues > 1 else "#1"
-
-        # Update all issues with bundle info
-        issue_list = db.query(ComicIssue).filter(ComicIssue.comic_id == comic.id).all()
-        for idx, issue in enumerate(issue_list):
-            issue.download_url = url
-            issue.source = source
-            issue.bundle_id = bundle_id
-            issue.bundle_title = bundle_title
-            issue.bundle_range = bundle_range
-            issue.is_bundle_master = (idx == 0)  # First issue downloads for all
-
-    # Already has source URLs, mark as searched
-    comic.sources_searched = True
+    # Save the scraper page URL as source reference (NOT as download_url)
+    # The actual download links (mega, mediafire, etc.) will be resolved by
+    # fetch_volume_from_scraper which calls get_download_links() on the scraper
+    if not comic.source_urls:
+        comic.source_urls = {}
+    comic.source_urls[source] = url
 
     db.commit()
     db.refresh(comic)
 
-    # Auto-queue download for bundle master
-    if issues > 0 and comic.auto_download:
-        master = db.query(ComicIssue).filter(
-            ComicIssue.comic_id == comic.id,
-            ComicIssue.is_bundle_master == True
-        ).first()
-        if master and master.download_url:
-            queue_item = DownloadQueue(
-                comic_issue_id=master.id,
-                content_type='comic',
-                status='queued',
-                priority=0
-            )
-            db.add(queue_item)
-            master.status = 'downloading'
-            db.commit()
-            logger.info(f"Auto-queued bundle master for download: {title}")
+    # Launch background task to resolve actual download links from the scraper page
+    if issues > 0 and background_tasks:
+        background_tasks.add_task(
+            fetch_volume_from_scraper,
+            comic.id,
+            url,      # scraper page URL — get_download_links() resolves the real links
+            source,
+            issues
+        )
 
     logger.info(f"Added comic from scraper: {title} ({issues} issues) from {source}")
 
@@ -897,7 +878,19 @@ async def search_sources(
     if not comic:
         raise HTTPException(status_code=404, detail="Comic not found")
 
-    background_tasks.add_task(search_scrapers_for_comic, comic.id, comic.title)
+    # If we have a known scraper page URL, resolve links directly
+    if comic.source_urls:
+        for src_name, src_url in comic.source_urls.items():
+            issue_count = db.query(ComicIssue).filter(
+                ComicIssue.comic_id == comic_id
+            ).count()
+            background_tasks.add_task(
+                fetch_volume_from_scraper,
+                comic.id, src_url, src_name, issue_count
+            )
+            break  # Only use first source
+    else:
+        background_tasks.add_task(search_scrapers_for_comic, comic.id, comic.title)
 
     return {"message": "Source search started"}
 

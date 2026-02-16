@@ -98,7 +98,8 @@ class CBRComicsScraper(ComicScraperBase):
 
     async def get_download_links(self, url: str) -> ComicScraperResult:
         """
-        Get download links from a comic page
+        Get download links from a comic page.
+        Resolves cbrcomicsweb.space redirect pages to actual MEGA/MediaFire URLs.
 
         Args:
             url: URL of the comic page
@@ -128,84 +129,46 @@ class CBRComicsScraper(ComicScraperBase):
         desc_elem = soup.find('div', class_=re.compile(r'content|entry-content'))
         description = desc_elem.get_text(strip=True)[:300] if desc_elem else ""
 
-        # Find download links
-        download_links = []
-
-        # Method 1: Look for direct links in content
+        # Collect all hrefs from the page (deduplicated)
+        all_hrefs = set()
+        # From content area
         if desc_elem:
-            # Find all links in content area
-            links = desc_elem.find_all('a', href=True)
+            for link in desc_elem.find_all('a', href=True):
+                all_hrefs.add(link['href'].strip())
+        # From all page links (buttons, image links, etc.)
+        for link in soup.find_all('a', href=True):
+            all_hrefs.add(link['href'].strip())
 
-            for link in links:
-                href = link['href']
+        # Classify links: direct download hosts vs cbrcomicsweb.space redirects
+        download_links = []
+        redirect_urls = []
 
-                # Check if this is a download link (direct host or redirect domain)
-                is_download_link = False
+        for href in all_hrefs:
+            href_lower = href.lower()
 
-                # Direct hosting links
-                if any(host in href.lower() for host in ['mega.nz', 'mega.co', 'mediafire', 'drive.google', 'gdrive']):
-                    is_download_link = True
-                    host = self.detect_host(href)
+            # Direct hosting links (MEGA, MediaFire, Google Drive, etc.)
+            if any(host in href_lower for host in ['mega.nz', 'mega.co', 'mediafire.com', 'drive.google.com', 'gdrive']):
+                host = self.detect_host(href)
+                dl = DownloadLink(
+                    url=href,
+                    host=host,
+                    quality_score=self.get_quality_score(host)
+                )
+                if not any(existing.url == href for existing in download_links):
+                    download_links.append(dl)
+                    logger.info(f"CBRComics: Found direct {host.value} link")
 
-                # CBRComics intermediate redirect domain
-                elif 'cbrcomicsweb.space' in href.lower():
-                    is_download_link = True
-                    # Assume MEGA as default (most common for CBRComics)
-                    host = HostType.MEGA
-                    logger.info(f"CBRComics: Found redirect link: {href}")
+            # cbrcomicsweb.space redirect pages — need to resolve
+            elif 'cbrcomicsweb.space' in href_lower:
+                redirect_urls.append(href)
 
-                if is_download_link:
-                    dl = DownloadLink(
-                        url=href,
-                        host=host,
-                        quality_score=self.get_quality_score(host)
-                    )
-                    if not any(existing.url == href for existing in download_links):
-                        download_links.append(dl)
-                        logger.info(f"CBRComics: Found {host.value} link")
-
-        # Method 2: Look for download buttons
-        buttons = soup.find_all('a', href=True)
-        for button in buttons:
-            href = button.get('href')
-            if href:
-                # Check for download links or redirect domains
-                is_download = any(host in href.lower() for host in ['mega', 'mediafire', 'drive.google', 'cbrcomicsweb.space'])
-
-                if is_download:
-                    if 'cbrcomicsweb.space' in href.lower():
-                        host = HostType.MEGA  # Assume MEGA
-                    else:
-                        host = self.detect_host(href)
-
-                    dl = DownloadLink(
-                        url=href,
-                        host=host,
-                        quality_score=self.get_quality_score(host)
-                    )
-                    if not any(existing.url == href for existing in download_links):
-                        download_links.append(dl)
-                        logger.info(f"CBRComics: Found {host.value} link in button/link")
-
-        # Method 3: Look specifically for images wrapped in links (common pattern)
-        img_links = soup.find_all('a', href=True)
-        for link in img_links:
-            if link.find('img'):  # Has an image inside
-                href = link['href']
-                if 'cbrcomicsweb.space' in href.lower() or any(h in href.lower() for h in ['mega', 'mediafire', 'drive.google']):
-                    if 'cbrcomicsweb.space' in href.lower():
-                        host = HostType.MEGA
-                    else:
-                        host = self.detect_host(href)
-
-                    dl = DownloadLink(
-                        url=href,
-                        host=host,
-                        quality_score=self.get_quality_score(host)
-                    )
-                    if not any(existing.url == href for existing in download_links):
-                        download_links.append(dl)
-                        logger.info(f"CBRComics: Found {host.value} link with image")
+        # Resolve cbrcomicsweb.space redirects to get actual download URLs
+        if redirect_urls:
+            logger.info(f"CBRComics: Resolving {len(redirect_urls)} cbrcomicsweb.space redirect(s)...")
+            resolved = await self._resolve_redirect_pages(redirect_urls)
+            for dl in resolved:
+                if not any(existing.url == dl.url for existing in download_links):
+                    download_links.append(dl)
 
         # Sort by quality
         download_links.sort(key=lambda x: x.quality_score, reverse=True)
@@ -227,6 +190,98 @@ class CBRComicsScraper(ComicScraperBase):
 
         logger.info(f"CBRComics: Found {len(download_links)} download links for '{title}'")
         return result
+
+    async def _resolve_redirect_pages(self, redirect_urls: List[str]) -> List[DownloadLink]:
+        """
+        Resolve cbrcomicsweb.space redirect pages to actual download URLs.
+        These pages contain direct links to MEGA, MediaFire, etc.
+
+        Args:
+            redirect_urls: List of cbrcomicsweb.space URLs to resolve
+
+        Returns:
+            List of resolved DownloadLink objects with actual host URLs
+        """
+        import base64
+        from urllib.parse import unquote
+        import asyncio
+
+        resolved_links = []
+        seen_urls = set()
+
+        async def resolve_one(redirect_url: str) -> List[DownloadLink]:
+            links = []
+            try:
+                html = await self._get_page(redirect_url, timeout=15)
+                if not html:
+                    logger.warning(f"CBRComics: Failed to fetch redirect page: {redirect_url}")
+                    return links
+
+                soup = BeautifulSoup(html, 'html.parser')
+
+                # Method 1: Direct host links in href attributes
+                for a in soup.find_all('a', href=True):
+                    href = a['href'].strip()
+                    if any(host in href.lower() for host in [
+                        'mega.nz', 'mega.co', 'mediafire.com',
+                        'drive.google.com', 'fireload', 'terabox',
+                        'krakenfiles.com', 'upload.ee', 'megaup.net'
+                    ]):
+                        host = self.detect_host(href)
+                        dl = DownloadLink(
+                            url=href,
+                            host=host,
+                            quality_score=self.get_quality_score(host)
+                        )
+                        links.append(dl)
+                        logger.info(f"CBRComics: Resolved redirect -> {host.value}: {href[:80]}")
+
+                # Method 2: data-link base64 attributes (LinkContainer plugin)
+                for el in soup.find_all(attrs={'data-link': True}):
+                    encoded = el.get('data-link')
+                    if encoded:
+                        try:
+                            decoded = unquote(base64.b64decode(encoded).decode())
+                            if any(host in decoded.lower() for host in [
+                                'mega.nz', 'mediafire.com', 'drive.google.com'
+                            ]):
+                                host = self.detect_host(decoded)
+                                dl = DownloadLink(
+                                    url=decoded,
+                                    host=host,
+                                    quality_score=self.get_quality_score(host)
+                                )
+                                links.append(dl)
+                                logger.info(f"CBRComics: Decoded data-link -> {host.value}: {decoded[:80]}")
+                        except Exception as e:
+                            logger.debug(f"CBRComics: data-link decode error: {e}")
+
+            except Exception as e:
+                logger.warning(f"CBRComics: Error resolving redirect {redirect_url}: {e}")
+
+            return links
+
+        # Resolve all redirect URLs (limit concurrency to 3)
+        semaphore = asyncio.Semaphore(3)
+
+        async def resolve_with_limit(url):
+            async with semaphore:
+                return await resolve_one(url)
+
+        tasks = [resolve_with_limit(url) for url in redirect_urls[:10]]  # Max 10 redirects
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning(f"CBRComics: Redirect resolution error: {result}")
+                continue
+            for dl in result:
+                if dl.url not in seen_urls:
+                    seen_urls.add(dl.url)
+                    resolved_links.append(dl)
+
+        logger.info(f"CBRComics: Resolved {len(resolved_links)} links from {len(redirect_urls)} redirect(s)")
+        return resolved_links
 
     async def search_for_issue(self, comic_title: str, issue_number: str) -> Optional[Dict]:
         """

@@ -292,7 +292,7 @@ async def trigger_cleanup(db: Session = Depends(get_db)):
     Returns:
         Cleanup status
     """
-    from app.services.scheduler import MangaScheduler
+    from app.services.scheduler import ContentScheduler
     from pathlib import Path
     from datetime import datetime, timedelta
 

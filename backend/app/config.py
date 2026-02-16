@@ -17,12 +17,12 @@ class Settings(BaseSettings):
     DEBUG: bool = False
 
     # Database
-    DATABASE_URL: str = "postgresql://manga:manga@localhost:5432/alejandria"
+    DATABASE_URL: str = "postgresql://alejandria:alejandria@localhost:5432/alejandria"
 
     # Paths
     DOWNLOAD_DIR: str = "/downloads"
-    MANGA_DIR: str = "/manga"
-    KINDLE_DIR: str = "/manga/kindle"
+    LIBRARY_DIR: str = "/library"
+    KINDLE_DIR: str = "/library/kindle"
 
     # Scheduler Settings
     CHECK_INTERVAL_HOURS: int = 6

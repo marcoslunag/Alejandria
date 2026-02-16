@@ -37,6 +37,7 @@ class DownloadLink:
     quality_score: int = 50  # 0-100, higher is better
     file_size: Optional[str] = None
     link_status: str = "resolved"  # resolved, shortener, needs_captcha, failed
+    issue_range: Optional[str] = None  # e.g. "#1 - #2", "#3", covers multiple issues
 
     def __lt__(self, other):
         return self.quality_score < other.quality_score

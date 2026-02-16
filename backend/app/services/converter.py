@@ -30,7 +30,7 @@ class KCCConverter:
         'K': 'Kindle (Standard)'
     }
 
-    def __init__(self, output_dir: str = "/manga/kindle"):
+    def __init__(self, output_dir: str = "/library/kindle"):
         """
         Initialize KCC converter
 

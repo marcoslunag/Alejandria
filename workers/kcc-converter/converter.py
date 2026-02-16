@@ -29,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 WATCH_DIR = Path(os.getenv('WATCH_DIR', '/downloads'))
-OUTPUT_DIR = Path(os.getenv('OUTPUT_DIR', '/manga/kindle'))
+OUTPUT_DIR = Path(os.getenv('OUTPUT_DIR', '/library/kindle'))
 KCC_CONFIG_FILE = WATCH_DIR / '.kcc_config.json'
 
 # Defaults (can be overridden by config file)

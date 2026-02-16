@@ -8,7 +8,7 @@ from .scraper import TomosMangaScraper
 from .downloader import MangaDownloader
 from .converter import KCCConverter
 from .stk_kindle_sender import STKKindleSender
-from .scheduler import MangaScheduler
+from .scheduler import ContentScheduler
 from .terabox_bypass import TeraBoxBypass, TeraBoxBypassAsync
 
 __all__ = [
@@ -17,7 +17,7 @@ __all__ = [
     'MangaDownloader',
     'KCCConverter',
     'STKKindleSender',
-    'MangaScheduler',
+    'ContentScheduler',
     'TeraBoxBypass',
     'TeraBoxBypassAsync',
 ]

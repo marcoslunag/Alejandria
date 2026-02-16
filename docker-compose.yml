@@ -6,8 +6,8 @@ services:
     security_opt:
       - seccomp:unconfined
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-manga}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-manga}
+      POSTGRES_USER: ${POSTGRES_USER:-alejandria}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-alejandria}
       POSTGRES_DB: ${POSTGRES_DB:-alejandria}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -16,7 +16,7 @@ services:
       - "5432:5432"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-manga}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-alejandria}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -30,9 +30,9 @@ services:
     security_opt:
       - seccomp:unconfined
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-manga}:${POSTGRES_PASSWORD:-manga}@postgres:5432/${POSTGRES_DB:-alejandria}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-alejandria}:${POSTGRES_PASSWORD:-alejandria}@postgres:5432/${POSTGRES_DB:-alejandria}
       - DOWNLOAD_DIR=/downloads
-      - MANGA_DIR=/manga
+      - LIBRARY_DIR=/library
       - CHECK_INTERVAL_HOURS=${CHECK_INTERVAL_HOURS:-6}
       - KCC_PROFILE=${KCC_PROFILE:-KPW5}
       - KCC_FORMAT=${KCC_FORMAT:-EPUB}
@@ -49,7 +49,7 @@ services:
       - FLARESOLVERR_URL=${FLARESOLVERR_URL:-}
     volumes:
       - downloads:/downloads
-      - manga:/manga
+      - library:/library
       - ./backend:/app
     ports:
       - "9878:7878"
@@ -68,13 +68,13 @@ services:
       - seccomp:unconfined
     environment:
       - WATCH_DIR=/downloads
-      - OUTPUT_DIR=/manga/kindle
+      - OUTPUT_DIR=/library/kindle
       - KCC_PROFILE=${KCC_PROFILE:-KPW5}
       - KCC_FORMAT=${KCC_FORMAT:-EPUB}
       - KCC_QUALITY=${KCC_QUALITY:-85}
     volumes:
       - downloads:/downloads
-      - manga:/manga
+      - library:/library
     restart: unless-stopped
     networks:
       - alejandria
@@ -123,7 +123,7 @@ volumes:
     driver: local
   downloads:
     driver: local
-  manga:
+  library:
     driver: local
 
 networks:

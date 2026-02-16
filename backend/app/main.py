@@ -13,7 +13,7 @@ import sys
 from app.config import get_settings
 from app.database import init_db
 from app.api.v1 import api_router
-from app.services.scheduler import MangaScheduler
+from app.services.scheduler import ContentScheduler
 
 # Configure logging
 logging.basicConfig(
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # Global scheduler instance
-scheduler: MangaScheduler = None
+scheduler: ContentScheduler = None
 
 
 @asynccontextmanager
@@ -55,10 +55,10 @@ async def lifespan(app: FastAPI):
     try:
         from app.services.scheduler import set_scheduler
 
-        scheduler = MangaScheduler(
+        scheduler = ContentScheduler(
             check_interval_hours=settings.CHECK_INTERVAL_HOURS,
             download_dir=settings.DOWNLOAD_DIR,
-            manga_dir=settings.MANGA_DIR
+            library_dir=settings.LIBRARY_DIR
         )
         set_scheduler(scheduler)  # Set global instance
         scheduler.start()

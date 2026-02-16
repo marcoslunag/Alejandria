@@ -12,6 +12,6 @@
 -- CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
 -- Grant privileges
-GRANT ALL PRIVILEGES ON DATABASE alejandria TO manga;
+GRANT ALL PRIVILEGES ON DATABASE alejandria TO alejandria;
 
 -- The tables will be created automatically by SQLAlchemy on first startup

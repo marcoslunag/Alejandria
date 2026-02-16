@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/kindle-sync", tags=["kindle-sync"])
 
-KINDLE_DIR = Path("/manga/kindle")
+KINDLE_DIR = Path("/library/kindle")
 
 
 @router.get("/", response_class=HTMLResponse)

@@ -1,5 +1,5 @@
 """
-Manga Scheduler Service
+Content Scheduler Service
 Handles automated tasks like checking for new chapters, downloads, conversions
 """
 
@@ -28,7 +28,7 @@ import asyncio
 logger = logging.getLogger(__name__)
 
 
-class MangaScheduler:
+class ContentScheduler:
     """
     Scheduler para tareas automáticas:
     - Buscar nuevos capítulos cada 6 horas
@@ -42,7 +42,7 @@ class MangaScheduler:
         self,
         check_interval_hours: int = 6,
         download_dir: str = "/downloads",
-        manga_dir: str = "/manga"
+        library_dir: str = "/library"
     ):
         """
         Initialize scheduler
@@ -50,7 +50,7 @@ class MangaScheduler:
         Args:
             check_interval_hours: Hours between chapter checks
             download_dir: Directory for downloads
-            manga_dir: Directory for processed manga
+            library_dir: Directory for processed content (manga, comics, books)
         """
         self.scheduler = AsyncIOScheduler()
         self.check_interval_hours = check_interval_hours
@@ -59,7 +59,7 @@ class MangaScheduler:
         self.scraper = TomosMangaScraper()
         self.downloader = MangaDownloader(download_dir=download_dir)
         self.book_downloader = BookDownloader(download_dir=str(Path(download_dir) / "books"))
-        self.converter = KCCConverter(output_dir=str(Path(manga_dir) / "kindle"))
+        self.converter = KCCConverter(output_dir=str(Path(library_dir) / "kindle"))
 
         # Tracking
         self.is_running = False
@@ -256,7 +256,7 @@ class MangaScheduler:
         Busca fuentes de descarga para cómics monitorizados.
         - Cómics sin fuentes buscadas (sources_searched=False)
         - Cómics con issues sin download_url
-        Después de buscar, crea DownloadQueue items para issues con URL.
+        Solo busca y guarda links — NO auto-queue downloads.
         """
         logger.info("Checking comic sources...")
 
@@ -292,53 +292,34 @@ class MangaScheduler:
 
             for comic in comics:
                 try:
-                    logger.info(f"Searching sources for: {comic.title}")
-                    await search_scrapers_for_comic(comic.id, comic.title)
+                    # If we already have a known scraper page URL, resolve links directly
+                    # instead of doing a full text-based search
+                    if comic.source_urls:
+                        from app.services.comic_service import fetch_volume_from_scraper
+                        for src_name, src_url in comic.source_urls.items():
+                            issue_count = db.query(ComicIssue).filter(
+                                ComicIssue.comic_id == comic.id
+                            ).count()
+                            logger.info(f"Resolving links from known source: {src_name} → {src_url}")
+                            await fetch_volume_from_scraper(comic.id, src_url, src_name, issue_count)
+                            break  # Only use first source
+                    else:
+                        logger.info(f"Searching sources for: {comic.title}")
+                        await search_scrapers_for_comic(comic.id, comic.title)
 
-                    # Mark as searched
+                    # Mark as searched (DON'T auto-queue downloads — user decides when to download)
                     comic.sources_searched = True
                     comic.last_check = datetime.utcnow()
                     db.commit()
 
-                    # Queue downloads for issues that now have URLs
-                    if comic.auto_download:
-                        issues_with_urls = db.query(ComicIssue).filter(
-                            and_(
-                                ComicIssue.comic_id == comic.id,
-                                ComicIssue.download_url != None,
-                                ComicIssue.status == 'pending'
-                            )
-                        ).all()
-
-                        queued = 0
-                        for issue in issues_with_urls:
-                            # Skip non-master bundle issues
-                            if issue.bundle_id and not issue.is_bundle_master:
-                                continue
-
-                            # Check if already in queue
-                            existing = db.query(DownloadQueue).filter(
-                                and_(
-                                    DownloadQueue.comic_issue_id == issue.id,
-                                    DownloadQueue.status.in_(['queued', 'downloading'])
-                                )
-                            ).first()
-                            if existing:
-                                continue
-
-                            queue_item = DownloadQueue(
-                                comic_issue_id=issue.id,
-                                content_type='comic',
-                                status='queued',
-                                priority=0
-                            )
-                            db.add(queue_item)
-                            issue.status = 'downloading'
-                            queued += 1
-
-                        if queued > 0:
-                            db.commit()
-                            logger.info(f"Queued {queued} issues for auto-download: {comic.title}")
+                    issues_with_urls = db.query(ComicIssue).filter(
+                        and_(
+                            ComicIssue.comic_id == comic.id,
+                            ComicIssue.download_url != None
+                        )
+                    ).count()
+                    total_issues = db.query(ComicIssue).filter(ComicIssue.comic_id == comic.id).count()
+                    logger.info(f"Source search complete for '{comic.title}': {issues_with_urls}/{total_issues} issues have download URLs")
 
                 except Exception as e:
                     logger.error(f"Error searching sources for {comic.title}: {e}")
@@ -870,7 +851,7 @@ class MangaScheduler:
             if not manga:
                 return
 
-            # Buscar archivo convertido en /manga/kindle (output del KCC Worker)
+            # Buscar archivo convertido en /library/kindle (output del KCC Worker)
             kindle_dir = Path(self.converter.output_dir)
 
             # Extraer número de tomo/capítulo
@@ -1002,7 +983,7 @@ class MangaScheduler:
             if not comic:
                 return
 
-            # Buscar archivo convertido en /manga/kindle (output del KCC Worker)
+            # Buscar archivo convertido en /library/kindle (output del KCC Worker)
             kindle_dir = Path(self.converter.output_dir)
 
             # Extraer número de issue
@@ -1494,16 +1475,16 @@ class MangaScheduler:
 
 
 # Singleton instance
-_scheduler_instance: MangaScheduler = None
+_scheduler_instance: ContentScheduler = None
 
 
-def set_scheduler(scheduler: MangaScheduler):
+def set_scheduler(scheduler: ContentScheduler):
     """Set the global scheduler instance"""
     global _scheduler_instance
     _scheduler_instance = scheduler
 
 
-def get_scheduler() -> MangaScheduler:
+def get_scheduler() -> ContentScheduler:
     """Get the global scheduler instance"""
     global _scheduler_instance
     return _scheduler_instance

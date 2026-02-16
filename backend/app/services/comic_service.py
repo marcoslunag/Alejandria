@@ -79,11 +79,10 @@ async def fetch_comic_issues(comic_id: int, comicvine_id: int):
 
 async def fetch_issues_and_search_sources(comic_id: int, comicvine_id: int):
     """
-    Background task: fetch issues from ComicVine, then search scrapers for download links,
-    then auto-queue downloads for issues with URLs.
+    Background task: fetch issues from ComicVine, then search scrapers for download links.
+    Does NOT auto-queue downloads — user decides when to download.
     """
     from app.database import SessionLocal
-    from app.models.download import DownloadQueue
 
     # Step 1: Fetch issues from ComicVine
     await fetch_comic_issues(comic_id, comicvine_id)
@@ -97,41 +96,16 @@ async def fetch_issues_and_search_sources(comic_id: int, comicvine_id: int):
 
         await search_scrapers_for_comic(comic_id, comic.title)
 
-        # Mark as searched
+        # Mark as searched (DON'T auto-queue downloads — user decides when to download)
         comic.sources_searched = True
         db.commit()
 
-        # Step 3: Auto-queue downloads if auto_download is enabled
-        if comic.auto_download:
-            from sqlalchemy import and_
-
-            issues_with_urls = db.query(ComicIssue).filter(
-                and_(
-                    ComicIssue.comic_id == comic_id,
-                    ComicIssue.download_url != None,
-                    ComicIssue.status == 'pending'
-                )
-            ).all()
-
-            queued = 0
-            for issue in issues_with_urls:
-                # Skip non-master bundle issues
-                if issue.bundle_id and not issue.is_bundle_master:
-                    continue
-
-                queue_item = DownloadQueue(
-                    comic_issue_id=issue.id,
-                    content_type='comic',
-                    status='queued',
-                    priority=0
-                )
-                db.add(queue_item)
-                issue.status = 'downloading'
-                queued += 1
-
-            if queued > 0:
-                db.commit()
-                logger.info(f"Auto-queued {queued} issues for download after source search: {comic.title}")
+        issues_with_urls = db.query(ComicIssue).filter(
+            ComicIssue.comic_id == comic_id,
+            ComicIssue.download_url != None
+        ).count()
+        total_issues = db.query(ComicIssue).filter(ComicIssue.comic_id == comic_id).count()
+        logger.info(f"Source search complete for '{comic.title}': {issues_with_urls}/{total_issues} issues have download URLs")
 
     except Exception as e:
         logger.error(f"Error in fetch_issues_and_search_sources for comic {comic_id}: {e}")
@@ -228,6 +202,40 @@ def save_comic_metadata(comic: Comic, issue: ComicIssue, file_path):
 
 
 # ============================================================================
+# ISSUE RANGE PARSING
+# ============================================================================
+
+def _parse_issue_range(issue_range: str) -> List[int]:
+    """
+    Parse an issue range string into a list of issue numbers.
+
+    Examples:
+        "#1 - #2"  -> [1, 2]
+        "#3"       -> [3]
+        "#1-#5"    -> [1, 2, 3, 4, 5]
+        "1 - 2"    -> [1, 2]
+        "#10"      -> [10]
+    """
+    if not issue_range:
+        return []
+
+    # Try range pattern: "#1 - #2", "#1-#5", "1-5", "#1 - 5"
+    range_match = re.search(r'#?(\d+)\s*[-–]\s*#?(\d+)', issue_range)
+    if range_match:
+        start = int(range_match.group(1))
+        end = int(range_match.group(2))
+        if start <= end and (end - start) < 100:
+            return list(range(start, end + 1))
+
+    # Try single issue: "#3", "3"
+    single_match = re.search(r'#?(\d+)', issue_range)
+    if single_match:
+        return [int(single_match.group(1))]
+
+    return []
+
+
+# ============================================================================
 # SCRAPER VOLUME FETCHING
 # ============================================================================
 
@@ -285,6 +293,16 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
                 ComicIssue.comic_id == comic_id
             ).order_by(ComicIssue.issue_number).all()
 
+            # Build issue_number -> issue mapping
+            issue_map = {}
+            for issue in issues:
+                try:
+                    num = int(issue.issue_number) if issue.issue_number and issue.issue_number.isdigit() else 0
+                except (ValueError, TypeError):
+                    num = 0
+                if num > 0:
+                    issue_map[num] = issue
+
             # Filter to only resolved/real host links (not shorteners)
             resolved_links = [
                 dl for dl in scrape_result.download_links
@@ -293,9 +311,52 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
             # Sort by quality (best first)
             resolved_links.sort(key=lambda x: x.quality_score, reverse=True)
 
-            if len(resolved_links) >= max(2, len(issues) * 0.5):
-                # Multiple resolved links available: assign individually per issue
-                logger.info(f"Assigning {len(resolved_links)} individual links to {len(issues)} issues")
+            # Check if links have issue_range metadata (from table parsing)
+            has_issue_mapping = any(dl.issue_range for dl in resolved_links)
+
+            if has_issue_mapping:
+                # SMART ASSIGNMENT: Use issue_range from scraper to map links to issues
+                logger.info(f"Using issue_range metadata to assign {len(resolved_links)} links")
+                assigned = 0
+                for dl in resolved_links:
+                    if not dl.issue_range:
+                        continue
+                    # Parse issue_range: "#1 - #2", "#3", "#1-#5", etc.
+                    issue_nums = _parse_issue_range(dl.issue_range)
+                    if not issue_nums:
+                        continue
+
+                    # If range covers multiple issues, create a bundle
+                    if len(issue_nums) > 1:
+                        bundle_id = hashlib.md5(dl.url.encode()).hexdigest()[:16]
+                        first = True
+                        for num in issue_nums:
+                            issue = issue_map.get(num)
+                            if issue and not issue.download_url:
+                                issue.download_url = dl.url
+                                issue.source = source
+                                issue.link_status = dl.link_status
+                                issue.bundle_id = bundle_id
+                                issue.bundle_range = dl.issue_range
+                                issue.bundle_title = f"{scrape_result.title} ({dl.issue_range})"
+                                issue.is_bundle_master = first
+                                first = False
+                                assigned += 1
+                    else:
+                        # Single issue
+                        issue = issue_map.get(issue_nums[0])
+                        if issue and not issue.download_url:
+                            issue.download_url = dl.url
+                            issue.source = source
+                            issue.link_status = dl.link_status
+                            assigned += 1
+
+                db.commit()
+                logger.info(f"Smart assignment: {assigned}/{len(issues)} issues got links from {source}")
+
+            elif len(resolved_links) >= max(2, len(issues) * 0.5):
+                # Multiple resolved links, no issue_range: assign sequentially per issue
+                logger.info(f"Assigning {len(resolved_links)} links sequentially to {len(issues)} issues")
                 for idx, issue in enumerate(issues):
                     if idx < len(resolved_links):
                         issue.download_url = resolved_links[idx].url
@@ -304,10 +365,10 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
                         logger.info(f"  Issue #{issue.issue_number}: {resolved_links[idx].host.value} link assigned")
 
                 db.commit()
-                logger.info(f"Assigned individual links to {len(issues)} issues from {source}")
+                logger.info(f"Assigned individual links to {min(len(resolved_links), len(issues))} issues from {source}")
 
             elif len(resolved_links) >= 1:
-                # Some resolved links but fewer than issues: bundle with best link
+                # Few resolved links: bundle all issues with best link
                 bundle_id = hashlib.md5(volume_url.encode()).hexdigest()[:16]
                 bundle_title = scrape_result.title
                 bundle_range = f"#1-{issue_count}"
@@ -348,41 +409,11 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
         else:
             logger.warning(f"No download links found for volume: {volume_url}")
 
-        # Mark as searched and auto-queue downloads
+        # Mark as searched (but DON'T auto-queue downloads — user decides when to download)
         comic = db.query(Comic).filter(Comic.id == comic_id).first()
         if comic:
             comic.sources_searched = True
             db.commit()
-
-            if comic.auto_download:
-                from app.models.download import DownloadQueue
-                from sqlalchemy import and_
-
-                issues_to_queue = db.query(ComicIssue).filter(
-                    and_(
-                        ComicIssue.comic_id == comic_id,
-                        ComicIssue.download_url != None,
-                        ComicIssue.status == 'pending'
-                    )
-                ).all()
-
-                queued = 0
-                for issue in issues_to_queue:
-                    if issue.bundle_id and not issue.is_bundle_master:
-                        continue
-                    queue_item = DownloadQueue(
-                        comic_issue_id=issue.id,
-                        content_type='comic',
-                        status='queued',
-                        priority=0
-                    )
-                    db.add(queue_item)
-                    issue.status = 'downloading'
-                    queued += 1
-
-                if queued > 0:
-                    db.commit()
-                    logger.info(f"Auto-queued {queued} issues for download from volume scraper")
 
     except Exception as e:
         logger.error(f"Error fetching volume from scraper: {e}")
