@@ -13,7 +13,8 @@ import logging
 
 from app.database import get_db
 from app.models.chapter import Chapter
-from app.models.settings import AppSettings
+from app.models.user import User
+from app.core.deps import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class STKAuthorizeRequest(BaseModel):
 
 
 @router.get("/status/{chapter_id}")
-async def get_kindle_status(chapter_id: int, db: Session = Depends(get_db)):
+async def get_kindle_status(chapter_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Get Kindle send status for a chapter.
     Supports split files (multiple paths separated by '|' in converted_path).
@@ -70,7 +71,7 @@ async def get_kindle_status(chapter_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/can-send")
-async def check_kindle_configured(db: Session = Depends(get_db)):
+async def check_kindle_configured(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Check if STK is properly configured
     """
@@ -79,14 +80,13 @@ async def check_kindle_configured(db: Session = Depends(get_db)):
     sender = get_stk_sender()
     is_auth = sender.is_authenticated()
 
-    settings = db.query(AppSettings).first()
-    has_device = settings and settings.stk_device_serial if settings else False
+    has_device = bool(current_user.stk_device_serial)
 
     return {
         "configured": is_auth and has_device,
         "authenticated": is_auth,
         "device_configured": has_device,
-        "device_name": settings.stk_device_name if has_device else None,
+        "device_name": current_user.stk_device_name if has_device else None,
         "message": "Ready to send" if (is_auth and has_device) else "STK not configured"
     }
 
@@ -96,7 +96,7 @@ async def check_kindle_configured(db: Session = Depends(get_db)):
 # ============================================
 
 @router.get("/stk/status")
-async def stk_status(db: Session = Depends(get_db)):
+async def stk_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Check if STK (Send to Kindle) is authenticated
     """
@@ -109,13 +109,12 @@ async def stk_status(db: Session = Depends(get_db)):
     if is_auth:
         devices = sender.get_devices()
 
-    # Get saved device preference
-    settings = db.query(AppSettings).first()
+    # Get saved device preference from user
     saved_device = None
-    if settings and settings.stk_device_serial:
+    if current_user.stk_device_serial:
         saved_device = {
-            "serial": settings.stk_device_serial,
-            "name": settings.stk_device_name
+            "serial": current_user.stk_device_serial,
+            "name": current_user.stk_device_name
         }
 
     return {
@@ -127,7 +126,7 @@ async def stk_status(db: Session = Depends(get_db)):
 
 
 @router.get("/stk/signin-url")
-async def stk_get_signin_url():
+async def stk_get_signin_url(current_user: User = Depends(get_current_user)):
     """
     Get Amazon OAuth2 sign-in URL
     """
@@ -143,7 +142,7 @@ async def stk_get_signin_url():
 
 
 @router.post("/stk/authorize")
-async def stk_authorize(data: STKAuthorizeRequest):
+async def stk_authorize(data: STKAuthorizeRequest, current_user: User = Depends(get_current_user)):
     """
     Complete STK authorization with the redirect URL from browser
     """
@@ -171,7 +170,7 @@ async def stk_authorize(data: STKAuthorizeRequest):
 
 
 @router.get("/stk/devices")
-async def stk_get_devices():
+async def stk_get_devices(current_user: User = Depends(get_current_user)):
     """
     Get list of Kindle devices
     """
@@ -193,7 +192,8 @@ async def stk_get_devices():
 async def stk_send_to_kindle(
     chapter_id: int,
     data: Optional[SendRequest] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Send chapter to Kindle via STK
@@ -237,11 +237,9 @@ async def stk_send_to_kindle(
     device_serials = None
     if data and data.device_serial:
         device_serials = [data.device_serial]
-    else:
-        settings = db.query(AppSettings).first()
-        if settings and settings.stk_device_serial:
-            device_serials = [settings.stk_device_serial]
-            logger.info(f"Using saved device: {settings.stk_device_name or settings.stk_device_serial}")
+    elif current_user.stk_device_serial:
+        device_serials = [current_user.stk_device_serial]
+        logger.info(f"Using saved device: {current_user.stk_device_name or current_user.stk_device_serial}")
 
     # Send all files
     sent_count = 0
@@ -285,7 +283,7 @@ async def stk_send_to_kindle(
 
 
 @router.post("/stk/logout")
-async def stk_logout():
+async def stk_logout(current_user: User = Depends(get_current_user)):
     """
     Clear STK session
     """

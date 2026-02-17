@@ -28,6 +28,8 @@ from app.schemas.chapter import ChapterResponse
 from app.services.anilist import AnilistService
 from app.services.scraper import TomosMangaScraper
 from app.services.mangaycomics_scraper import MangayComicsScraper
+from app.models.user import User
+from app.core.deps import get_current_user
 import logging
 from slugify import slugify
 from pydantic import BaseModel
@@ -46,7 +48,8 @@ router = APIRouter(prefix="/manga", tags=["manga"])
 async def get_trending_manga(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get trending manga from Anilist
@@ -58,7 +61,7 @@ async def get_trending_manga(
     result = []
     for item in trending:
         # Check if in library
-        in_library = db.query(Manga).filter(Manga.anilist_id == item['anilist_id']).first()
+        in_library = db.query(Manga).filter(Manga.anilist_id == item['anilist_id']).filter(Manga.user_id == current_user.id).first()
 
         card = {
             "id": in_library.id if in_library else 0,
@@ -84,7 +87,8 @@ async def get_trending_manga(
 async def get_popular_manga(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get popular manga from Anilist
@@ -94,7 +98,7 @@ async def get_popular_manga(
 
     result = []
     for item in popular:
-        in_library = db.query(Manga).filter(Manga.anilist_id == item['anilist_id']).first()
+        in_library = db.query(Manga).filter(Manga.anilist_id == item['anilist_id']).filter(Manga.user_id == current_user.id).first()
 
         card = {
             "id": in_library.id if in_library else 0,
@@ -121,7 +125,8 @@ async def search_manga(
     q: str = Query(..., min_length=2, description="Search query"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Search manga on AniList - the best manga/anime database
@@ -134,7 +139,7 @@ async def search_manga(
 
         for item in anilist_results['results']:
             # Check if already in library
-            in_library = db.query(Manga).filter(Manga.anilist_id == item['anilist_id']).first()
+            in_library = db.query(Manga).filter(Manga.anilist_id == item['anilist_id']).filter(Manga.user_id == current_user.id).first()
 
             results.append(MangaSearch(
                 title=item['title'],
@@ -171,12 +176,13 @@ def list_manga(
     monitored: Optional[bool] = None,
     status: Optional[str] = None,
     search: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     List manga in library with filtering
     """
-    query = db.query(Manga)
+    query = db.query(Manga).filter(Manga.user_id == current_user.id)
 
     if monitored is not None:
         query = query.filter(Manga.monitored == monitored)
@@ -202,14 +208,15 @@ def list_manga(
 async def add_manga_from_anilist(
     data: MangaCreateFromAnilist,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Add manga to library from Anilist ID (Kaizoku-style)
     This is the preferred method!
     """
-    # Check if already exists
-    existing = db.query(Manga).filter(Manga.anilist_id == data.anilist_id).first()
+    # Check if already exists for this user
+    existing = db.query(Manga).filter(Manga.anilist_id == data.anilist_id).filter(Manga.user_id == current_user.id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Manga already in library")
 
@@ -236,6 +243,7 @@ async def add_manga_from_anilist(
         slug=slug,
         source_url=data.source_url,
         source_type='tomosmanga' if data.source_url else None,
+        user_id=current_user.id,
 
         # Anilist metadata
         anilist_id=metadata['anilist_id'],
@@ -317,14 +325,15 @@ async def add_manga_from_anilist(
 async def add_manga_from_url(
     data: MangaCreateFromURL,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Add manga from direct URL (legacy method)
     Optionally link to Anilist for metadata
     """
-    # Check if already exists
-    existing = db.query(Manga).filter(Manga.source_url == data.source_url).first()
+    # Check if already exists for this user
+    existing = db.query(Manga).filter(Manga.source_url == data.source_url).filter(Manga.user_id == current_user.id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Manga already in library")
 
@@ -357,6 +366,7 @@ async def add_manga_from_url(
         slug=slug,
         source_url=data.source_url,
         source_type='tomosmanga',
+        user_id=current_user.id,
         description=metadata.get('description') if metadata else details.get('description'),
         cover_image=metadata.get('cover_image') if metadata else details.get('cover'),
         monitored=data.monitored,
@@ -419,20 +429,22 @@ async def add_manga_from_url(
 # ============================================================================
 
 @router.get("/library/stats", response_model=LibraryStats)
-def get_library_stats(db: Session = Depends(get_db)):
+def get_library_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Get overall library statistics
     """
-    total_manga = db.query(func.count(Manga.id)).scalar()
-    monitored = db.query(func.count(Manga.id)).filter(Manga.monitored == True).scalar()
-    total_chapters = db.query(func.count(Chapter.id)).scalar()
+    user_manga_ids = db.query(Manga.id).filter(Manga.user_id == current_user.id).subquery()
+    total_manga = db.query(func.count(Manga.id)).filter(Manga.user_id == current_user.id).scalar()
+    monitored = db.query(func.count(Manga.id)).filter(Manga.user_id == current_user.id, Manga.monitored == True).scalar()
+    total_chapters = db.query(func.count(Chapter.id)).filter(Chapter.manga_id.in_(user_manga_ids)).scalar()
     downloaded = db.query(func.count(Chapter.id)).filter(
+        Chapter.manga_id.in_(user_manga_ids),
         Chapter.status.in_(['downloaded', 'converted', 'sent'])
     ).scalar()
-    pending = db.query(func.count(Chapter.id)).filter(Chapter.status == 'pending').scalar()
+    pending = db.query(func.count(Chapter.id)).filter(Chapter.manga_id.in_(user_manga_ids), Chapter.status == 'pending').scalar()
 
     # Genre distribution
-    manga_with_genres = db.query(Manga).filter(Manga.genres != None).all()
+    manga_with_genres = db.query(Manga).filter(Manga.user_id == current_user.id, Manga.genres != None).all()
     genre_counts = {}
     for manga in manga_with_genres:
         if manga.genres:
@@ -441,7 +453,7 @@ def get_library_stats(db: Session = Depends(get_db)):
 
     # Status distribution
     status_counts = {}
-    for manga in db.query(Manga).all():
+    for manga in db.query(Manga).filter(Manga.user_id == current_user.id).all():
         if manga.status:
             status_counts[manga.status] = status_counts.get(manga.status, 0) + 1
 
@@ -462,11 +474,11 @@ def get_library_stats(db: Session = Depends(get_db)):
 # ============================================================================
 
 @router.get("/{manga_id}", response_model=MangaDetailResponse)
-def get_manga(manga_id: int, db: Session = Depends(get_db)):
+def get_manga(manga_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Get detailed manga information
     """
-    manga = db.query(Manga).filter(Manga.id == manga_id).first()
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == current_user.id).first()
 
     if not manga:
         raise HTTPException(status_code=404, detail="Manga not found")
@@ -500,12 +512,13 @@ async def update_manga(
     manga_id: int,
     data: MangaUpdate,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Update manga settings
     """
-    manga = db.query(Manga).filter(Manga.id == manga_id).first()
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == current_user.id).first()
 
     if not manga:
         raise HTTPException(status_code=404, detail="Manga not found")
@@ -534,13 +547,13 @@ async def update_manga(
 
 
 @router.get("/{manga_id}/search-source")
-async def search_manga_source(manga_id: int, db: Session = Depends(get_db)):
+async def search_manga_source(manga_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Busca automáticamente la source_url para un manga sin source
     """
     from app.services.tomosmanga_search import TomosMangaSearch, MangayComicsSearch
 
-    manga = db.query(Manga).filter(Manga.id == manga_id).first()
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == current_user.id).first()
 
     if not manga:
         raise HTTPException(status_code=404, detail="Manga not found")
@@ -569,12 +582,13 @@ async def set_manga_source(
     manga_id: int,
     source_url: str,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Establece la source_url de un manga y descarga los capítulos
     """
-    manga = db.query(Manga).filter(Manga.id == manga_id).first()
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == current_user.id).first()
 
     if not manga:
         raise HTTPException(status_code=404, detail="Manga not found")
@@ -605,11 +619,11 @@ async def set_manga_source(
 
 
 @router.delete("/{manga_id}", status_code=204)
-def delete_manga(manga_id: int, db: Session = Depends(get_db)):
+def delete_manga(manga_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Delete manga and all its chapters
     """
-    manga = db.query(Manga).filter(Manga.id == manga_id).first()
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == current_user.id).first()
 
     if not manga:
         raise HTTPException(status_code=404, detail="Manga not found")
@@ -626,12 +640,13 @@ def delete_manga(manga_id: int, db: Session = Depends(get_db)):
 async def refresh_manga(
     manga_id: int,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Force refresh of manga chapters
     """
-    manga = db.query(Manga).filter(Manga.id == manga_id).first()
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == current_user.id).first()
 
     if not manga:
         raise HTTPException(status_code=404, detail="Manga not found")
@@ -642,11 +657,11 @@ async def refresh_manga(
 
 
 @router.get("/{manga_id}/stats", response_model=MangaStats)
-def get_manga_stats(manga_id: int, db: Session = Depends(get_db)):
+def get_manga_stats(manga_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Get detailed statistics for a manga
     """
-    manga = db.query(Manga).filter(Manga.id == manga_id).first()
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == current_user.id).first()
 
     if not manga:
         raise HTTPException(status_code=404, detail="Manga not found")
@@ -695,12 +710,13 @@ def get_manga_stats(manga_id: int, db: Session = Depends(get_db)):
 def get_manga_chapters(
     manga_id: int,
     status: Optional[str] = Query(None, description="Filter by status"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get all chapters for a manga
     """
-    manga = db.query(Manga).filter(Manga.id == manga_id).first()
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == current_user.id).first()
 
     if not manga:
         raise HTTPException(status_code=404, detail="Manga not found")
@@ -725,15 +741,16 @@ async def download_chapters(
     manga_id: int,
     request: ChapterDownloadRequest,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Queue specific chapters for download.
-    
+
     Automatically deduplicates chapters that share the same download_url
     (bundled volumes) to avoid downloading the same file multiple times.
     """
-    manga = db.query(Manga).filter(Manga.id == manga_id).first()
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == current_user.id).first()
 
     if not manga:
         raise HTTPException(status_code=404, detail="Manga not found")

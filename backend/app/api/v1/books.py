@@ -29,6 +29,8 @@ from app.services.openlibrary import get_openlibrary_service
 from app.services.book_scrapers import LectulandiaScraper
 import logging
 from slugify import slugify
+from app.models.user import User
+from app.core.deps import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,8 @@ async def search_books(
     limit: int = Query(20, ge=1, le=40),
     language: Optional[str] = Query(None, description="Language filter (es, en, etc.)"),
     source: str = Query("all", description="Search source (all, google, openlibrary, scrapers, lectulandia)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Search books on Google Books, Open Library, or EPUB scrapers
@@ -70,7 +73,8 @@ async def search_books(
             for item in search_results['results']:
                 # Check if already in library
                 in_library = db.query(Book).filter(
-                    Book.google_books_id == item.get('google_books_id')
+                    Book.google_books_id == item.get('google_books_id'),
+                    Book.user_id == current_user.id
                 ).first()
 
                 results.append({
@@ -87,7 +91,8 @@ async def search_books(
 
             for item in search_results['results']:
                 in_library = db.query(Book).filter(
-                    Book.openlibrary_id == item.get('openlibrary_id')
+                    Book.openlibrary_id == item.get('openlibrary_id'),
+                    Book.user_id == current_user.id
                 ).first()
 
                 results.append({
@@ -111,7 +116,8 @@ async def search_books(
                         # Check by title (fuzzy match)
                         # Note: Can't use .contains() on JSON field in PostgreSQL easily
                         in_library = db.query(Book).filter(
-                            Book.title.ilike(f"%{item['title'][:40]}%")
+                            Book.title.ilike(f"%{item['title'][:40]}%"),
+                            Book.user_id == current_user.id
                         ).first()
 
                         scraper_results.append({
@@ -170,12 +176,13 @@ async def get_library(
     sort: str = Query("title", description="Sort by: title, rating, recent"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get books library with filtering and sorting
     """
-    query = db.query(Book)
+    query = db.query(Book).filter(Book.user_id == current_user.id)
 
     # Apply filters
     if monitored is not None:
@@ -215,18 +222,20 @@ async def get_library(
 
 
 @router.get("/library/stats", response_model=BookLibraryStats)
-async def get_library_stats(db: Session = Depends(get_db)):
+async def get_library_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Get library statistics
     """
-    total_books = db.query(Book).count()
-    monitored_books = db.query(Book).filter(Book.monitored == True).count()
+    user_book_ids = db.query(Book.id).filter(Book.user_id == current_user.id).subquery()
+    total_books = db.query(Book).filter(Book.user_id == current_user.id).count()
+    monitored_books = db.query(Book).filter(Book.user_id == current_user.id, Book.monitored == True).count()
 
-    total_files = db.query(BookChapter).count()
+    total_files = db.query(BookChapter).filter(BookChapter.book_id.in_(user_book_ids)).count()
     downloaded_files = db.query(BookChapter).filter(
+        BookChapter.book_id.in_(user_book_ids),
         BookChapter.status.in_(["downloaded", "sent"])
     ).count()
-    sent_files = db.query(BookChapter).filter(BookChapter.status == "sent").count()
+    sent_files = db.query(BookChapter).filter(BookChapter.book_id.in_(user_book_ids), BookChapter.status == "sent").count()
 
     return BookLibraryStats(
         total_books=total_books,
@@ -238,11 +247,11 @@ async def get_library_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/{book_id}/stats")
-async def get_book_stats(book_id: int, db: Session = Depends(get_db)):
+async def get_book_stats(book_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Get download statistics for a specific book
     """
-    book = db.query(Book).filter(Book.id == book_id).first()
+    book = db.query(Book).filter(Book.id == book_id, Book.user_id == current_user.id).first()
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
@@ -262,11 +271,11 @@ async def get_book_stats(book_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{book_id}", response_model=BookDetailResponse)
-async def get_book(book_id: int, db: Session = Depends(get_db)):
+async def get_book(book_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Get detailed book information with chapters
     """
-    book = db.query(Book).filter(Book.id == book_id).first()
+    book = db.query(Book).filter(Book.id == book_id, Book.user_id == current_user.id).first()
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
@@ -291,15 +300,17 @@ async def get_book(book_id: int, db: Session = Depends(get_db)):
 async def add_book_from_google_books(
     data: BookCreateFromGoogleBooks,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Add book to library from Google Books ID
     Automatically searches all scrapers for download links
     """
-    # Check if already exists
+    # Check if already exists for this user
     existing = db.query(Book).filter(
-        Book.google_books_id == data.google_books_id
+        Book.google_books_id == data.google_books_id,
+        Book.user_id == current_user.id
     ).first()
 
     if existing:
@@ -336,6 +347,7 @@ async def add_book_from_google_books(
         info_link=metadata.get('info_link'),
         monitored=data.monitored,
         auto_download=data.auto_download,
+        user_id=current_user.id,
         source_urls={}
     )
 
@@ -353,7 +365,8 @@ async def add_book_from_google_books(
 async def add_book_from_url(
     data: BookCreateFromURL,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Add book from scraper URL directly
@@ -393,6 +406,7 @@ async def add_book_from_url(
         language="es",
         monitored=data.monitored,
         auto_download=data.auto_download,
+        user_id=current_user.id,
         source_urls={scraper_name: data.source_url},
         preferred_source=scraper_name
     )
@@ -440,12 +454,13 @@ async def add_book_from_url(
 async def update_book(
     book_id: int,
     data: BookUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Update book settings
     """
-    book = db.query(Book).filter(Book.id == book_id).first()
+    book = db.query(Book).filter(Book.id == book_id, Book.user_id == current_user.id).first()
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
@@ -462,11 +477,11 @@ async def update_book(
 
 
 @router.delete("/{book_id}")
-async def delete_book(book_id: int, db: Session = Depends(get_db)):
+async def delete_book(book_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Delete book from library
     """
-    book = db.query(Book).filter(Book.id == book_id).first()
+    book = db.query(Book).filter(Book.id == book_id, Book.user_id == current_user.id).first()
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
@@ -480,12 +495,13 @@ async def delete_book(book_id: int, db: Session = Depends(get_db)):
 async def refresh_book(
     book_id: int,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Refresh book - re-check scrapers for new files
     """
-    book = db.query(Book).filter(Book.id == book_id).first()
+    book = db.query(Book).filter(Book.id == book_id, Book.user_id == current_user.id).first()
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
@@ -500,11 +516,11 @@ async def refresh_book(
 # ============================================================================
 
 @router.get("/{book_id}/chapters", response_model=List[BookChapterResponse])
-async def get_book_chapters(book_id: int, db: Session = Depends(get_db)):
+async def get_book_chapters(book_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Get chapters for a book
     """
-    book = db.query(Book).filter(Book.id == book_id).first()
+    book = db.query(Book).filter(Book.id == book_id, Book.user_id == current_user.id).first()
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
@@ -519,12 +535,13 @@ async def get_book_chapters(book_id: int, db: Session = Depends(get_db)):
 async def download_chapters(
     book_id: int,
     data: ChapterDownloadRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Queue selected chapters for download using the download queue system
     """
-    book = db.query(Book).filter(Book.id == book_id).first()
+    book = db.query(Book).filter(Book.id == book_id, Book.user_id == current_user.id).first()
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
@@ -576,13 +593,13 @@ async def download_chapters(
 async def send_book_to_kindle(
     book_id: int,
     chapter_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Send downloaded book EPUB to Kindle via STK
     """
     from app.services.stk_kindle_sender import get_stk_sender
-    from app.models.settings import AppSettings
 
     sender = get_stk_sender()
 
@@ -622,12 +639,11 @@ async def send_book_to_kindle(
     if book.authors and len(book.authors) > 0:
         author = book.authors[0]
 
-    # Get device serials from settings
+    # Get device serials from user settings
     device_serials = None
-    settings = db.query(AppSettings).first()
-    if settings and settings.stk_device_serial:
-        device_serials = [settings.stk_device_serial]
-        logger.info(f"Using saved device: {settings.stk_device_name or settings.stk_device_serial}")
+    if current_user.stk_device_serial:
+        device_serials = [current_user.stk_device_serial]
+        logger.info(f"Using saved device: {current_user.stk_device_name or current_user.stk_device_serial}")
 
     # Send to Kindle
     title = book.title

@@ -42,6 +42,8 @@ from app.services.comic_service import (
     quick_check_availability,
     search_scrapers_for_comic,
 )
+from app.models.user import User
+from app.core.deps import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,8 @@ async def search_comics(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
     check_availability: bool = Query(True, description="Check if sources are available (slower but filters results)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Search comics on ComicVine with optional source availability checking
@@ -80,7 +83,7 @@ async def search_comics(
     # Prepare results with basic info
     for item in search_result.get('results', []):
         # Check if in library
-        in_library = db.query(Comic).filter(Comic.comicvine_id == item['comicvine_id']).first()
+        in_library = db.query(Comic).filter(Comic.comicvine_id == item['comicvine_id'], Comic.user_id == current_user.id).first()
 
         # Clean start_year - ComicVine sometimes returns strings like ' 1999'
         start_year = item.get('start_year')
@@ -186,19 +189,20 @@ async def search_comics(
 @router.get("/comicvine/{comicvine_id}")
 async def get_comicvine_details(
     comicvine_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get detailed comic info from ComicVine (preview before adding)
     """
     comicvine = get_comicvine_service()
     details = await comicvine.get_volume(comicvine_id)
-    
+
     if not details:
         raise HTTPException(status_code=404, detail="Comic not found on ComicVine")
-    
+
     # Check if in library
-    in_library = db.query(Comic).filter(Comic.comicvine_id == comicvine_id).first()
+    in_library = db.query(Comic).filter(Comic.comicvine_id == comicvine_id, Comic.user_id == current_user.id).first()
     
     return {
         **details,
@@ -220,12 +224,13 @@ async def get_library(
     order: str = Query("asc", regex="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get comics library with filters
     """
-    query = db.query(Comic)
+    query = db.query(Comic).filter(Comic.user_id == current_user.id)
     
     # Filters
     if monitored is not None:
@@ -284,7 +289,8 @@ async def add_comic_from_url(
     issues: int = 0,
     cover: str = None,
     background_tasks: BackgroundTasks = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Add comic directly from scraper URL (for Spanish search results)
@@ -306,8 +312,8 @@ async def add_comic_from_url(
 
     slug = slugify(title)
 
-    # Check if already exists
-    existing = db.query(Comic).filter(Comic.slug == slug).first()
+    # Check if already exists for this user
+    existing = db.query(Comic).filter(Comic.slug == slug, Comic.user_id == current_user.id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Comic already in library")
 
@@ -359,7 +365,8 @@ async def add_comic_from_url(
             artists=comicvine_details.get('artists'),
             comicvine_url=comicvine_details.get('comicvine_url'),
             comicvine_search_attempted=True,
-            monitored=True
+            monitored=True,
+            user_id=current_user.id
         )
         logger.info(f"Created comic with ComicVine metadata")
     else:
@@ -371,7 +378,8 @@ async def add_comic_from_url(
             cover_image=cover,
             comicvine_search_attempted=True,
             publisher="Unknown",
-            monitored=True
+            monitored=True,
+            user_id=current_user.id
         )
         logger.info(f"Created comic without ComicVine metadata")
     db.add(comic)
@@ -430,7 +438,8 @@ async def add_comic_from_url(
 async def add_comic(
     data: ComicCreate,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Add comic to library from ComicVine
@@ -450,8 +459,8 @@ async def add_comic(
         slug = slugify(title)
         count_of_issues = data.volume_to_add.issues
 
-        # Check if this specific volume already exists (by slug)
-        existing = db.query(Comic).filter(Comic.slug == slug).first()
+        # Check if this specific volume already exists for this user
+        existing = db.query(Comic).filter(Comic.slug == slug, Comic.user_id == current_user.id).first()
         if existing:
             raise HTTPException(status_code=400, detail=f"Vol {data.volume_to_add.number} already in library")
     else:
@@ -459,8 +468,8 @@ async def add_comic(
         slug = slugify(title)
         count_of_issues = details.get('count_of_issues')
 
-        # Check if already exists
-        existing = db.query(Comic).filter(Comic.comicvine_id == data.comicvine_id).first()
+        # Check if already exists for this user
+        existing = db.query(Comic).filter(Comic.comicvine_id == data.comicvine_id, Comic.user_id == current_user.id).first()
         if existing:
             raise HTTPException(status_code=400, detail="Comic already in library")
 
@@ -483,6 +492,7 @@ async def add_comic(
         comicvine_url=details.get('comicvine_url'),
         monitored=True,
         auto_download=True,
+        user_id=current_user.id,
         created_at=datetime.utcnow()
     )
 
@@ -525,14 +535,15 @@ async def add_comic(
 
 
 @router.get("/stats", response_model=ComicStats)
-async def get_stats(db: Session = Depends(get_db)):
+async def get_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Get comic library statistics
     """
-    total_comics = db.query(func.count(Comic.id)).scalar()
-    monitored_comics = db.query(func.count(Comic.id)).filter(Comic.monitored == True).scalar()
-    total_issues = db.query(func.count(ComicIssue.id)).scalar()
-    downloaded_issues = db.query(func.count(ComicIssue.id)).filter(ComicIssue.status == "downloaded").scalar()
+    user_comic_ids = db.query(Comic.id).filter(Comic.user_id == current_user.id).subquery()
+    total_comics = db.query(func.count(Comic.id)).filter(Comic.user_id == current_user.id).scalar()
+    monitored_comics = db.query(func.count(Comic.id)).filter(Comic.user_id == current_user.id, Comic.monitored == True).scalar()
+    total_issues = db.query(func.count(ComicIssue.id)).filter(ComicIssue.comic_id.in_(user_comic_ids)).scalar()
+    downloaded_issues = db.query(func.count(ComicIssue.id)).filter(ComicIssue.comic_id.in_(user_comic_ids), ComicIssue.status == "downloaded").scalar()
     
     return ComicStats(
         total_comics=total_comics or 0,
@@ -545,12 +556,13 @@ async def get_stats(db: Session = Depends(get_db)):
 @router.get("/{comic_id}", response_model=ComicDetailResponse)
 async def get_comic(
     comic_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get comic details with issues
     """
-    comic = db.query(Comic).filter(Comic.id == comic_id).first()
+    comic = db.query(Comic).filter(Comic.id == comic_id, Comic.user_id == current_user.id).first()
     if not comic:
         raise HTTPException(status_code=404, detail="Comic not found")
     
@@ -611,12 +623,13 @@ async def get_comic(
 async def update_comic(
     comic_id: int,
     data: ComicUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Update comic settings
     """
-    comic = db.query(Comic).filter(Comic.id == comic_id).first()
+    comic = db.query(Comic).filter(Comic.id == comic_id, Comic.user_id == current_user.id).first()
     if not comic:
         raise HTTPException(status_code=404, detail="Comic not found")
     
@@ -653,12 +666,13 @@ async def update_comic(
 @router.delete("/{comic_id}")
 async def delete_comic(
     comic_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Remove comic from library
     """
-    comic = db.query(Comic).filter(Comic.id == comic_id).first()
+    comic = db.query(Comic).filter(Comic.id == comic_id, Comic.user_id == current_user.id).first()
     if not comic:
         raise HTTPException(status_code=404, detail="Comic not found")
     
@@ -675,12 +689,13 @@ async def delete_comic(
 async def refresh_comic(
     comic_id: int,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Refresh comic metadata and issues from ComicVine
     """
-    comic = db.query(Comic).filter(Comic.id == comic_id).first()
+    comic = db.query(Comic).filter(Comic.id == comic_id, Comic.user_id == current_user.id).first()
     if not comic:
         raise HTTPException(status_code=404, detail="Comic not found")
     
@@ -701,7 +716,8 @@ async def refresh_comic(
 async def get_issues(
     comic_id: int,
     status: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get all issues for a comic
@@ -739,10 +755,11 @@ async def get_issues(
 @router.get("/{comic_id}/stats", response_model=ComicIssueStats)
 async def get_comic_stats(
     comic_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Get download statistics for a specific comic"""
-    comic = db.query(Comic).filter(Comic.id == comic_id).first()
+    comic = db.query(Comic).filter(Comic.id == comic_id, Comic.user_id == current_user.id).first()
     if not comic:
         raise HTTPException(status_code=404, detail="Comic not found")
 
@@ -762,10 +779,11 @@ async def get_comic_stats(
 async def download_issues(
     comic_id: int,
     data: IssueDownloadRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Queue selected issues for download via DownloadQueue"""
-    comic = db.query(Comic).filter(Comic.id == comic_id).first()
+    comic = db.query(Comic).filter(Comic.id == comic_id, Comic.user_id == current_user.id).first()
     if not comic:
         raise HTTPException(status_code=404, detail="Comic not found")
 
@@ -871,10 +889,11 @@ async def download_issues(
 async def search_sources(
     comic_id: int,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Search scrapers for download links"""
-    comic = db.query(Comic).filter(Comic.id == comic_id).first()
+    comic = db.query(Comic).filter(Comic.id == comic_id, Comic.user_id == current_user.id).first()
     if not comic:
         raise HTTPException(status_code=404, detail="Comic not found")
 
@@ -899,7 +918,8 @@ async def search_sources(
 async def send_issue_to_kindle(
     comic_id: int,
     issue_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Send a downloaded/converted issue to Kindle via STK.
@@ -909,7 +929,7 @@ async def send_issue_to_kindle(
     from app.services.stk_kindle_sender import get_stk_service
     from pathlib import Path
 
-    comic = db.query(Comic).filter(Comic.id == comic_id).first()
+    comic = db.query(Comic).filter(Comic.id == comic_id, Comic.user_id == current_user.id).first()
     if not comic:
         raise HTTPException(status_code=404, detail="Comic not found")
 

@@ -14,6 +14,8 @@ from app.models.book_chapter import BookChapter
 from app.models.comic import Comic, ComicIssue
 from app.models.download import DownloadQueue
 from app.schemas.download import DownloadQueueResponse, DownloadQueueDetailResponse
+from app.models.user import User
+from app.core.deps import get_current_user
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,8 @@ def list_queue(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     status: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     List download activity - chapters with real download activity
@@ -53,7 +56,7 @@ def list_queue(
     result = []
 
     # Query MANGA chapters with download activity
-    manga_query = db.query(Chapter).join(Manga)
+    manga_query = db.query(Chapter).join(Manga).filter(Manga.user_id == current_user.id)
 
     if status:
         chapter_statuses = status_map.get(status, [status])
@@ -113,7 +116,7 @@ def list_queue(
         })
 
     # Query BOOK chapters with download activity
-    book_query = db.query(BookChapter).join(Book)
+    book_query = db.query(BookChapter).join(Book).filter(Book.user_id == current_user.id)
 
     if status:
         chapter_statuses = status_map.get(status, [status])
@@ -172,7 +175,7 @@ def list_queue(
         })
 
     # Query COMIC issues with download activity
-    comic_query = db.query(ComicIssue).join(Comic)
+    comic_query = db.query(ComicIssue).join(Comic).filter(Comic.user_id == current_user.id)
 
     if status:
         chapter_statuses = status_map.get(status, [status])
@@ -239,7 +242,7 @@ def list_queue(
 
 
 @router.post("/reset-stuck")
-def reset_stuck_downloads(db: Session = Depends(get_db)):
+def reset_stuck_downloads(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Reset stuck downloads (items with status='downloading' but no progress)
     This typically happens after a container restart
@@ -274,7 +277,8 @@ def reset_stuck_downloads(db: Session = Depends(get_db)):
 def add_to_queue(
     chapter_id: int,
     priority: int = Query(0, ge=0, le=10),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Add chapter to download queue
@@ -317,7 +321,7 @@ def add_to_queue(
 
 
 @router.delete("/{chapter_id}", status_code=204)
-def remove_from_queue(chapter_id: int, db: Session = Depends(get_db)):
+def remove_from_queue(chapter_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Remove chapter from download queue (reset its status)
 
@@ -343,7 +347,7 @@ def remove_from_queue(chapter_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{chapter_id}/cancel")
-def cancel_download(chapter_id: int, db: Session = Depends(get_db)):
+def cancel_download(chapter_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Cancel a download in progress and clean up partial files.
     
@@ -478,7 +482,7 @@ def cancel_download(chapter_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{chapter_id}/retry")
-def retry_download(chapter_id: int, db: Session = Depends(get_db)):
+def retry_download(chapter_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Retry failed download
 
@@ -515,7 +519,8 @@ def retry_download(chapter_id: int, db: Session = Depends(get_db)):
 @router.post("/clear")
 def clear_queue(
     status: Optional[str] = Query(None, description="Clear only items with this status"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Clear download queue (reset chapter statuses)
@@ -552,7 +557,7 @@ def clear_queue(
 
 
 @router.delete("/{chapter_id}/file")
-def delete_downloaded_file(chapter_id: int, db: Session = Depends(get_db)):
+def delete_downloaded_file(chapter_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Delete downloaded file and reset chapter status.
 
@@ -631,7 +636,7 @@ def delete_downloaded_file(chapter_id: int, db: Session = Depends(get_db)):
 # ============================================================================
 
 @router.post("/comic/{issue_id}/cancel")
-def cancel_comic_download(issue_id: int, db: Session = Depends(get_db)):
+def cancel_comic_download(issue_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Cancel a comic issue download in progress and clean up partial files.
     If the issue is part of a bundle, ALL bundle issues will be cancelled.
@@ -709,7 +714,7 @@ def cancel_comic_download(issue_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/comic/{issue_id}/retry")
-def retry_comic_download(issue_id: int, db: Session = Depends(get_db)):
+def retry_comic_download(issue_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Retry a failed comic issue download"""
     issue = db.query(ComicIssue).filter(ComicIssue.id == issue_id).first()
     if not issue:
@@ -738,7 +743,7 @@ def retry_comic_download(issue_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/comic/{issue_id}/file")
-def delete_comic_file(issue_id: int, db: Session = Depends(get_db)):
+def delete_comic_file(issue_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Delete downloaded comic file and reset issue status"""
     import os
     from pathlib import Path
@@ -798,7 +803,7 @@ def delete_comic_file(issue_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/stats")
-def get_queue_stats(db: Session = Depends(get_db)):
+def get_queue_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Get queue statistics based on chapter status
 
@@ -812,16 +817,21 @@ def get_queue_stats(db: Session = Depends(get_db)):
     """
     from sqlalchemy import func
 
-    # Count from chapters table - only real activity
+    # Count from chapters table - only real activity for this user
+    user_manga_ids = db.query(Manga.id).filter(Manga.user_id == current_user.id).subquery()
+
     downloading = db.query(func.count(Chapter.id)).filter(
+        Chapter.manga_id.in_(user_manga_ids),
         Chapter.status == 'downloading'
     ).scalar() or 0
 
     completed = db.query(func.count(Chapter.id)).filter(
+        Chapter.manga_id.in_(user_manga_ids),
         Chapter.status.in_(['downloaded', 'converted', 'sent'])
     ).scalar() or 0
 
     failed = db.query(func.count(Chapter.id)).filter(
+        Chapter.manga_id.in_(user_manga_ids),
         Chapter.status == 'error'
     ).scalar() or 0
 

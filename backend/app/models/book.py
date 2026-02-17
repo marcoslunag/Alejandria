@@ -4,7 +4,7 @@ Represents a book or book series being monitored
 Integrated with Google Books/Open Library for metadata
 """
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float, JSON, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -16,6 +16,7 @@ class Book(Base):
     __tablename__ = "books"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Basic info
     title = Column(String(500), nullable=False, index=True)

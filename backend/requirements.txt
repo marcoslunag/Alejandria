@@ -36,6 +36,11 @@ python-slugify==8.0.1
 tenacity>=8.2
 pycryptodome>=3.9.6
 
+# Authentication
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+email-validator==2.1.0
+
 # Environment
 python-dotenv==1.0.0
 

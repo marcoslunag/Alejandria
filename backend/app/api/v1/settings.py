@@ -1,9 +1,9 @@
 """
 Settings API Endpoints
-Manage application settings (KCC, STK configuration)
+Per-user settings (KCC, STK configuration)
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
@@ -13,7 +13,8 @@ import json
 from pathlib import Path
 
 from app.database import get_db
-from app.models.settings import AppSettings
+from app.models.user import User
+from app.core.deps import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,9 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 # Pydantic schemas
 class SettingsResponse(BaseModel):
-    # KCC settings
     kcc_profile: str = "KPW5"
-    # STK device settings
     stk_device_serial: Optional[str] = None
     stk_device_name: Optional[str] = None
-    # Feature flags
     auto_send_to_kindle: bool = False
     is_stk_configured: bool = False
 
@@ -55,95 +53,75 @@ class SettingsResponse(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    # KCC settings
     kcc_profile: Optional[str] = None
-    # STK device settings
     stk_device_serial: Optional[str] = None
     stk_device_name: Optional[str] = None
-    # Feature flags
     auto_send_to_kindle: Optional[bool] = None
 
 
-def get_or_create_settings(db: Session) -> AppSettings:
-    """Get settings from DB or create default"""
-    settings = db.query(AppSettings).first()
-    if not settings:
-        settings = AppSettings()
-        db.add(settings)
-        db.commit()
-        db.refresh(settings)
-    return settings
-
-
 @router.get("", response_model=SettingsResponse)
-async def get_settings(db: Session = Depends(get_db)):
-    """
-    Get current application settings
-    """
-    settings = get_or_create_settings(db)
-
+async def get_settings(current_user: User = Depends(get_current_user)):
+    """Get current user's settings"""
     return SettingsResponse(
-        kcc_profile=settings.kcc_profile or "KPW5",
-        stk_device_serial=settings.stk_device_serial,
-        stk_device_name=settings.stk_device_name,
-        auto_send_to_kindle=settings.auto_send_to_kindle,
-        is_stk_configured=settings.is_stk_configured
+        kcc_profile=current_user.kcc_profile or "KPW5",
+        stk_device_serial=current_user.stk_device_serial,
+        stk_device_name=current_user.stk_device_name,
+        auto_send_to_kindle=current_user.auto_send_to_kindle,
+        is_stk_configured=current_user.is_stk_configured
     )
 
 
 @router.post("", response_model=SettingsResponse)
-async def save_settings(data: SettingsUpdate, db: Session = Depends(get_db)):
-    """
-    Save application settings
-    """
-    settings = get_or_create_settings(db)
-
+async def save_settings(
+    data: SettingsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Save current user's settings"""
     if data.kcc_profile is not None:
-        settings.kcc_profile = data.kcc_profile
-        write_kcc_config(settings.kcc_profile)
+        current_user.kcc_profile = data.kcc_profile
+        write_kcc_config(current_user.kcc_profile)
 
     if data.stk_device_serial is not None:
-        settings.stk_device_serial = data.stk_device_serial
-        
+        current_user.stk_device_serial = data.stk_device_serial
+
     if data.stk_device_name is not None:
-        settings.stk_device_name = data.stk_device_name
+        current_user.stk_device_name = data.stk_device_name
 
     if data.auto_send_to_kindle is not None:
-        settings.auto_send_to_kindle = data.auto_send_to_kindle
+        current_user.auto_send_to_kindle = data.auto_send_to_kindle
 
     db.commit()
-    db.refresh(settings)
+    db.refresh(current_user)
 
-    logger.info("Settings updated")
+    logger.info(f"Settings updated for user {current_user.username}")
 
     return SettingsResponse(
-        kcc_profile=settings.kcc_profile or "KPW5",
-        stk_device_serial=settings.stk_device_serial,
-        stk_device_name=settings.stk_device_name,
-        auto_send_to_kindle=settings.auto_send_to_kindle,
-        is_stk_configured=settings.is_stk_configured
+        kcc_profile=current_user.kcc_profile or "KPW5",
+        stk_device_serial=current_user.stk_device_serial,
+        stk_device_name=current_user.stk_device_name,
+        auto_send_to_kindle=current_user.auto_send_to_kindle,
+        is_stk_configured=current_user.is_stk_configured
     )
 
 
 @router.get("/terabox-status")
-async def get_terabox_status():
-    """
-    Get TeraBox bypass status
-    """
+async def get_terabox_status(current_user: User = Depends(get_current_user)):
+    """Get TeraBox bypass status"""
     try:
         terabox_cookie = os.getenv('TERABOX_COOKIE', '')
-        
+
         has_cookies = bool(terabox_cookie and 'ndus=' in terabox_cookie)
-        
+
         cookies_found = []
         if terabox_cookie:
             for part in terabox_cookie.split(';'):
                 if '=' in part:
                     key = part.strip().split('=', 1)[0].strip()
                     cookies_found.append(key)
-        
+
         is_valid = 'ndus' in cookies_found
-        
+
         return {
             "ok": True,
             "is_configured": has_cookies,
