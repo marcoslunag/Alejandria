@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { mangaApi } from '../services/api';
 import ContentGrid from '../components/ContentGrid';
-import { FaBook, FaFilter, FaSync, FaSortAmountDown } from 'react-icons/fa';
+import { FaBook, FaFilter, FaSync, FaSortAmountDown, FaSearch } from 'react-icons/fa';
 
 const Library = () => {
+  const navigate = useNavigate();
   const [manga, setManga] = useState([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
@@ -74,13 +76,22 @@ const Library = () => {
               Gestiona tu colección de manga
             </p>
           </div>
-          <button
-            onClick={loadLibrary}
-            className="btn btn-secondary flex items-center gap-2"
-          >
-            <FaSync />
-            <span>Actualizar</span>
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => navigate('/search')}
+              className="btn bg-primary hover:bg-primary/80 text-white flex items-center gap-2"
+            >
+              <FaSearch />
+              <span>Buscar Manga</span>
+            </button>
+            <button
+              onClick={loadLibrary}
+              className="btn btn-secondary"
+              title="Actualizar"
+            >
+              <FaSync />
+            </button>
+          </div>
         </div>
 
         {/* Stats */}

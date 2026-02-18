@@ -199,7 +199,7 @@ export const comicApi = {
   downloadIssues: (comicId, issueIds) =>
     api.post(`/comics/${comicId}/issues/download`, { issue_ids: issueIds }),
 
-  // Search sources (GetComics)
+  // Search sources
   searchSources: (comicId) =>
     api.post(`/comics/${comicId}/search-sources`),
 

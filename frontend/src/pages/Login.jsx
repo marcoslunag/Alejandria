@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { FaUser, FaLock } from 'react-icons/fa';
 
@@ -17,8 +17,12 @@ const Login = () => {
     setLoading(true);
 
     try {
-      await login(username, password);
-      navigate('/');
+      const { mustChangePassword } = await login(username, password);
+      if (mustChangePassword) {
+        navigate('/change-password');
+      } else {
+        navigate('/');
+      }
     } catch (err) {
       const detail = err.response?.data?.detail;
       setError(detail || 'Error al iniciar sesion');
@@ -91,13 +95,6 @@ const Login = () => {
               )}
             </button>
           </form>
-
-          <div className="mt-6 text-center text-gray-400">
-            <span>No tienes cuenta? </span>
-            <Link to="/register" className="text-primary hover:underline">
-              Registrate
-            </Link>
-          </div>
         </div>
       </div>
     </div>

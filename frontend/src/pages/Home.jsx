@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import toast from 'react-hot-toast';
 import { mangaApi } from '../services/api';
 import ContentGrid from '../components/ContentGrid';
 import { FaFire, FaStar, FaSortAmountDown } from 'react-icons/fa';
@@ -47,13 +48,12 @@ const Home = () => {
         monitored: true,
         auto_download: true,
       });
-      alert(`"${manga.title}" añadido a la biblioteca!`);
-      // Reload data to update "in_library" status
+      toast.success(`"${manga.title}" añadido a la biblioteca`);
       loadTrending();
       loadPopular();
     } catch (error) {
       console.error('Error añadiendo manga:', error);
-      alert('Error al añadir el manga. Inténtalo de nuevo.');
+      toast.error('Error al añadir el manga');
     }
   };
 

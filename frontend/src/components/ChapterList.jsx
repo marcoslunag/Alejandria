@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { mangaApi } from '../services/api';
 import SendToKindleButton from './SendToKindleButton';
 import {
@@ -80,21 +81,19 @@ const ChapterList = ({ mangaId }) => {
 
   const handleDownload = async () => {
     if (selectedTomos.length === 0) {
-      alert('Selecciona al menos un tomo para descargar');
+      toast.error('Selecciona al menos un tomo para descargar');
       return;
     }
 
     try {
       setDownloading(true);
       await mangaApi.downloadChapters(mangaId, selectedTomos);
-      alert(`${selectedTomos.length} tomo(s) añadido(s) a la cola de descargas!`);
+      toast.success(`${selectedTomos.length} tomo(s) añadido(s) a la cola`);
       setSelectedTomos([]);
-
-      // Reload after a delay to show updated status
       setTimeout(loadTomos, 2000);
     } catch (error) {
       console.error('Error descargando tomos:', error);
-      alert('Error al añadir tomos a la cola');
+      toast.error('Error al añadir tomos a la cola');
     } finally {
       setDownloading(false);
     }
@@ -102,9 +101,10 @@ const ChapterList = ({ mangaId }) => {
 
   const copyToClipboard = (text, tomoNumber) => {
     navigator.clipboard.writeText(text).then(() => {
-      alert(`URL del Tomo ${tomoNumber} copiada al portapapeles!`);
+      toast.success(`URL del Tomo ${tomoNumber} copiada`);
     }).catch(err => {
       console.error('Error copying to clipboard:', err);
+      toast.error('Error al copiar URL');
     });
   };
 

@@ -47,12 +47,41 @@ services:
       - CAPTCHA_API_KEY=${CAPTCHA_API_KEY:-}
       # FlareSolverr URL for bypassing Cloudflare protection
       - FLARESOLVERR_URL=${FLARESOLVERR_URL:-}
+      # Disable scheduler in backend (runs in separate container)
+      - DISABLE_SCHEDULER=true
     volumes:
       - downloads:/downloads
       - library:/library
       - ./backend:/app
     ports:
       - "9878:7878"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - alejandria
+
+  # Scheduler Worker (background jobs: downloads, conversions, Kindle sending)
+  scheduler:
+    build:
+      context: .
+      dockerfile: workers/scheduler/Dockerfile
+    container_name: alejandria-scheduler
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-alejandria}:${POSTGRES_PASSWORD:-alejandria}@postgres:5432/${POSTGRES_DB:-alejandria}
+      - DOWNLOAD_DIR=/downloads
+      - LIBRARY_DIR=/library
+      - CHECK_INTERVAL_HOURS=${CHECK_INTERVAL_HOURS:-6}
+      - COMICVINE_API_KEY=${COMICVINE_API_KEY:-}
+      - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY:-}
+      - CAPTCHA_API_KEY=${CAPTCHA_API_KEY:-}
+      - FLARESOLVERR_URL=${FLARESOLVERR_URL:-}
+    volumes:
+      - downloads:/downloads
+      - library:/library
     depends_on:
       postgres:
         condition: service_healthy

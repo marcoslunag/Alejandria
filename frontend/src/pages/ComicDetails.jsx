@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { comicApi, mangaApi } from '../services/api';
 import ContentDetailPage from '../components/ContentDetailPage';
 import ComicIssueList from '../components/ComicIssueList';
+import ConfirmModal from '../components/ConfirmModal';
 import {
   FaBuilding,
   FaUser,
@@ -27,6 +29,7 @@ const ComicDetails = () => {
   const [searchingSources, setSearchingSources] = useState(false);
   const [translatedDescription, setTranslatedDescription] = useState(null);
   const [translating, setTranslating] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     loadComic();
@@ -84,11 +87,11 @@ const ComicDetails = () => {
     try {
       setSearchingSources(true);
       await comicApi.searchSources(id);
-      alert('Buscando fuentes de descarga en segundo plano...');
+      toast('Buscando fuentes de descarga en segundo plano...', { icon: 'ℹ️' });
       setTimeout(() => loadComic(), 3000);
     } catch (error) {
       console.error('Error searching sources:', error);
-      alert('Error al buscar fuentes');
+      toast.error('Error al buscar fuentes');
     } finally {
       setSearchingSources(false);
     }
@@ -104,13 +107,14 @@ const ComicDetails = () => {
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Eliminar "${comic.title}" de la biblioteca?`)) return;
     try {
       setDeleting(true);
       await comicApi.deleteComic(id);
+      toast.success('Cómic eliminado');
       navigate('/comics');
     } catch (error) {
       console.error('Error deleting:', error);
+      toast.error('Error al eliminar el cómic');
       setDeleting(false);
     }
   };
@@ -166,7 +170,7 @@ const ComicDetails = () => {
   });
   actions.push({
     label: 'Eliminar',
-    onClick: handleDelete,
+    onClick: () => setShowDeleteConfirm(true),
     disabled: deleting,
     className: 'btn btn-secondary text-red-500 hover:bg-red-500/20 flex items-center gap-2',
     icon: deleting ? <FaSpinner className="animate-spin" /> : <FaTrash />,
@@ -203,6 +207,14 @@ const ComicDetails = () => {
       backLink={{ to: '/comics', label: 'Volver a Comics' }}
     >
       <ComicIssueList comicId={id} />
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        title="Eliminar cómic"
+        message={`¿Eliminar "${comic?.title}" de la biblioteca?`}
+        confirmText="Eliminar"
+        onConfirm={() => { setShowDeleteConfirm(false); handleDelete(); }}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </ContentDetailPage>
   );
 };

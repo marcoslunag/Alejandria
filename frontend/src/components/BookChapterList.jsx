@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { bookApi } from '../services/api';
 import BookSendToKindleButton from './BookSendToKindleButton';
 import {
@@ -66,21 +67,19 @@ const BookChapterList = ({ bookId }) => {
 
   const handleDownload = async () => {
     if (selectedChapters.length === 0) {
-      alert('Selecciona al menos un archivo para descargar');
+      toast.error('Selecciona al menos un archivo para descargar');
       return;
     }
 
     try {
       setDownloading(true);
       await bookApi.downloadChapters(bookId, selectedChapters);
-      alert(`${selectedChapters.length} archivo(s) añadido(s) a la cola de descargas!`);
+      toast.success(`${selectedChapters.length} archivo(s) añadido(s) a la cola`);
       setSelectedChapters([]);
-
-      // Reload after a delay to show updated status
       setTimeout(loadChapters, 2000);
     } catch (error) {
       console.error('Error descargando archivos:', error);
-      alert('Error al añadir archivos a la cola');
+      toast.error('Error al añadir archivos a la cola');
     } finally {
       setDownloading(false);
     }
@@ -88,9 +87,10 @@ const BookChapterList = ({ bookId }) => {
 
   const copyToClipboard = (text, chapterNumber) => {
     navigator.clipboard.writeText(text).then(() => {
-      alert(`URL del archivo ${chapterNumber} copiada al portapapeles!`);
+      toast.success(`URL del archivo ${chapterNumber} copiada`);
     }).catch(err => {
       console.error('Error copying to clipboard:', err);
+      toast.error('Error al copiar URL');
     });
   };
 

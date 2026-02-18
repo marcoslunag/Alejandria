@@ -37,7 +37,7 @@ tenacity>=8.2
 pycryptodome>=3.9.6
 
 # Authentication
-passlib[bcrypt]==1.7.4
+bcrypt>=4.0.0
 python-jose[cryptography]==3.3.0
 email-validator==2.1.0
 

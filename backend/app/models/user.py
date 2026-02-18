@@ -20,6 +20,8 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False)
+    must_change_password = Column(Boolean, default=False)
 
     # Per-user Kindle/KCC settings (replaces AppSettings)
     kcc_profile = Column(String(20), default="KPW5")

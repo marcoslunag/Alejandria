@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { comicApi } from '../services/api';
 import ComicSendToKindleButton from './ComicSendToKindleButton';
 import {
@@ -86,21 +87,19 @@ const ComicIssueList = ({ comicId }) => {
 
   const handleDownload = async () => {
     if (selectedIssues.length === 0) {
-      alert('Selecciona al menos un issue para descargar');
+      toast.error('Selecciona al menos un issue para descargar');
       return;
     }
 
     try {
       setDownloading(true);
       await comicApi.downloadIssues(comicId, selectedIssues);
-      alert(`${selectedIssues.length} issue(s) anadido(s) a la cola de descargas!`);
+      toast.success(`${selectedIssues.length} issue(s) añadido(s) a la cola`);
       setSelectedIssues([]);
-
-      // Reload after a delay to show updated status
       setTimeout(loadIssues, 2000);
     } catch (error) {
       console.error('Error descargando issues:', error);
-      alert('Error al anadir issues a la cola');
+      toast.error('Error al añadir issues a la cola');
     } finally {
       setDownloading(false);
     }
@@ -108,9 +107,10 @@ const ComicIssueList = ({ comicId }) => {
 
   const copyToClipboard = (text, issueNumber) => {
     navigator.clipboard.writeText(text).then(() => {
-      alert(`URL del issue #${issueNumber} copiada al portapapeles!`);
+      toast.success(`URL del issue #${issueNumber} copiada`);
     }).catch(err => {
       console.error('Error copying to clipboard:', err);
+      toast.error('Error al copiar URL');
     });
   };
 

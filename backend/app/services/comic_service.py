@@ -1819,7 +1819,7 @@ async def search_scrapers_for_comic(comic_id: int, title: str):
         # Update source_urls on comic
         if not comic.source_urls:
             comic.source_urls = {}
-        comic.source_urls["getcomics"] = f"https://getcomics.org/?s={quote(title)}"
+        comic.source_urls["scrapers"] = f"searched:{title}"
         comic.last_check = datetime.utcnow()
 
         issues_with_urls = sum(1 for i in all_issues if i.download_url is not None)

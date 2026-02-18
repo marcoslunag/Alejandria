@@ -6,10 +6,10 @@ LABEL maintainer="Alejandria" \
 WORKDIR /app
 
 # Copy package files
-COPY package.json ./
+COPY package.json package-lock.json ./
 
-# Install dependencies
-RUN npm install && npm cache clean --force
+# Install dependencies (ci uses lock file for faster, deterministic installs)
+RUN npm ci && npm cache clean --force
 
 # Copy source code
 COPY . .

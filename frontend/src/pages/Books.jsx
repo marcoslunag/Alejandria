@@ -88,10 +88,10 @@ const Books = () => {
             </button>
             <button
               onClick={loadLibrary}
-              className="btn btn-secondary flex items-center gap-2"
+              className="btn btn-secondary"
+              title="Actualizar"
             >
               <FaSync />
-              <span>Actualizar</span>
             </button>
           </div>
         </div>

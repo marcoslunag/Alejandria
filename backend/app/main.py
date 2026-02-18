@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
+import os
 import sys
 
 from app.config import get_settings
@@ -50,21 +51,25 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
 
-    # Initialize and start scheduler
+    # Initialize and start scheduler (unless disabled via env var)
     global scheduler
-    try:
-        from app.services.scheduler import set_scheduler
+    disable_scheduler = os.environ.get("DISABLE_SCHEDULER", "").lower() in ("true", "1", "yes")
+    if disable_scheduler:
+        logger.info("Scheduler disabled (DISABLE_SCHEDULER=true) - running in separate container")
+    else:
+        try:
+            from app.services.scheduler import set_scheduler
 
-        scheduler = ContentScheduler(
-            check_interval_hours=settings.CHECK_INTERVAL_HOURS,
-            download_dir=settings.DOWNLOAD_DIR,
-            library_dir=settings.LIBRARY_DIR
-        )
-        set_scheduler(scheduler)  # Set global instance
-        scheduler.start()
-        logger.info("Scheduler started")
-    except Exception as e:
-        logger.error(f"Scheduler initialization failed: {e}")
+            scheduler = ContentScheduler(
+                check_interval_hours=settings.CHECK_INTERVAL_HOURS,
+                download_dir=settings.DOWNLOAD_DIR,
+                library_dir=settings.LIBRARY_DIR
+            )
+            set_scheduler(scheduler)  # Set global instance
+            scheduler.start()
+            logger.info("Scheduler started")
+        except Exception as e:
+            logger.error(f"Scheduler initialization failed: {e}")
 
     yield
 

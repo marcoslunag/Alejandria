@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { mangaApi, bookApi, comicApi } from '../services/api';
 import SendToKindleButton from '../components/SendToKindleButton';
 import BookSendToKindleButton from '../components/BookSendToKindleButton';
+import ConfirmModal from '../components/ConfirmModal';
 import {
   FaDownload,
   FaSync,
@@ -22,6 +24,7 @@ const Queue = () => {
   const [filter, setFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [confirmAction, setConfirmAction] = useState(null);
 
   const loadQueue = useCallback(async () => {
     try {
@@ -58,37 +61,51 @@ const Queue = () => {
   };
 
   const cancelDownload = async (item) => {
-    if (!confirm('Cancelar esta descarga? Si forma parte de un bundle, se cancelaran todos los issues del bundle.')) return;
-    try {
-      if (item.content_type === 'manga') {
-        const response = await mangaApi.cancelDownload(item.chapter_id);
-        if (response.data?.bundle_size > 1) {
-          alert(`Se han cancelado ${response.data.bundle_size} tomos del bundle.`);
+    setConfirmAction({
+      title: 'Cancelar descarga',
+      message: 'Cancelar esta descarga? Si forma parte de un bundle, se cancelarán todos los issues del bundle.',
+      onConfirm: async () => {
+        setConfirmAction(null);
+        try {
+          if (item.content_type === 'manga') {
+            const response = await mangaApi.cancelDownload(item.chapter_id);
+            if (response.data?.bundle_size > 1) {
+              toast(`Se han cancelado ${response.data.bundle_size} tomos del bundle`, { icon: 'ℹ️' });
+            }
+          } else if (item.content_type === 'comic') {
+            const response = await comicApi.cancelDownload(item.comic_issue_id);
+            if (response.data?.bundle_size > 1) {
+              toast(`Se han cancelado ${response.data.bundle_size} issues del bundle`, { icon: 'ℹ️' });
+            }
+          }
+          loadQueue();
+        } catch (error) {
+          console.error('Error cancelando descarga:', error);
+          toast.error('Error al cancelar la descarga');
         }
-      } else if (item.content_type === 'comic') {
-        const response = await comicApi.cancelDownload(item.comic_issue_id);
-        if (response.data?.bundle_size > 1) {
-          alert(`Se han cancelado ${response.data.bundle_size} issues del bundle.`);
-        }
-      }
-      loadQueue();
-    } catch (error) {
-      console.error('Error cancelando descarga:', error);
-    }
+      },
+    });
   };
 
   const deleteDownload = async (item) => {
-    if (!confirm('Eliminar este archivo descargado?')) return;
-    try {
-      if (item.content_type === 'manga') {
-        await mangaApi.deleteDownloadFile(item.chapter_id);
-      } else if (item.content_type === 'comic') {
-        await comicApi.deleteFile(item.comic_issue_id);
-      }
-      loadQueue();
-    } catch (error) {
-      console.error('Error eliminando descarga:', error);
-    }
+    setConfirmAction({
+      title: 'Eliminar archivo',
+      message: '¿Eliminar este archivo descargado?',
+      onConfirm: async () => {
+        setConfirmAction(null);
+        try {
+          if (item.content_type === 'manga') {
+            await mangaApi.deleteDownloadFile(item.chapter_id);
+          } else if (item.content_type === 'comic') {
+            await comicApi.deleteFile(item.comic_issue_id);
+          }
+          loadQueue();
+        } catch (error) {
+          console.error('Error eliminando descarga:', error);
+          toast.error('Error al eliminar el archivo');
+        }
+      },
+    });
   };
 
   const handleKindleSent = (chapterId, sentAt) => {
@@ -495,6 +512,14 @@ const Queue = () => {
           })}
         </div>
       )}
+      <ConfirmModal
+        isOpen={!!confirmAction}
+        title={confirmAction?.title || ''}
+        message={confirmAction?.message || ''}
+        confirmText="Confirmar"
+        onConfirm={confirmAction?.onConfirm || (() => {})}
+        onCancel={() => setConfirmAction(null)}
+      />
     </div>
   );
 };

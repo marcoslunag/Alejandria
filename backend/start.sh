@@ -13,7 +13,7 @@ echo "Database is ready!"
 
 # Initialize database tables (SQLAlchemy creates them if they don't exist)
 echo "Initializing database..."
-python -c "from app.database import init_db; init_db()"
+python -c "import app.models.user; from app.database import init_db; init_db()"
 echo "Database initialized!"
 
 echo "Starting uvicorn server..."

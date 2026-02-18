@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { bookApi } from '../services/api';
 import ContentDetailPage from '../components/ContentDetailPage';
 import BookChapterList from '../components/BookChapterList';
+import ConfirmModal from '../components/ConfirmModal';
 import {
   FaCalendar,
   FaSync,
@@ -15,6 +17,7 @@ const BookDetails = () => {
   const [book, setBook] = useState(null);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     loadBook();
@@ -45,27 +48,25 @@ const BookDetails = () => {
   const handleRefresh = async () => {
     try {
       await bookApi.refreshBook(id);
-      alert('Actualizacion en cola. Buscando nuevos archivos...');
+      toast('Actualización en cola. Buscando nuevos archivos...', { icon: 'ℹ️' });
       setTimeout(() => {
         loadBook();
         loadStats();
       }, 2000);
     } catch (error) {
       console.error('Error actualizando:', error);
+      toast.error('Error al actualizar');
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Eliminar "${book.title}"? Esto eliminara todos los archivos descargados.`)) {
-      return;
-    }
     try {
       await bookApi.deleteBook(id);
-      alert('Libro eliminado correctamente');
+      toast.success('Libro eliminado correctamente');
       window.location.href = '/books';
     } catch (error) {
       console.error('Error eliminando:', error);
-      alert('Error al eliminar el libro');
+      toast.error('Error al eliminar el libro');
     }
   };
 
@@ -111,7 +112,7 @@ const BookDetails = () => {
   });
   actions.push({
     label: 'Eliminar',
-    onClick: handleDelete,
+    onClick: () => setShowDeleteConfirm(true),
     className: 'btn bg-red-500 hover:bg-red-600 text-white flex items-center gap-2',
     icon: <FaTrash />,
   });
@@ -149,6 +150,14 @@ const BookDetails = () => {
       backLink={{ to: '/books', label: 'Ir a Libros' }}
     >
       <BookChapterList bookId={id} />
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        title="Eliminar libro"
+        message={`¿Eliminar "${book?.title}"? Esto eliminará todos los archivos descargados.`}
+        confirmText="Eliminar"
+        onConfirm={() => { setShowDeleteConfirm(false); handleDelete(); }}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </ContentDetailPage>
   );
 };

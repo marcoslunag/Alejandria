@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { mangaApi } from '../services/api';
 import ContentDetailPage from '../components/ContentDetailPage';
 import ChapterList from '../components/ChapterList';
+import ConfirmModal from '../components/ConfirmModal';
 import {
   FaCalendar,
   FaBook,
@@ -16,6 +18,7 @@ const MangaDetails = () => {
   const [manga, setManga] = useState(null);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     loadManga();
@@ -46,24 +49,22 @@ const MangaDetails = () => {
   const handleRefresh = async () => {
     try {
       await mangaApi.refreshManga(id);
-      alert('Actualización en cola. Los nuevos tomos se obtendrán en breve.');
+      toast('Actualización en cola. Los nuevos tomos se obtendrán en breve.', { icon: 'ℹ️' });
       setTimeout(loadManga, 2000);
     } catch (error) {
       console.error('Error actualizando:', error);
+      toast.error('Error al actualizar');
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm(`¿Eliminar "${manga.title}"? Esto eliminará todos los tomos descargados.`)) {
-      return;
-    }
     try {
       await mangaApi.deleteManga(id);
-      alert('Manga eliminado correctamente');
+      toast.success('Manga eliminado correctamente');
       window.location.href = '/library';
     } catch (error) {
       console.error('Error eliminando:', error);
-      alert('Error al eliminar el manga');
+      toast.error('Error al eliminar el manga');
     }
   };
 
@@ -145,7 +146,7 @@ const MangaDetails = () => {
   });
   actions.push({
     label: 'Eliminar',
-    onClick: handleDelete,
+    onClick: () => setShowDeleteConfirm(true),
     className: 'btn bg-red-500 hover:bg-red-600 text-white flex items-center gap-2',
     icon: <FaTrash />,
   });
@@ -188,6 +189,14 @@ const MangaDetails = () => {
       backLink={{ to: '/library', label: 'Ir a la Biblioteca' }}
     >
       <ChapterList mangaId={id} />
+      <ConfirmModal
+        isOpen={showDeleteConfirm}
+        title="Eliminar manga"
+        message={`¿Eliminar "${manga?.title}"? Esto eliminará todos los tomos descargados.`}
+        confirmText="Eliminar"
+        onConfirm={() => { setShowDeleteConfirm(false); handleDelete(); }}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </ContentDetailPage>
   );
 };

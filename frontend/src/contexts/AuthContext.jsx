@@ -13,6 +13,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
 
   // Set token in axios headers
   useEffect(() => {
@@ -34,6 +35,10 @@ export const AuthProvider = ({ children }) => {
       try {
         const res = await api.get('/auth/me');
         setUser(res.data);
+        // Check if user needs to change password
+        if (res.data.must_change_password) {
+          setMustChangePassword(true);
+        }
       } catch {
         // Token invalid/expired
         localStorage.removeItem('token');
@@ -50,26 +55,24 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (username, password) => {
     const res = await api.post('/auth/login', { username, password });
-    const { access_token, user: userData } = res.data;
+    const { access_token, must_change_password: mcp, user: userData } = res.data;
 
     localStorage.setItem('token', access_token);
     localStorage.setItem('user', JSON.stringify(userData));
     setToken(access_token);
     setUser(userData);
+    setMustChangePassword(mcp);
 
-    return userData;
+    return { user: userData, mustChangePassword: mcp };
   };
 
-  const register = async (username, email, password) => {
-    const res = await api.post('/auth/register', { username, email, password });
-    const { access_token, user: userData } = res.data;
-
-    localStorage.setItem('token', access_token);
-    localStorage.setItem('user', JSON.stringify(userData));
-    setToken(access_token);
-    setUser(userData);
-
-    return userData;
+  const changePassword = async (currentPassword, newPassword) => {
+    await api.post('/auth/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+    setMustChangePassword(false);
+    setUser(prev => prev ? { ...prev, must_change_password: false } : prev);
   };
 
   const logout = () => {
@@ -77,10 +80,21 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('user');
     setToken(null);
     setUser(null);
+    setMustChangePassword(false);
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{
+      user,
+      token,
+      loading,
+      login,
+      logout,
+      changePassword,
+      mustChangePassword,
+      isAuthenticated: !!user,
+      isAdmin: user?.is_admin || false,
+    }}>
       {children}
     </AuthContext.Provider>
   );

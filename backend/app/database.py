@@ -3,10 +3,15 @@ Database Configuration and Session Management
 SQLAlchemy setup with PostgreSQL
 """
 
-from sqlalchemy import create_engine
+import secrets
+import string
+import logging
+from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -37,6 +42,66 @@ def get_db():
         db.close()
 
 
+def _generate_password(length: int = 16) -> str:
+    """Generate a random password"""
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _migrate_columns():
+    """Add missing columns to existing tables (poor man's migration)"""
+    inspector = inspect(engine)
+    if 'users' not in inspector.get_table_names():
+        return
+
+    existing = {col['name'] for col in inspector.get_columns('users')}
+    with engine.begin() as conn:
+        if 'is_admin' not in existing:
+            conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE"))
+            logger.info("Added is_admin column to users table")
+        if 'must_change_password' not in existing:
+            conn.execute(text("ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT FALSE"))
+            logger.info("Added must_change_password column to users table")
+
+
 def init_db():
-    """Initialize database tables"""
+    """Initialize database tables and create admin user if not exists"""
+    _migrate_columns()
     Base.metadata.create_all(bind=engine)
+    _seed_admin()
+
+
+def _seed_admin():
+    """Create default admin user if no admin exists"""
+    from app.models.user import User
+    from app.core.security import hash_password
+
+    db = SessionLocal()
+    try:
+        admin = db.query(User).filter(User.is_admin == True).first()
+        if admin:
+            return
+
+        password = _generate_password()
+        admin = User(
+            username="admin",
+            email="admin@alejandria.local",
+            password_hash=hash_password(password),
+            is_active=True,
+            is_admin=True,
+            must_change_password=True,
+        )
+        db.add(admin)
+        db.commit()
+
+        logger.warning("=" * 60)
+        logger.warning("  ADMIN USER CREATED")
+        logger.warning(f"  Username: admin")
+        logger.warning(f"  Password: {password}")
+        logger.warning("  Please change this password on first login!")
+        logger.warning("=" * 60)
+    except Exception as e:
+        logger.error(f"Error creating admin user: {e}")
+        db.rollback()
+    finally:
+        db.close()

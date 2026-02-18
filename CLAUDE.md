@@ -87,7 +87,6 @@ Componentes compartidos por manga, cómics y libros:
   - ✅ ZonaComics (Playwright + resolución ouo.io automática)
   - ✅ CBRComics (aiohttp + cbrcomicsweb.space redirect resolution)
   - ✅ MegaComics/MegaComicsTV3 (aiohttp search + table parsing + Playwright ouo.io)
-  - ⏸️ Marmota (pendiente)
 - **Link Assignment**:
   - ✅ Smart: `issue_range` metadata from scraper tables (e.g., "#1 - #2" → bundle)
   - ✅ Sequential: 1:1 mapping when enough resolved links without issue_range
@@ -243,15 +242,13 @@ CAPTCHA_API_KEY=tu_2captcha_key
 - **Causa**: Links no se guardan por verificación fallida
 - **Solución**: Revisar logs, probablemente acortadores
 
-## 📚 Skills Disponibles
+## 📚 Skills y Workflow
 
-Para este proyecto NO se requieren skills especiales, ya que:
-- Todo el código es custom (no usa frameworks especiales)
-- La documentación está en los archivos `.md` del proyecto
-- El contexto se mantiene en `~/.claude/memory/MEMORY.md`
+Ver **`skills.md`** para reglas de workflow, gestión de tareas y principios core.
 
 ## 🎓 Recursos
 
+- **Skills**: `skills.md` (workflow, subagents, task management, core principles)
 - **Memory**: `~/.claude/projects/c--Users-kitos-Desktop-Alejandria/memory/MEMORY.md`
 - **Logs de Sesiones**: `SESION_*.md`
 - **Pendientes**: `PENDIENTES_*.md`

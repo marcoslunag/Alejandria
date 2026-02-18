@@ -1,6 +1,8 @@
-import { BrowserRouter as Router, Routes, Route, Outlet } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
+import { BrowserRouter as Router, Routes, Route, Outlet, Navigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import ErrorBoundary from './components/ErrorBoundary';
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import Library from './pages/Library';
@@ -13,14 +15,50 @@ import BookDetails from './pages/BookDetails';
 import Queue from './pages/Queue';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
-import Register from './pages/Register';
+import ChangePassword from './pages/ChangePassword';
+import AdminUsers from './pages/AdminUsers';
 
 function ProtectedLayout() {
+  const { mustChangePassword, isAdmin } = useAuth();
+
+  // Admin users go straight to user management
+  if (isAdmin) {
+    return <Navigate to="/admin/users" replace />;
+  }
+
+  // Force redirect to change-password if needed
+  if (mustChangePassword) {
+    return <Navigate to="/change-password" replace />;
+  }
+
   return (
     <ProtectedRoute>
       <Navbar />
       <main>
-        <Outlet />
+        <ErrorBoundary>
+          <Outlet />
+        </ErrorBoundary>
+      </main>
+    </ProtectedRoute>
+  );
+}
+
+function AdminLayout() {
+  const { isAdmin, mustChangePassword } = useAuth();
+
+  if (mustChangePassword) {
+    return <Navigate to="/change-password" replace />;
+  }
+
+  if (!isAdmin) return <Navigate to="/" replace />;
+
+  return (
+    <ProtectedRoute>
+      <Navbar />
+      <main>
+        <ErrorBoundary>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </ProtectedRoute>
   );
@@ -30,13 +68,37 @@ function App() {
   return (
     <Router>
       <AuthProvider>
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            duration: 4000,
+            style: {
+              background: '#1f2937',
+              color: '#f3f4f6',
+              border: '1px solid #374151',
+            },
+            success: {
+              iconTheme: { primary: '#10b981', secondary: '#f3f4f6' },
+            },
+            error: {
+              duration: 5000,
+              iconTheme: { primary: '#ef4444', secondary: '#f3f4f6' },
+            },
+          }}
+        />
         <div className="min-h-screen bg-dark">
           <Routes>
             {/* Public routes */}
             <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
 
-            {/* Protected routes */}
+            {/* Authenticated but may need password change */}
+            <Route path="/change-password" element={
+              <ProtectedRoute>
+                <ChangePassword />
+              </ProtectedRoute>
+            } />
+
+            {/* Protected routes (non-admin users) */}
             <Route element={<ProtectedLayout />}>
               <Route path="/" element={<Home />} />
               <Route path="/library" element={<Library />} />
@@ -48,6 +110,11 @@ function App() {
               <Route path="/books/:id" element={<BookDetails />} />
               <Route path="/queue" element={<Queue />} />
               <Route path="/settings" element={<Settings />} />
+            </Route>
+
+            {/* Admin routes */}
+            <Route element={<AdminLayout />}>
+              <Route path="/admin/users" element={<AdminUsers />} />
             </Route>
           </Routes>
         </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { mangaApi, comicApi, bookApi } from '../services/api';
 import SearchBar from '../components/SearchBar';
 import ContentCard from '../components/ContentCard';
@@ -52,12 +53,12 @@ const Search = () => {
         monitored: true,
         auto_download: true,
       });
-      alert(`"${manga.title}" añadido a la biblioteca!`);
+      toast.success(`"${manga.title}" añadido a la biblioteca`);
       const query = searchParams.get('q') || initialQuery;
       if (query) handleSearch(query);
     } catch (error) {
       console.error('Error añadiendo manga:', error);
-      alert('Error al añadir el manga. Inténtalo de nuevo.');
+      toast.error('Error al añadir el manga');
     }
   };
 
@@ -73,7 +74,7 @@ const Search = () => {
           issues: volume.issues,
           cover: volume.cover
         });
-        alert(`"${volume.title}" añadido a la biblioteca!`);
+        toast.success(`"${volume.title}" añadido a la biblioteca`);
       }
       // Normal ComicVine comic
       else {
@@ -84,10 +85,10 @@ const Search = () => {
         if (comic.volume_to_add) {
           payload.volume_to_add = comic.volume_to_add;
           await comicApi.addComic(payload);
-          alert(`"${comic.title} Vol ${comic.volume_to_add.number}" añadido a la biblioteca!`);
+          toast.success(`"${comic.title} Vol ${comic.volume_to_add.number}" añadido a la biblioteca`);
         } else {
           await comicApi.addComic(payload);
-          alert(`"${comic.title}" añadido a la biblioteca!`);
+          toast.success(`"${comic.title}" añadido a la biblioteca`);
         }
       }
 
@@ -95,7 +96,7 @@ const Search = () => {
       if (query) handleSearch(query);
     } catch (error) {
       console.error('Error añadiendo comic:', error);
-      alert('Error al añadir el cómic. Inténtalo de nuevo.');
+      toast.error('Error al añadir el cómic');
     }
   };
 
@@ -116,16 +117,16 @@ const Search = () => {
           auto_download: true,
         });
       } else {
-        alert('Este libro no tiene suficiente información para ser añadido.');
+        toast.error('Este libro no tiene suficiente información para ser añadido');
         return;
       }
 
-      alert(`"${book.title}" añadido a la biblioteca!`);
+      toast.success(`"${book.title}" añadido a la biblioteca`);
       const query = searchParams.get('q') || initialQuery;
       if (query) handleSearch(query);
     } catch (error) {
       console.error('Error añadiendo libro:', error);
-      alert('Error al añadir el libro. Inténtalo de nuevo.');
+      toast.error('Error al añadir el libro');
     }
   };
 

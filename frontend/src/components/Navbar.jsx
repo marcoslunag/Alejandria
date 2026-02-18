@@ -1,12 +1,12 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom';
-import { FaHome, FaBook, FaSearch, FaCog, FaDownload, FaMask, FaBookReader, FaSignOutAlt, FaUser } from 'react-icons/fa';
+import { FaHome, FaBook, FaSearch, FaCog, FaDownload, FaMask, FaBookReader, FaSignOutAlt, FaUser, FaUserShield } from 'react-icons/fa';
 import { useAuth } from '../contexts/AuthContext';
 
 const Navbar = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
 
-  const navItems = [
+  const userNavItems = [
     { to: '/', icon: FaHome, label: 'Inicio' },
     { to: '/search', icon: FaSearch, label: 'Buscar' },
     { to: '/library', icon: FaBook, label: 'Manga' },
@@ -26,32 +26,53 @@ const Navbar = () => {
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-3">
+          <Link to={isAdmin ? '/admin/users' : '/'} className="flex items-center gap-3">
             <div className="text-3xl">📚</div>
             <div>
               <h1 className="text-xl font-bold text-primary">Alejandria</h1>
-              <p className="text-xs text-gray-400">Tu biblioteca digital</p>
+              <p className="text-xs text-gray-400">
+                {isAdmin ? 'Panel de administración' : 'Tu biblioteca digital'}
+              </p>
             </div>
           </Link>
 
           {/* Navigation */}
           <div className="flex items-center gap-6">
-            {navItems.map((item) => (
+            {isAdmin ? (
+              /* Admin: solo muestra el enlace de usuarios */
               <NavLink
-                key={item.to}
-                to={item.to}
+                to="/admin/users"
                 className={({ isActive }) =>
                   `flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
                     isActive
-                      ? 'bg-primary text-white'
+                      ? 'bg-purple-600 text-white'
                       : 'text-gray-400 hover:text-white hover:bg-dark-lighter'
                   }`
                 }
               >
-                <item.icon />
-                <span className="hidden md:inline">{item.label}</span>
+                <FaUserShield />
+                <span className="hidden md:inline">Usuarios</span>
               </NavLink>
-            ))}
+            ) : (
+              /* Usuarios normales: menú completo */
+              userNavItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === '/'}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                      isActive
+                        ? 'bg-primary text-white'
+                        : 'text-gray-400 hover:text-white hover:bg-dark-lighter'
+                    }`
+                  }
+                >
+                  <item.icon />
+                  <span className="hidden md:inline">{item.label}</span>
+                </NavLink>
+              ))
+            )}
 
             {/* User menu */}
             <div className="flex items-center gap-3 ml-4 pl-4 border-l border-gray-700">

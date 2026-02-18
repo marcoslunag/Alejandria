@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { comicApi } from '../services/api';
 import ContentGrid from '../components/ContentGrid';
 import {
@@ -95,7 +96,7 @@ const Comics = () => {
       );
     } catch (error) {
       console.error('Error adding comic:', error);
-      alert(error.response?.data?.detail || 'Error añadiendo cómic');
+      toast.error(error.response?.data?.detail || 'Error añadiendo cómic');
     } finally {
       setAddingComic(null);
     }
