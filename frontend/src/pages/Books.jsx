@@ -20,6 +20,8 @@ const Books = () => {
   const [filter, setFilter] = useState({
     monitored: null,
     search: '',
+    category: '',
+    language: '',
   });
   const [sortBy, setSortBy] = useState('title');
 
@@ -66,8 +68,20 @@ const Books = () => {
     }
   };
 
+  // Extract unique categories and languages from loaded books
+  const availableCategories = [...new Set(books.flatMap(b => b.categories || []))].sort();
+  const LANG_LABELS = { es: 'Español', en: 'Inglés', fr: 'Francés', de: 'Alemán', it: 'Italiano', pt: 'Portugués' };
+  const availableLanguages = [...new Set(books.map(b => b.language).filter(Boolean))].sort();
+
+  // Client-side category/language filter
+  const filteredBooks = books.filter(b => {
+    if (filter.category && !(b.categories || []).includes(filter.category)) return false;
+    if (filter.language && b.language !== filter.language) return false;
+    return true;
+  });
+
   // Sort books
-  const sortedBooks = [...books].sort((a, b) => {
+  const sortedBooks = [...filteredBooks].sort((a, b) => {
     switch (sortBy) {
       case 'rating':
         return (b.average_rating || 0) - (a.average_rating || 0);
@@ -167,6 +181,30 @@ const Books = () => {
             <option value="false">No monitoreados</option>
           </select>
 
+          {/* Category filter */}
+          {availableCategories.length > 0 && (
+            <select
+              value={filter.category}
+              onChange={(e) => setFilter({ ...filter, category: e.target.value })}
+              className="input"
+            >
+              <option value="">Todas las categorías</option>
+              {availableCategories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+
+          {/* Language filter */}
+          {availableLanguages.length > 0 && (
+            <select
+              value={filter.language}
+              onChange={(e) => setFilter({ ...filter, language: e.target.value })}
+              className="input"
+            >
+              <option value="">Todos los idiomas</option>
+              {availableLanguages.map(l => <option key={l} value={l}>{LANG_LABELS[l] || l}</option>)}
+            </select>
+          )}
+
           {/* Sort */}
           <div className="flex items-center gap-2">
             <FaSortAmountDown className="text-gray-400" />
@@ -182,9 +220,9 @@ const Books = () => {
           </div>
 
           {/* Clear filters */}
-          {(filter.monitored !== null || filter.search) && (
+          {(filter.monitored !== null || filter.search || filter.category || filter.language) && (
             <button
-              onClick={() => setFilter({ monitored: null, search: '' })}
+              onClick={() => setFilter({ monitored: null, search: '', category: '', language: '' })}
               className="btn btn-secondary text-sm"
             >
               Limpiar filtros

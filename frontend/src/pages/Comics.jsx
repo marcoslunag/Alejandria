@@ -24,6 +24,8 @@ const Comics = () => {
     monitored: null,
     publisher: '',
     search: '',
+    genre: '',
+    startYear: '',
   });
   const [sortBy, setSortBy] = useState('title');
 
@@ -116,8 +118,19 @@ const Comics = () => {
     }
   };
 
+  // Extract unique genres and years from loaded comics
+  const availableGenres = [...new Set(comics.flatMap(c => c.genres || []))].sort();
+  const availableYears = [...new Set(comics.map(c => c.start_year).filter(Boolean))].sort((a, b) => b - a);
+
+  // Client-side genre/year filter
+  const filteredComics = comics.filter(c => {
+    if (filter.genre && !(c.genres || []).includes(filter.genre)) return false;
+    if (filter.startYear && String(c.start_year) !== String(filter.startYear)) return false;
+    return true;
+  });
+
   // Sort comics
-  const sortedComics = [...comics].sort((a, b) => {
+  const sortedComics = [...filteredComics].sort((a, b) => {
     switch (sortBy) {
       case 'year':
         return (b.start_year || 0) - (a.start_year || 0);
@@ -322,6 +335,30 @@ const Comics = () => {
               className="input w-32"
             />
 
+            {/* Genre filter */}
+            {availableGenres.length > 0 && (
+              <select
+                value={filter.genre}
+                onChange={(e) => setFilter({ ...filter, genre: e.target.value })}
+                className="input"
+              >
+                <option value="">Todos los géneros</option>
+                {availableGenres.map(g => <option key={g} value={g}>{g}</option>)}
+              </select>
+            )}
+
+            {/* Year filter */}
+            {availableYears.length > 0 && (
+              <select
+                value={filter.startYear}
+                onChange={(e) => setFilter({ ...filter, startYear: e.target.value })}
+                className="input"
+              >
+                <option value="">Todos los años</option>
+                {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            )}
+
             {/* Sort */}
             <div className="flex items-center gap-2">
               <FaSortAmountDown className="text-gray-400" />
@@ -337,9 +374,9 @@ const Comics = () => {
             </div>
 
             {/* Clear filters */}
-            {(filter.monitored !== null || filter.publisher || filter.search) && (
+            {(filter.monitored !== null || filter.publisher || filter.search || filter.genre || filter.startYear) && (
               <button
-                onClick={() => setFilter({ monitored: null, publisher: '', search: '' })}
+                onClick={() => setFilter({ monitored: null, publisher: '', search: '', genre: '', startYear: '' })}
                 className="btn btn-secondary text-sm"
               >
                 Limpiar filtros

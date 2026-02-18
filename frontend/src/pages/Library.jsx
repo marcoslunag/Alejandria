@@ -14,6 +14,7 @@ const Library = () => {
     monitored: null,
     status: '',
     search: '',
+    genre: '',
   });
   const [sortBy, setSortBy] = useState('title'); // title, rating, recent, tomos
 
@@ -61,8 +62,16 @@ const Library = () => {
     }
   };
 
+  // Extract unique genres from loaded manga
+  const availableGenres = [...new Set(manga.flatMap(m => m.genres || []))].sort();
+
+  // Apply client-side genre filter first
+  const filteredManga = filter.genre
+    ? manga.filter(m => (m.genres || []).includes(filter.genre))
+    : manga;
+
   // Sort manga based on sortBy
-  const sortedManga = [...manga].sort((a, b) => {
+  const sortedManga = [...filteredManga].sort((a, b) => {
     switch (sortBy) {
       case 'rating':
         return (b.average_score || 0) - (a.average_score || 0);
@@ -194,6 +203,18 @@ const Library = () => {
               <option value="NOT_YET_RELEASED">Por publicar</option>
             </select>
 
+            {/* Genre filter */}
+            {availableGenres.length > 0 && (
+              <select
+                value={filter.genre}
+                onChange={(e) => setFilter({ ...filter, genre: e.target.value })}
+                className="input"
+              >
+                <option value="">Todos los géneros</option>
+                {availableGenres.map(g => <option key={g} value={g}>{g}</option>)}
+              </select>
+            )}
+
             {/* Sort */}
             <div className="flex items-center gap-2">
               <FaSortAmountDown className="text-gray-400" />
@@ -210,9 +231,9 @@ const Library = () => {
             </div>
 
             {/* Clear filters */}
-            {(filter.monitored !== null || filter.status || filter.search) && (
+            {(filter.monitored !== null || filter.status || filter.search || filter.genre) && (
               <button
-                onClick={() => setFilter({ monitored: null, status: '', search: '' })}
+                onClick={() => setFilter({ monitored: null, status: '', search: '', genre: '' })}
                 className="btn btn-secondary text-sm"
               >
                 Limpiar filtros
