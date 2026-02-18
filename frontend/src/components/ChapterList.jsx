@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { mangaApi } from '../services/api';
+import { sanitizeUrl } from '../utils/sanitizeUrl';
 import SendToKindleButton from './SendToKindleButton';
 import {
   FaDownload,
@@ -328,7 +329,7 @@ const ChapterList = ({ mangaId }) => {
                 {tomo.download_url && (
                   <div className="flex items-center gap-2 mt-1">
                     <a
-                      href={tomo.download_url}
+                      href={sanitizeUrl(tomo.download_url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs text-primary hover:text-primary-light flex items-center gap-1"

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { comicApi } from '../services/api';
+import { sanitizeUrl } from '../utils/sanitizeUrl';
 import ComicSendToKindleButton from './ComicSendToKindleButton';
 import {
   FaDownload,
@@ -375,7 +376,7 @@ const ComicIssueList = ({ comicId }) => {
                       </span>
                     )}
                     <a
-                      href={issue.download_url}
+                      href={sanitizeUrl(issue.download_url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"

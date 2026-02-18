@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { bookApi } from '../services/api';
+import { sanitizeUrl } from '../utils/sanitizeUrl';
 import BookSendToKindleButton from './BookSendToKindleButton';
 import {
   FaDownload,
@@ -301,7 +302,7 @@ const BookChapterList = ({ bookId }) => {
                 {chapter.download_url && (
                   <div className="flex items-center gap-2 mt-1">
                     <a
-                      href={chapter.download_url}
+                      href={sanitizeUrl(chapter.download_url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1"

@@ -67,7 +67,7 @@ Componentes compartidos por manga, cómics y libros:
 3. **Bundles inteligentes**: Detecta colecciones (TPB, HC, "Completo") para descargar todo de una vez
 4. **Priorización de hosts**: Google Drive > MediaFire > MEGA (por rate limits)
 
-## 🔒 Seguridad (V7)
+## 🔒 Seguridad (V7 + V8)
 
 ### Fixes implementados
 - **SECRET_KEY**: Sin default hardcodeado — genera clave aleatoria si no está en `.env`, con warning en logs
@@ -75,11 +75,15 @@ Componentes compartidos por manga, cómics y libros:
 - **Rate limiting login**: 10 intentos fallidos por IP en ventana de 15 minutos, luego HTTP 429
 - **kindle_sync.py**: Endpoints `/list` y `/mark-downloaded` requieren auth (`get_current_user`)
 - **system.py**: Endpoints admin (`process-queue`, `process-conversions`, `cleanup`, `stats`, `test/*`, `logs/recent`) requieren `is_admin=True`; `/translate` requiere auth básica
-- **queue.py IDOR**: Todos los endpoints de chapter/issue verifican ownership vía JOIN con `user_id`
+- **queue.py IDOR**: Todos los endpoints de chapter/issue verifican ownership vía JOIN con `user_id`; `clear_queue` también filtra por `user_id`
 - **docker-compose.yml**: Eliminado `security_opt: seccomp:unconfined` de todos los servicios; puerto 5432 no expuesto externamente
-- **kcc Dockerfile**: `chmod 777` → `chmod 755`
+- **Dockerfiles**: Todos los contenedores corren como usuario no-root `appuser` (uid=1000); HEALTHCHECK en workers
+- **kcc Dockerfile**: `chmod 777` → `chmod 755`; usuario `appuser`
 - **AdminUsers.jsx**: Campo password usa `type="password"`
 - **axios**: Actualizado a `^1.8.2`
+- **requests**: Actualizado a `>=2.32.3`
+- **terabox_bypass.py**: Path traversal corregido — `Path(filename).name` para sanitizar nombre
+- **Frontend URLs**: `sanitizeUrl()` helper en `src/utils/sanitizeUrl.js`; aplicado en `ContentDetailPage`, `ChapterList`, `BookChapterList`, `ComicIssueList`
 
 ### Patrones de auth en endpoints
 ```python
@@ -91,6 +95,13 @@ admin: User = Depends(get_admin_user)
 
 # Admin inline (para system.py)
 current_user: User = Depends(require_admin)  # require_admin definido localmente
+```
+
+### Frontend URL sanitization
+```js
+// src/utils/sanitizeUrl.js
+import { sanitizeUrl } from '../utils/sanitizeUrl';
+// Uso: href={sanitizeUrl(url)} — devuelve '#' si el protocolo no es http/https
 ```
 
 ## 📚 Sistemas Implementados

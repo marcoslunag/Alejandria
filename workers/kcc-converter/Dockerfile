@@ -41,11 +41,16 @@ RUN pip install --no-cache-dir \
     python-dotenv \
     Pillow
 
-# Crear directorios necesarios
-RUN mkdir -p /downloads /library/kindle && chmod 755 /downloads /library/kindle
+# Crear directorios y usuario no-root
+RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser && \
+    mkdir -p /downloads /library/kindle && \
+    chown -R appuser:appuser /downloads /library /app
 
-# Copiar script
+# Copiar script (como root todavía para que COPY funcione, luego chown)
 COPY converter.py .
+RUN chown appuser:appuser /app/converter.py
+
+USER appuser
 
 # Variables de entorno por defecto
 ENV WATCH_DIR=/downloads
@@ -54,5 +59,9 @@ ENV KCC_PROFILE=KPW5
 ENV KCC_FORMAT=EPUB
 ENV KCC_QUALITY=95
 ENV PYTHONUNBUFFERED=1
+
+# Health check: verificar que el proceso converter sigue activo
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+    CMD pgrep -f "converter.py" > /dev/null || exit 1
 
 CMD ["python", "-u", "converter.py"]

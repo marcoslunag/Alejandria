@@ -43,7 +43,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir --no-deps mega.py==1.0.8
 
-# Install Playwright browsers (only Chromium to save space)
+# Install Playwright browsers to a fixed path (not ~/; accessible to all users)
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN playwright install chromium
 
 # Copy application code
@@ -52,8 +53,12 @@ COPY . .
 # Make start script executable
 RUN chmod +x start.sh
 
-# Create necessary directories
-RUN mkdir -p /downloads /library /library/kindle
+# Create non-root user and set up directories with correct ownership
+RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser && \
+    mkdir -p /downloads /library /library/kindle && \
+    chown -R appuser:appuser /downloads /library /app /ms-playwright
+
+USER appuser
 
 # Expose port
 EXPOSE 7878

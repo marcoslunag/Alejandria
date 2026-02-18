@@ -551,7 +551,7 @@ def clear_queue(
         'pending': ['pending']
     }
 
-    query = db.query(Chapter)
+    query = db.query(Chapter).join(Manga).filter(Manga.user_id == current_user.id)
 
     if status:
         chapter_statuses = status_map.get(status, [status])

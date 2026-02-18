@@ -609,8 +609,10 @@ class TeraBoxBypass:
             return result
         
         download_link = result.get('download_link')
-        filename = result.get('file_name', 'terabox_download')
-        
+        # Sanitize filename: strip directory components to prevent path traversal
+        raw_filename = result.get('file_name', 'terabox_download')
+        filename = Path(raw_filename).name or 'terabox_download'
+
         # Preparar path de salida
         os.makedirs(output_path, exist_ok=True)
         file_path = os.path.join(output_path, filename)

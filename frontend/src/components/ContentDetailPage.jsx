@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { sanitizeUrl } from '../utils/sanitizeUrl';
 import {
   FaStar,
   FaSync,
@@ -104,14 +105,14 @@ const ContentDetailPage = ({
             // Real banner image (like manga from AniList)
             <div
               className="absolute inset-0 bg-cover bg-center"
-              style={{ backgroundImage: `url(${bannerImage})` }}
+              style={{ backgroundImage: `url(${sanitizeUrl(bannerImage)})` }}
             />
           ) : (
             // Blurred cover as banner (books, comics)
             <div
               className="absolute inset-0 bg-cover bg-center"
               style={{
-                backgroundImage: `url(${coverImage})`,
+                backgroundImage: `url(${sanitizeUrl(coverImage)})`,
                 filter: 'blur(8px)',
                 transform: 'scale(1.1)',
               }}
@@ -250,7 +251,7 @@ const ContentDetailPage = ({
                 {externalLinks.map((link, i) => (
                   <a
                     key={i}
-                    href={link.url}
+                    href={sanitizeUrl(link.url)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="btn btn-secondary flex items-center gap-2"
