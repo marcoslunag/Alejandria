@@ -19,7 +19,7 @@ from app.services.scraper import TomosMangaScraper
 from app.services.downloader import MangaDownloader
 from app.services.book_downloader import BookDownloader
 from app.services.converter import KCCConverter
-from app.services.stk_kindle_sender import STKKindleSender
+from app.services.stk_kindle_sender import get_stk_sender
 from pathlib import Path
 from datetime import datetime, timedelta
 import logging
@@ -1138,56 +1138,49 @@ class ContentScheduler:
             db.close()
 
     async def send_to_kindle(self):
-        """Envía archivos convertidos al Kindle via STK"""
+        """Envía archivos convertidos al Kindle via STK (por usuario)"""
         logger.debug("Checking for files to send to Kindle...")
 
         db: Session = SessionLocal()
         try:
-            # Load settings from database
-            from app.models.settings import AppSettings
-            settings = db.query(AppSettings).first()
+            from app.models.user import User
 
-            if not settings:
-                logger.debug("No settings configured, skipping Kindle send")
-                return
-
-            if not settings.auto_send_to_kindle:
-                logger.debug("Auto send to Kindle is disabled")
-                return
-
-            if not settings.stk_device_serial:
-                logger.debug("STK device not configured, skipping")
-                return
-
-            # Obtener capítulos de manga convertidos no enviados
+            # Obtener capítulos de manga convertidos no enviados, agrupados por usuario
             chapters = db.query(Chapter).filter(
                 Chapter.status == 'converted'
-            ).limit(3).all()
+            ).limit(6).all()
 
-            if chapters:
-                logger.info(f"Sending {len(chapters)} manga chapters to Kindle via STK")
-                for chapter in chapters:
-                    await self._send_chapter_to_kindle(chapter.id, settings)
+            for chapter in chapters:
+                manga = chapter.manga
+                if not manga:
+                    continue
+                user = db.query(User).filter(User.id == manga.user_id).first()
+                if not user or not user.auto_send_to_kindle or not user.stk_device_serial:
+                    continue
+                await self._send_chapter_to_kindle(chapter.id, user)
 
             # Obtener issues de comic convertidos no enviados
             comic_issues = db.query(ComicIssue).filter(
                 ComicIssue.status == 'converted'
-            ).limit(3).all()
+            ).limit(6).all()
 
-            if comic_issues:
-                logger.info(f"Sending {len(comic_issues)} comic issues to Kindle via STK")
-                for issue in comic_issues:
-                    await self._send_comic_issue_to_kindle(issue.id, settings)
+            for issue in comic_issues:
+                comic = issue.comic
+                if not comic:
+                    continue
+                user = db.query(User).filter(User.id == comic.user_id).first()
+                if not user or not user.auto_send_to_kindle or not user.stk_device_serial:
+                    continue
+                await self._send_comic_issue_to_kindle(issue.id, user)
 
         except Exception as e:
             logger.error(f"Error in send_to_kindle: {e}")
         finally:
             db.close()
 
-    async def _send_chapter_to_kindle(self, chapter_id: int, settings=None):
+    async def _send_chapter_to_kindle(self, chapter_id: int, user):
         """
-        Envía un capítulo individual al Kindle usando STK.
-
+        Envía un capítulo individual al Kindle usando el STK del usuario.
         Soporta archivos divididos en partes (rutas separadas por '|' en converted_path).
         """
         db: Session = SessionLocal()
@@ -1212,20 +1205,10 @@ class ContentScheduler:
             if len(file_paths) > 1:
                 logger.info(f"Sending {len(file_paths)} parts for {manga.title} Ch {int(chapter.number)}")
 
-            # Get settings from DB if not provided
-            if not settings:
-                from app.models.settings import AppSettings
-                settings = db.query(AppSettings).first()
-                if not settings:
-                    logger.error("No settings configured")
-                    return
-
-            if not settings.stk_device_serial:
-                logger.error("STK device not configured")
+            stk_sender = get_stk_sender(user.id)
+            if not stk_sender.is_authenticated():
+                logger.error(f"STK not authenticated for user {user.id}")
                 return
-
-            # Send via STK
-            stk_sender = STKKindleSender()
 
             all_success = True
             for idx, file_path in enumerate(file_paths):
@@ -1233,20 +1216,15 @@ class ContentScheduler:
                 part_info = f" (Part {idx + 1}/{len(file_paths)})" if len(file_paths) > 1 else ""
                 logger.info(f"Sending to Kindle via STK: {file_path.name}{part_info} ({file_size_mb:.1f}MB)")
 
-                try:
-                    success = await stk_sender.send_file(
-                        file_path=str(file_path),
-                        device_serial=settings.stk_device_serial
-                    )
+                result = stk_sender.send_file(
+                    file_path=file_path,
+                    device_serials=[user.stk_device_serial] if user.stk_device_serial else None
+                )
 
-                    if success:
-                        logger.info(f"Sent via STK: {file_path.name}")
-                    else:
-                        logger.error(f"Failed to send via STK: {file_path.name}")
-                        all_success = False
-
-                except Exception as e:
-                    logger.error(f"STK send failed for {file_path.name}: {e}")
+                if result.get('success'):
+                    logger.info(f"Sent via STK: {file_path.name}")
+                else:
+                    logger.error(f"Failed to send via STK: {file_path.name} — {result.get('message')}")
                     all_success = False
 
             # Marcar como enviado solo si todas las partes se enviaron correctamente
@@ -1264,9 +1242,9 @@ class ContentScheduler:
         finally:
             db.close()
 
-    async def _send_comic_issue_to_kindle(self, issue_id: int, settings=None):
+    async def _send_comic_issue_to_kindle(self, issue_id: int, user):
         """
-        Envía un issue de comic al Kindle usando STK.
+        Envía un issue de comic al Kindle usando el STK del usuario.
         Soporta archivos divididos en partes (rutas separadas por '|' en converted_path).
         """
         db: Session = SessionLocal()
@@ -1292,20 +1270,10 @@ class ContentScheduler:
             if len(file_paths) > 1:
                 logger.info(f"Sending {len(file_paths)} parts for {comic.title} Issue {issue_num}")
 
-            # Get settings from DB if not provided
-            if not settings:
-                from app.models.settings import AppSettings
-                settings = db.query(AppSettings).first()
-                if not settings:
-                    logger.error("No settings configured")
-                    return
-
-            if not settings.stk_device_serial:
-                logger.error("STK device not configured")
+            stk_sender = get_stk_sender(user.id)
+            if not stk_sender.is_authenticated():
+                logger.error(f"STK not authenticated for user {user.id}")
                 return
-
-            # Send via STK
-            stk_sender = STKKindleSender()
 
             all_success = True
             for idx, file_path in enumerate(file_paths):
@@ -1313,20 +1281,15 @@ class ContentScheduler:
                 part_info = f" (Part {idx + 1}/{len(file_paths)})" if len(file_paths) > 1 else ""
                 logger.info(f"Sending to Kindle via STK: {file_path.name}{part_info} ({file_size_mb:.1f}MB)")
 
-                try:
-                    success = await stk_sender.send_file(
-                        file_path=str(file_path),
-                        device_serial=settings.stk_device_serial
-                    )
+                result = stk_sender.send_file(
+                    file_path=file_path,
+                    device_serials=[user.stk_device_serial] if user.stk_device_serial else None
+                )
 
-                    if success:
-                        logger.info(f"Sent via STK: {file_path.name}")
-                    else:
-                        logger.error(f"Failed to send via STK: {file_path.name}")
-                        all_success = False
-
-                except Exception as e:
-                    logger.error(f"STK send failed for {file_path.name}: {e}")
+                if result.get('success'):
+                    logger.info(f"Sent via STK: {file_path.name}")
+                else:
+                    logger.error(f"Failed to send via STK: {file_path.name} — {result.get('message')}")
                     all_success = False
 
             # Marcar como enviado solo si todas las partes se enviaron correctamente

@@ -1,6 +1,7 @@
 """
 Kindle API Endpoints
 Send books to Kindle via STK (Send to Kindle API)
+Each user has their own isolated STK session.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -39,32 +40,23 @@ class STKAuthorizeRequest(BaseModel):
 
 @router.get("/status/{chapter_id}")
 async def get_kindle_status(chapter_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """
-    Get Kindle send status for a chapter.
-    Supports split files (multiple paths separated by '|' in converted_path).
-    """
+    """Get Kindle send status for a chapter."""
     chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
-
     if not chapter:
         raise HTTPException(status_code=404, detail="Tomo not found")
 
-    # Handle multiple files (split files) separated by '|'
     file_paths = []
     if chapter.converted_path:
         file_paths = [Path(p.strip()) for p in chapter.converted_path.split('|') if p.strip()]
 
-    # Check if all files exist
     existing_files = [f for f in file_paths if f.exists()]
-    has_epub = len(existing_files) > 0
-
-    # Calculate total size
     total_size_mb = sum(f.stat().st_size / (1024 * 1024) for f in existing_files)
 
     return {
         "chapter_id": chapter_id,
         "status": chapter.status,
         "sent_at": chapter.sent_at,
-        "has_epub": has_epub,
+        "has_epub": len(existing_files) > 0,
         "file_count": len(existing_files),
         "file_size_mb": round(total_size_mb, 2)
     }
@@ -72,14 +64,11 @@ async def get_kindle_status(chapter_id: int, db: Session = Depends(get_db), curr
 
 @router.get("/can-send")
 async def check_kindle_configured(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """
-    Check if STK is properly configured
-    """
+    """Check if STK is properly configured for the current user"""
     from app.services.stk_kindle_sender import get_stk_sender
 
-    sender = get_stk_sender()
+    sender = get_stk_sender(current_user.id)
     is_auth = sender.is_authenticated()
-
     has_device = bool(current_user.stk_device_serial)
 
     return {
@@ -91,25 +80,18 @@ async def check_kindle_configured(db: Session = Depends(get_db), current_user: U
     }
 
 
-# ============================================
-# STK (Send to Kindle) API - OAuth2 based
-# ============================================
+# ── STK OAuth2 endpoints ──────────────────────────────────────
 
 @router.get("/stk/status")
 async def stk_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """
-    Check if STK (Send to Kindle) is authenticated
-    """
+    """Check if STK is authenticated for the current user"""
     from app.services.stk_kindle_sender import get_stk_sender
 
-    sender = get_stk_sender()
+    sender = get_stk_sender(current_user.id)
     is_auth = sender.is_authenticated()
 
-    devices = []
-    if is_auth:
-        devices = sender.get_devices()
+    devices = sender.get_devices() if is_auth else []
 
-    # Get saved device preference from user
     saved_device = None
     if current_user.stk_device_serial:
         saved_device = {
@@ -127,12 +109,10 @@ async def stk_status(db: Session = Depends(get_db), current_user: User = Depends
 
 @router.get("/stk/signin-url")
 async def stk_get_signin_url(current_user: User = Depends(get_current_user)):
-    """
-    Get Amazon OAuth2 sign-in URL
-    """
+    """Get Amazon OAuth2 sign-in URL for the current user"""
     from app.services.stk_kindle_sender import get_stk_sender
 
-    sender = get_stk_sender()
+    sender = get_stk_sender(current_user.id)
     url = sender.get_signin_url()
 
     return {
@@ -143,16 +123,13 @@ async def stk_get_signin_url(current_user: User = Depends(get_current_user)):
 
 @router.post("/stk/authorize")
 async def stk_authorize(data: STKAuthorizeRequest, current_user: User = Depends(get_current_user)):
-    """
-    Complete STK authorization with the redirect URL from browser
-    """
+    """Complete STK authorization with the redirect URL from browser"""
     from app.services.stk_kindle_sender import get_stk_sender
-
-    sender = get_stk_sender()
 
     if not data.redirect_url:
         raise HTTPException(status_code=400, detail="redirect_url is required")
 
+    sender = get_stk_sender(current_user.id)
     success = sender.complete_authorization(data.redirect_url)
 
     if success:
@@ -171,21 +148,14 @@ async def stk_authorize(data: STKAuthorizeRequest, current_user: User = Depends(
 
 @router.get("/stk/devices")
 async def stk_get_devices(current_user: User = Depends(get_current_user)):
-    """
-    Get list of Kindle devices
-    """
+    """Get list of Kindle devices for the current user"""
     from app.services.stk_kindle_sender import get_stk_sender
 
-    sender = get_stk_sender()
-
+    sender = get_stk_sender(current_user.id)
     if not sender.is_authenticated():
-        raise HTTPException(
-            status_code=401,
-            detail="Not authenticated. Use /stk/signin-url first."
-        )
+        raise HTTPException(status_code=401, detail="Not authenticated. Use /stk/signin-url first.")
 
-    devices = sender.get_devices()
-    return {"devices": devices}
+    return {"devices": sender.get_devices()}
 
 
 @router.post("/stk/send/{chapter_id}")
@@ -195,12 +165,10 @@ async def stk_send_to_kindle(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Send chapter to Kindle via STK
-    """
+    """Send chapter to Kindle via STK using the current user's session"""
     from app.services.stk_kindle_sender import get_stk_sender
 
-    sender = get_stk_sender()
+    sender = get_stk_sender(current_user.id)
 
     if not sender.is_authenticated():
         raise HTTPException(
@@ -208,32 +176,23 @@ async def stk_send_to_kindle(
             detail="STK not authenticated. Go to Settings and authorize with Amazon."
         )
 
-    # Get chapter
     chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
-
     if not chapter:
         raise HTTPException(status_code=404, detail="Tomo not found")
 
     if not chapter.converted_path:
         raise HTTPException(status_code=400, detail="Tomo has not been converted to EPUB yet")
 
-    # Handle multiple files (split files) separated by '|'
     file_paths = [Path(p.strip()) for p in chapter.converted_path.split('|') if p.strip()]
-
-    # Verify all files exist
     missing_files = [str(f) for f in file_paths if not f.exists()]
     if missing_files:
-        raise HTTPException(
-            status_code=400,
-            detail=f"EPUB files not found: {', '.join(missing_files)}"
-        )
+        raise HTTPException(status_code=400, detail=f"EPUB files not found: {', '.join(missing_files)}")
 
-    # Get author from authors list
     author = "Unknown"
     if chapter.manga.authors and len(chapter.manga.authors) > 0:
         author = chapter.manga.authors[0]
 
-    # Get device serials - priority: request > settings > all devices
+    # Device priority: request param > user setting > all devices
     device_serials = None
     if data and data.device_serial:
         device_serials = [data.device_serial]
@@ -241,7 +200,6 @@ async def stk_send_to_kindle(
         device_serials = [current_user.stk_device_serial]
         logger.info(f"Using saved device: {current_user.stk_device_name or current_user.stk_device_serial}")
 
-    # Send all files
     sent_count = 0
     failed_files = []
 
@@ -258,7 +216,6 @@ async def stk_send_to_kindle(
 
         if result['success']:
             sent_count += 1
-            logger.info(f"Sent {book_file.name} to Kindle")
         else:
             failed_files.append(book_file.name)
             logger.error(f"Failed to send {book_file.name}: {result['message']}")
@@ -272,24 +229,18 @@ async def stk_send_to_kindle(
         if failed_files:
             message += f" ({len(failed_files)} fallidos)"
 
-        return SendResponse(
-            ok=True,
-            message=message,
-            chapter_id=chapter_id,
-            sent_at=chapter.sent_at
-        )
+        return SendResponse(ok=True, message=message, chapter_id=chapter_id, sent_at=chapter.sent_at)
     else:
         raise HTTPException(status_code=500, detail=f"Failed to send: {', '.join(failed_files)}")
 
 
 @router.post("/stk/logout")
 async def stk_logout(current_user: User = Depends(get_current_user)):
-    """
-    Clear STK session
-    """
-    from app.services.stk_kindle_sender import get_stk_sender
+    """Clear STK session for the current user"""
+    from app.services.stk_kindle_sender import get_stk_sender, remove_stk_sender
 
-    sender = get_stk_sender()
+    sender = get_stk_sender(current_user.id)
     sender.logout()
+    remove_stk_sender(current_user.id)
 
     return {"ok": True, "message": "STK session cleared"}
