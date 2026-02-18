@@ -44,9 +44,12 @@ services:
       - FLARESOLVERR_URL=${FLARESOLVERR_URL:-}
       # Disable scheduler in backend (runs in separate container)
       - DISABLE_SCHEDULER=true
+      # Import folder for external files (Feature 5)
+      - IMPORT_DIR=/imports
     volumes:
       - downloads:/downloads
       - library:/library
+      - imports:/imports
       - ./backend:/app
     ports:
       - "9878:7878"
@@ -72,9 +75,11 @@ services:
       - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY:-}
       - CAPTCHA_API_KEY=${CAPTCHA_API_KEY:-}
       - FLARESOLVERR_URL=${FLARESOLVERR_URL:-}
+      - IMPORT_DIR=/imports
     volumes:
       - downloads:/downloads
       - library:/library
+      - imports:/imports
     depends_on:
       postgres:
         condition: service_healthy
@@ -142,6 +147,8 @@ volumes:
   downloads:
     driver: local
   library:
+    driver: local
+  imports:
     driver: local
 
 networks:

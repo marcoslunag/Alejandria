@@ -150,6 +150,16 @@ export const mangaApi = {
 
   getKindleStatus: (chapterId) =>
     api.get(`/kindle/status/${chapterId}`),
+
+  // Import folder (Feature 5)
+  getImportStatus: () =>
+    api.get(`/import/status`),
+
+  triggerImportProcess: () =>
+    api.post(`/import/process`),
+
+  retryFailedImport: (filename) =>
+    api.post(`/import/retry/${encodeURIComponent(filename)}`),
 };
 
 // Comics API

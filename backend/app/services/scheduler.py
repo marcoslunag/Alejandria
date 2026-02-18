@@ -148,6 +148,15 @@ class ContentScheduler:
             max_instances=1
         )
 
+        # Procesar carpeta /imports cada 5 minutos (Feature 5)
+        self.scheduler.add_job(
+            self.process_import_folder,
+            IntervalTrigger(minutes=5),
+            id='process_imports',
+            replace_existing=True,
+            max_instances=1
+        )
+
         self.scheduler.start()
         self.is_running = True
         logger.info(f"Scheduler started (check interval: {self.check_interval_hours}h)")
@@ -1380,6 +1389,15 @@ class ContentScheduler:
             logger.error(f"Error in retry_failed_downloads: {e}")
         finally:
             db.close()
+
+    async def process_import_folder(self):
+        """Feature 5: Procesa archivos de la carpeta /imports"""
+        try:
+            from app.services.import_watcher import ImportWatcher
+            watcher = ImportWatcher()
+            await watcher.process_import_queue()
+        except Exception as e:
+            logger.error(f"Import folder processing error: {e}", exc_info=True)
 
     async def cleanup_old_files(self):
         """Limpia archivos descargados de más de X días"""

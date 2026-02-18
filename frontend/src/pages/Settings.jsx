@@ -15,7 +15,12 @@ import {
   FaTimes,
   FaAmazon,
   FaDownload,
-  FaFilter
+  FaFilter,
+  FaInbox,
+  FaSync,
+  FaRedo,
+  FaCheckSquare,
+  FaTimesCircle
 } from 'react-icons/fa';
 
 const Settings = () => {
@@ -50,6 +55,10 @@ const Settings = () => {
   ];
   const [saveStatus, setSaveStatus] = useState(null);
 
+  // Import folder state (Feature 5)
+  const [importStatus, setImportStatus] = useState(null);
+  const [importProcessing, setImportProcessing] = useState(false);
+
   // STK (Send to Kindle) OAuth state
   const [stkStatus, setStkStatus] = useState({ authenticated: false, devices: [] });
   const [stkSigninUrl, setStkSigninUrl] = useState('');
@@ -64,11 +73,12 @@ const Settings = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [statusRes, statsRes, settingsRes, stkRes] = await Promise.all([
+      const [statusRes, statsRes, settingsRes, stkRes, importRes] = await Promise.all([
         mangaApi.getSystemStatus().catch(() => null),
         mangaApi.getLibraryStats().catch(() => null),
         mangaApi.getSettings().catch(() => null),
-        mangaApi.stkGetStatus().catch(() => null)
+        mangaApi.stkGetStatus().catch(() => null),
+        mangaApi.getImportStatus().catch(() => null),
       ]);
       if (statusRes) setSystemStatus(statusRes.data);
       if (statsRes) setLibraryStats(statsRes.data);
@@ -80,6 +90,9 @@ const Settings = () => {
       }
       if (stkRes?.data) {
         setStkStatus(stkRes.data);
+      }
+      if (importRes?.data) {
+        setImportStatus(importRes.data);
       }
     } catch (error) {
       console.error('Error cargando datos:', error);
@@ -607,6 +620,118 @@ const Settings = () => {
                   </p>
                 </div>
               )}
+            </div>
+          </section>
+
+          {/* Bandeja de Entrada (/imports) */}
+          <section>
+            <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+              <FaInbox className="text-yellow-500" />
+              Bandeja de Entrada (/imports)
+            </h2>
+            <div className="card p-6 space-y-4">
+              <p className="text-sm text-gray-400">
+                Coloca archivos CBZ, CBR, EPUB o PDF en la carpeta <code className="bg-surface-light px-1 rounded">/imports</code> y el sistema los
+                detectará automáticamente cada 5 minutos. Los archivos se moverán a <code className="bg-surface-light px-1 rounded">/imports/processed</code> si se procesan correctamente.
+              </p>
+
+              {/* Stats row */}
+              {importStatus && (
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-yellow-400">{importStatus.pending_count}</p>
+                    <p className="text-xs text-gray-400">Pendientes</p>
+                  </div>
+                  <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-green-400">{importStatus.processed_count}</p>
+                    <p className="text-xs text-gray-400">Procesados</p>
+                  </div>
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-red-400">{importStatus.failed_count}</p>
+                    <p className="text-xs text-gray-400">Fallidos</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Pending files */}
+              {importStatus?.pending?.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-yellow-400 mb-2">En cola:</p>
+                  <div className="space-y-1">
+                    {importStatus.pending.map(f => (
+                      <div key={f} className="flex items-center gap-2 text-sm text-gray-300 bg-surface-light rounded px-3 py-1.5">
+                        <FaSpinner className="text-yellow-400 animate-spin text-xs" />
+                        {f}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Failed files */}
+              {importStatus?.failed?.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-red-400 mb-2">Fallidos (sin coincidencia en biblioteca):</p>
+                  <div className="space-y-1">
+                    {importStatus.failed.map(f => (
+                      <div key={f} className="flex items-center gap-2 text-sm text-gray-300 bg-surface-light rounded px-3 py-1.5">
+                        <FaTimesCircle className="text-red-400 text-xs flex-shrink-0" />
+                        <span className="flex-1 truncate">{f}</span>
+                        <button
+                          onClick={async () => {
+                            await mangaApi.retryFailedImport(f).catch(() => {});
+                            const res = await mangaApi.getImportStatus().catch(() => null);
+                            if (res?.data) setImportStatus(res.data);
+                          }}
+                          className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 flex-shrink-0"
+                        >
+                          <FaRedo className="text-[10px]" /> Reintentar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <button
+                  onClick={async () => {
+                    setImportProcessing(true);
+                    try {
+                      await mangaApi.triggerImportProcess();
+                      const res = await mangaApi.getImportStatus().catch(() => null);
+                      if (res?.data) setImportStatus(res.data);
+                    } finally {
+                      setImportProcessing(false);
+                    }
+                  }}
+                  disabled={importProcessing}
+                  className="btn btn-secondary flex items-center gap-2 text-sm"
+                >
+                  {importProcessing ? <FaSpinner className="animate-spin" /> : <FaSync />}
+                  Procesar ahora
+                </button>
+                <button
+                  onClick={async () => {
+                    const res = await mangaApi.getImportStatus().catch(() => null);
+                    if (res?.data) setImportStatus(res.data);
+                  }}
+                  className="btn btn-secondary flex items-center gap-2 text-sm"
+                >
+                  <FaSync />
+                  Actualizar
+                </button>
+              </div>
+
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
+                <p className="text-xs text-blue-300">
+                  <strong>Formato del nombre:</strong> <code>Titulo #01.cbz</code> (cómic) ·
+                  <code> Titulo Vol.01.cbz</code> (manga) ·
+                  <code> Autor - Titulo.epub</code> (libro).
+                  El título debe coincidir con una serie ya en tu biblioteca.
+                </p>
+              </div>
             </div>
           </section>
 
