@@ -242,6 +242,25 @@ CAPTCHA_API_KEY=tu_2captcha_key
 - **Causa**: Links no se guardan por verificación fallida
 - **Solución**: Revisar logs, probablemente acortadores
 
+## 🔍 Búsqueda Enriquecida (V6)
+
+### Manga Search
+- **Backend** (`manga.py` search endpoint): Tras buscar en AniList, lanza `MangayComicsScraper.search_manga()` en paralelo para cada resultado (via `run_in_executor`, timeout 8s)
+- **Matching**: Keyword matching (mismas reglas que `quick_check_availability` de comics): stop words filtradas, intersección de keywords ≥ 2 o match exact
+- **Schema** (`MangaSearch`): Nuevos campos `scraper_sources: List[str]`, `scraper_tomo_count: int`, `scraper_url: Optional[str]`
+- **Frontend**: Cards custom en `Search.jsx` (no `ContentCard` genérico) — badge "✓ Encontrado" verde si hay scraper, "Sin fuentes" gris si no, badgets "📚 N tomos" y "🌐 MangayComics"
+
+### Book Search
+- **Backend** (`books.py` search endpoint): Lectulandia se busca siempre en `source='all'`; resultados se indexan por título normalizado. Los resultados de Google Books se anotan con `scraper_sources` y `scraper_url` si hay match de prefijo (35 chars)
+- **Schema** (`GoogleBooksSearch`): Nuevos campos `scraper_sources: List[str]`, `scraper_url: Optional[str]`
+- **Frontend**: Cards custom en `Search.jsx` — badge "✓ EPUB disponible" verde si Lectulandia o Epubera, "Sin EPUB conocido" gris si solo Google Books, badges "🌐 Lectulandia" / "🌐 Epubera"
+
+### Patrón clave (idéntico a comics)
+- Búsqueda de scrapers SIEMPRE en paralelo (asyncio.gather / run_in_executor)
+- Timeout 8s para no bloquear si el scraper está lento
+- Match flexible: exact match OR keyword intersection ≥ min(2, len/2)
+- Frontend deduplica por `anilist_id` (manga) o `google_books_id || source_url` (libros)
+
 ## 📚 Skills y Workflow
 
 Ver **`skills.md`** para reglas de workflow, gestión de tareas y principios core.

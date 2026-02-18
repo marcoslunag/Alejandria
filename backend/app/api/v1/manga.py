@@ -129,8 +129,10 @@ async def search_manga(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Search manga on AniList - the best manga/anime database
+    Search manga on AniList + check availability in MangayComics scraper.
     """
+    import asyncio
+
     results = []
 
     try:
@@ -138,8 +140,10 @@ async def search_manga(
         anilist_results = await anilist.search_manga(q, page=page, per_page=limit)
 
         for item in anilist_results['results']:
-            # Check if already in library
-            in_library = db.query(Manga).filter(Manga.anilist_id == item['anilist_id']).filter(Manga.user_id == current_user.id).first()
+            in_library = db.query(Manga).filter(
+                Manga.anilist_id == item['anilist_id'],
+                Manga.user_id == current_user.id
+            ).first()
 
             results.append(MangaSearch(
                 title=item['title'],
@@ -156,6 +160,47 @@ async def search_manga(
             ))
     except Exception as e:
         logger.error(f"AniList search error: {e}")
+
+    # Check scraper availability in parallel for all results
+    if results:
+        scraper = MangayComicsScraper()
+        loop = asyncio.get_event_loop()
+        stop_words = {'the', 'a', 'an', 'of', 'and', 'or', 'el', 'la', 'de', 'los', 'las', 'en', 'y'}
+
+        async def check_manga_in_scraper(title: str):
+            try:
+                scraper_results = await asyncio.wait_for(
+                    loop.run_in_executor(None, scraper.search_manga, title),
+                    timeout=8.0
+                )
+                if not scraper_results:
+                    return {"sources": [], "tomo_count": 0, "url": None}
+
+                title_lower = title.lower()
+                title_kw = {w.strip('":,.-!?[]') for w in title_lower.split()
+                            if w not in stop_words and len(w.strip('":,.-!?[]')) > 2}
+
+                for r in scraper_results[:8]:
+                    r_lower = r.get('title', '').lower()
+                    r_kw = {w.strip('":,.-!?[]') for w in r_lower.split()
+                            if len(w.strip('":,.-!?[]')) > 2}
+                    exact = title_lower in r_lower or r_lower in title_lower
+                    keyword = len(title_kw & r_kw) >= min(2, max(1, len(title_kw) // 2))
+                    if exact or keyword:
+                        return {
+                            "sources": ["MangayComics"],
+                            "tomo_count": len(scraper_results),
+                            "url": r.get("url")
+                        }
+                return {"sources": [], "tomo_count": 0, "url": None}
+            except Exception:
+                return {"sources": [], "tomo_count": 0, "url": None}
+
+        checks = await asyncio.gather(*[check_manga_in_scraper(r.title) for r in results])
+        for manga_result, check in zip(results, checks):
+            manga_result.scraper_sources = check["sources"]
+            manga_result.scraper_tomo_count = check["tomo_count"]
+            manga_result.scraper_url = check["url"]
 
     return SearchResponse(
         query=q,

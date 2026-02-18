@@ -103,43 +103,59 @@ async def search_books(
                 })
 
         # Search in scrapers
+        scraper_results = []
+        # Maps normalized title → (source_name, source_url) for cross-referencing
+        scraper_title_index: dict = {}
+
         if source in ["all", "scrapers", "lectulandia"]:
-            scraper_results = []
+            try:
+                lectulandia = LectulandiaScraper()
+                lect_results = await lectulandia.search(q, page=page)
 
-            # Only search Lectulandia (most reliable with Playwright)
-            if source in ["all", "scrapers", "lectulandia"]:
-                try:
-                    lectulandia = LectulandiaScraper()
-                    lect_results = await lectulandia.search(q, page=page)
+                for item in lect_results:
+                    in_library = db.query(Book).filter(
+                        Book.title.ilike(f"%{item['title'][:40]}%"),
+                        Book.user_id == current_user.id
+                    ).first()
 
-                    for item in lect_results:
-                        # Check by title (fuzzy match)
-                        # Note: Can't use .contains() on JSON field in PostgreSQL easily
-                        in_library = db.query(Book).filter(
-                            Book.title.ilike(f"%{item['title'][:40]}%"),
-                            Book.user_id == current_user.id
-                        ).first()
+                    title_norm = item['title'].lower().strip()
+                    scraper_title_index[title_norm] = ('lectulandia', item['url'])
 
-                        scraper_results.append({
-                            'title': item['title'],
-                            'cover_image': item.get('cover'),
-                            'thumbnail': item.get('cover'),
-                            'source': 'lectulandia',
-                            'source_url': item['url'],
-                            'in_library': bool(in_library),
-                            'library_id': in_library.id if in_library else None,
-                            # Add placeholders for fields expected by frontend
-                            'authors': [],
-                            'google_books_id': None,
-                            'description': None,
-                            'published_date': None,
-                            'publisher': None,
-                        })
-                except Exception as e:
-                    logger.error(f"Lectulandia search error: {e}")
+                    scraper_results.append({
+                        'title': item['title'],
+                        'cover_image': item.get('cover'),
+                        'thumbnail': item.get('cover'),
+                        'source': 'lectulandia',
+                        'source_url': item['url'],
+                        'scraper_sources': ['lectulandia'],
+                        'scraper_url': item['url'],
+                        'in_library': bool(in_library),
+                        'library_id': in_library.id if in_library else None,
+                        'authors': [],
+                        'google_books_id': None,
+                        'description': None,
+                        'published_date': None,
+                        'publisher': None,
+                    })
+            except Exception as e:
+                logger.error(f"Lectulandia search error: {e}")
 
-            # Add scraper results to main results
-            results.extend(scraper_results)
+        # Cross-reference: annotate Google Books results with scraper availability
+        for result in results:
+            title_key = result['title'].lower().strip()
+            matched_source = None
+            matched_url = None
+            # Fuzzy: check 30-char prefix match against scraper titles
+            for lect_title, (src_name, src_url) in scraper_title_index.items():
+                if title_key[:35] in lect_title or lect_title[:35] in title_key:
+                    matched_source = src_name
+                    matched_url = src_url
+                    break
+            result['scraper_sources'] = [matched_source] if matched_source else []
+            result['scraper_url'] = matched_url
+
+        # Add scraper results (as separate cards when not found via Google Books)
+        results.extend(scraper_results)
 
         # Remove duplicates by title (case-insensitive)
         seen_titles = set()

@@ -250,13 +250,59 @@ const Search = () => {
           {activeTab === 'manga' && (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6">
               {results.map((manga) => (
-                <ContentCard
-                  key={manga.anilist_id}
-                  item={manga}
-                  type="manga"
-                  showAddButton={true}
-                  onAdd={handleAddManga}
-                />
+                <div key={manga.anilist_id} className="card overflow-hidden flex flex-col">
+                  <div className="relative aspect-[2/3] overflow-hidden bg-gray-800">
+                    {manga.cover ? (
+                      <img
+                        src={manga.cover}
+                        alt={manga.title}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <FaBook className="text-6xl text-gray-600" />
+                      </div>
+                    )}
+                    {/* Scraper availability badge */}
+                    {manga.scraper_sources && manga.scraper_sources.length > 0 ? (
+                      <div className="absolute top-2 left-2 bg-green-600 text-white px-2 py-0.5 rounded-full text-xs font-bold shadow">
+                        ✓ Encontrado
+                      </div>
+                    ) : (
+                      <div className="absolute top-2 left-2 bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full text-xs shadow">
+                        Sin fuentes
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-3 flex flex-col flex-1">
+                    <h3 className="font-bold text-sm mb-1 line-clamp-2">{manga.title}</h3>
+                    {manga.average_score > 0 && (
+                      <p className="text-xs text-yellow-400 mb-1">⭐ {manga.average_score / 10}/10</p>
+                    )}
+                    {/* Scraper info */}
+                    {manga.scraper_sources && manga.scraper_sources.length > 0 && (
+                      <div className="text-xs text-gray-400 mb-2 space-y-0.5">
+                        {manga.scraper_tomo_count > 0 && (
+                          <p>📚 {manga.scraper_tomo_count} tomos</p>
+                        )}
+                        <p>🌐 {manga.scraper_sources.join(', ')}</p>
+                      </div>
+                    )}
+                    <div className="mt-auto">
+                      {manga.in_library ? (
+                        <div className="text-center text-green-500 text-sm mt-2">✓ En biblioteca</div>
+                      ) : (
+                        <button
+                          onClick={() => handleAddManga(manga)}
+                          className="w-full btn btn-primary bg-blue-500 hover:bg-blue-600 text-sm mt-2"
+                        >
+                          Añadir
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               ))}
             </div>
           )}
@@ -376,15 +422,66 @@ const Search = () => {
 
           {activeTab === 'books' && (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6">
-              {results.map((book) => (
-                <ContentCard
-                  key={book.google_books_id}
-                  item={book}
-                  type="book"
-                  showAddButton={true}
-                  onAdd={handleAddBook}
-                />
-              ))}
+              {results.map((book, idx) => {
+                const scraperSources = book.scraper_sources || [];
+                const isLectulandia = book.source === 'lectulandia' || scraperSources.includes('lectulandia');
+                const isEpubera = book.source === 'epubera' || scraperSources.includes('epubera');
+                const hasAnyScraper = isLectulandia || isEpubera;
+
+                return (
+                  <div key={book.google_books_id || book.source_url || idx} className="card overflow-hidden flex flex-col">
+                    <div className="relative aspect-[2/3] overflow-hidden bg-gray-800">
+                      {(book.cover_image || book.thumbnail) ? (
+                        <img
+                          src={book.cover_image || book.thumbnail}
+                          alt={book.title}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <FaBookReader className="text-6xl text-gray-600" />
+                        </div>
+                      )}
+                      {/* EPUB availability badge */}
+                      {hasAnyScraper ? (
+                        <div className="absolute top-2 left-2 bg-green-600 text-white px-2 py-0.5 rounded-full text-xs font-bold shadow">
+                          ✓ EPUB disponible
+                        </div>
+                      ) : book.source === 'google_books' ? (
+                        <div className="absolute top-2 left-2 bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full text-xs shadow">
+                          Sin EPUB conocido
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="p-3 flex flex-col flex-1">
+                      <h3 className="font-bold text-sm mb-1 line-clamp-2">{book.title}</h3>
+                      {book.authors && book.authors.length > 0 && (
+                        <p className="text-xs text-gray-400 mb-1 line-clamp-1">{book.authors.join(', ')}</p>
+                      )}
+                      {/* Scraper sources */}
+                      {hasAnyScraper && (
+                        <div className="text-xs text-gray-400 mb-2 space-y-0.5">
+                          {isLectulandia && <p>🌐 Lectulandia</p>}
+                          {isEpubera && <p>🌐 Epubera</p>}
+                        </div>
+                      )}
+                      <div className="mt-auto">
+                        {book.in_library ? (
+                          <div className="text-center text-green-500 text-sm mt-2">✓ En biblioteca</div>
+                        ) : (
+                          <button
+                            onClick={() => handleAddBook(book)}
+                            className="w-full btn btn-primary bg-green-500 hover:bg-green-600 text-sm mt-2"
+                          >
+                            Añadir
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

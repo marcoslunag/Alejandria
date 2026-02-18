@@ -41,6 +41,10 @@ class GoogleBooksSearch(BaseModel):
     # For scraper results
     source_url: Optional[str] = Field(None, description="URL from scraper (lectulandia, epubera, etc.)")
 
+    # Scraper availability (populated during search for Google Books results)
+    scraper_sources: List[str] = []       # e.g. ["lectulandia", "epubera"]
+    scraper_url: Optional[str] = None     # Direct URL in scraper
+
     # Library status
     in_library: bool = False
     library_id: Optional[int] = None

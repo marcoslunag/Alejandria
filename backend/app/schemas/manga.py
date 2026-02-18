@@ -201,6 +201,11 @@ class MangaSearch(BaseModel):
     in_library: bool = False
     library_id: Optional[int] = None
 
+    # Scraper availability (populated during search)
+    scraper_sources: List[str] = []       # e.g. ["MangayComics"]
+    scraper_tomo_count: int = 0           # Number of tomos found in scraper
+    scraper_url: Optional[str] = None     # Direct URL in scraper
+
 
 class SearchResponse(BaseModel):
     """Combined search response"""
