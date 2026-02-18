@@ -1,8 +1,21 @@
-# Alejandría - Biblioteca Digital Automatizada
+# Alejandría v2.0 - Biblioteca Digital Automatizada
 
 ## 🎯 Descripción del Proyecto
 
 Alejandría es una plataforma de gestión automatizada de contenido digital (manga, cómics, libros) con integración a Kindle. El sistema descarga, convierte y envía contenido automáticamente.
+
+## 🚀 V2.0 Features (10/10 completadas)
+
+1. **Watchlist inteligente** - Toggle monitored en cards + filtro "Siguiendo" en Library
+2. **Smart retry** - Backoff exponencial: 5min → 30min → 2h → 24h para descargas fallidas
+3. **Reading progress** - mark-as-read, reading_status, biblioteca stats
+4. **Quality preferences** - preferred_quality, preferred_format, max_file_size, preferred_hosts por usuario
+5. **Import folder** - `/imports` watcher automático para CBZ/PDF/EPUB (cada 5min)
+6. **Content matching** - Anti-duplicados con normalización + Jaccard similarity ≥ 0.8, modal 409
+7. **Differential downloads** - Solo descarga issues faltantes en bundles (skip downloaded_at)
+8. **Metadata enricher** - Refresh semanal desde AniList/ComicVine/Google Books + Open Library fallback
+9. **PWA mobile** - manifest.json, service worker, hamburger menu responsive
+10. **Local recommendations** - Engine sin IA: perfil de géneros/autores/scores, página /discover
 
 ## 🏗️ Arquitectura
 
