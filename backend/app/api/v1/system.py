@@ -9,6 +9,9 @@ from sqlalchemy import func
 from app.database import get_db
 from app.models.manga import Manga
 from app.models.chapter import Chapter
+from app.models.comic import Comic, ComicIssue
+from app.models.book import Book
+from app.models.book_chapter import BookChapter
 from app.models.download import DownloadQueue
 from app.models.user import User
 from app.schemas.download import SystemStatusResponse
@@ -175,6 +178,146 @@ def test_stk(current_user: User = Depends(require_admin)):
             "status": "error",
             "message": str(e)
         }
+
+
+@router.get("/dashboard")
+def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Get personal dashboard stats for the current user.
+    Returns library counts, reading stats, recent downloads, and error count.
+    """
+    uid = current_user.id
+
+    # --- Library counts ---
+    total_manga = db.query(func.count(Manga.id)).filter(Manga.user_id == uid).scalar() or 0
+    total_comics = db.query(func.count(Comic.id)).filter(Comic.user_id == uid).scalar() or 0
+    total_books = db.query(func.count(Book.id)).filter(Book.user_id == uid).scalar() or 0
+
+    # --- Reading stats per type ---
+    def reading_counts(query, model):
+        rows = (
+            query.with_entities(model.reading_status, func.count(model.id))
+            .group_by(model.reading_status)
+            .all()
+        )
+        counts = {"not_started": 0, "reading": 0, "completed": 0}
+        for status, cnt in rows:
+            if status in counts:
+                counts[status] = cnt
+        return counts
+
+    manga_reading = reading_counts(db.query(Manga).filter(Manga.user_id == uid), Manga)
+    comics_reading = reading_counts(db.query(Comic).filter(Comic.user_id == uid), Comic)
+    books_reading = reading_counts(db.query(Book).filter(Book.user_id == uid), Book)
+
+    # --- Recent downloads (last 5 across all types) ---
+    recent = []
+
+    # Manga chapters
+    manga_dl = (
+        db.query(Chapter, Manga.title, Manga.cover_image)
+        .join(Manga, Chapter.manga_id == Manga.id)
+        .filter(Manga.user_id == uid, Chapter.downloaded_at.isnot(None))
+        .order_by(Chapter.downloaded_at.desc())
+        .limit(5)
+        .all()
+    )
+    for ch, manga_title, cover in manga_dl:
+        recent.append({
+            "type": "manga",
+            "title": manga_title,
+            "cover": cover,
+            "item_title": f"Cap. {int(ch.number) if ch.number == int(ch.number) else ch.number}",
+            "downloaded_at": ch.downloaded_at.isoformat() if ch.downloaded_at else None,
+        })
+
+    # Comic issues
+    comic_dl = (
+        db.query(ComicIssue, Comic.title, Comic.cover_image)
+        .join(Comic, ComicIssue.comic_id == Comic.id)
+        .filter(Comic.user_id == uid, ComicIssue.downloaded_at.isnot(None))
+        .order_by(ComicIssue.downloaded_at.desc())
+        .limit(5)
+        .all()
+    )
+    for issue, comic_title, cover in comic_dl:
+        recent.append({
+            "type": "comic",
+            "title": comic_title,
+            "cover": cover,
+            "item_title": f"#{issue.issue_number}" if issue.issue_number else issue.title or "",
+            "downloaded_at": issue.downloaded_at.isoformat() if issue.downloaded_at else None,
+        })
+
+    # Book chapters
+    book_dl = (
+        db.query(BookChapter, Book.title, Book.cover_image)
+        .join(Book, BookChapter.book_id == Book.id)
+        .filter(Book.user_id == uid, BookChapter.downloaded_at.isnot(None))
+        .order_by(BookChapter.downloaded_at.desc())
+        .limit(5)
+        .all()
+    )
+    for bc, book_title, cover in book_dl:
+        recent.append({
+            "type": "book",
+            "title": book_title,
+            "cover": cover,
+            "item_title": bc.title or f"Vol. {bc.number}",
+            "downloaded_at": bc.downloaded_at.isoformat() if bc.downloaded_at else None,
+        })
+
+    # Sort and keep top 5
+    recent.sort(key=lambda x: x["downloaded_at"] or "", reverse=True)
+    recent = recent[:5]
+
+    # --- Error count ---
+    manga_errors = (
+        db.query(func.count(Chapter.id))
+        .join(Manga, Chapter.manga_id == Manga.id)
+        .filter(Manga.user_id == uid, Chapter.status == "error")
+        .scalar() or 0
+    )
+    comic_errors = (
+        db.query(func.count(ComicIssue.id))
+        .join(Comic, ComicIssue.comic_id == Comic.id)
+        .filter(Comic.user_id == uid, ComicIssue.status == "error")
+        .scalar() or 0
+    )
+    book_errors = (
+        db.query(func.count(BookChapter.id))
+        .join(Book, BookChapter.book_id == Book.id)
+        .filter(Book.user_id == uid, BookChapter.status == "error")
+        .scalar() or 0
+    )
+    error_count = manga_errors + comic_errors + book_errors
+
+    # --- Storage used ---
+    comic_storage = (
+        db.query(func.sum(ComicIssue.file_size))
+        .join(Comic, ComicIssue.comic_id == Comic.id)
+        .filter(Comic.user_id == uid, ComicIssue.file_size.isnot(None))
+        .scalar() or 0
+    )
+    book_storage = (
+        db.query(func.sum(BookChapter.file_size))
+        .join(Book, BookChapter.book_id == Book.id)
+        .filter(Book.user_id == uid, BookChapter.file_size.isnot(None))
+        .scalar() or 0
+    )
+    storage_used_mb = round((comic_storage + book_storage) / (1024 * 1024), 1)
+
+    return {
+        "library": {"manga": total_manga, "comics": total_comics, "books": total_books},
+        "reading_stats": {
+            "manga": manga_reading,
+            "comics": comics_reading,
+            "books": books_reading,
+        },
+        "recent_downloads": recent,
+        "error_count": error_count,
+        "storage_used_mb": storage_used_mb,
+    }
 
 
 @router.get("/stats")

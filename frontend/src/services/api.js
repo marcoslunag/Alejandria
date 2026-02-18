@@ -303,4 +303,9 @@ export const recommendationsApi = {
     api.get('/recommendations', { params }),
 };
 
+// System API
+export const systemApi = {
+  getDashboard: () => api.get('/system/dashboard'),
+};
+
 export default api;

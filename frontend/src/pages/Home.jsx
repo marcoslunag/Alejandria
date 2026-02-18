@@ -1,26 +1,102 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { mangaApi } from '../services/api';
+import { mangaApi, systemApi } from '../services/api';
 import ContentGrid from '../components/ContentGrid';
-import { FaFire, FaStar, FaSortAmountDown } from 'react-icons/fa';
+import {
+  FaFire, FaStar, FaBook, FaMask, FaBookReader,
+  FaExclamationTriangle, FaDownload,
+} from 'react-icons/fa';
+
+const TYPE_CONFIG = {
+  manga:  { label: 'Manga',   color: 'text-blue-400',  bg: 'bg-blue-500/20',  icon: FaBook,       path: '/library' },
+  comics: { label: 'Cómics',  color: 'text-red-400',   bg: 'bg-red-500/20',   icon: FaMask,       path: '/comics'  },
+  books:  { label: 'Libros',  color: 'text-green-400', bg: 'bg-green-500/20', icon: FaBookReader, path: '/books'   },
+};
+
+const DOWNLOAD_TYPE_CONFIG = {
+  manga:  { color: 'text-blue-400',  label: 'Manga'  },
+  comic:  { color: 'text-red-400',   label: 'Comic'  },
+  book:   { color: 'text-green-400', label: 'Libro'  },
+};
+
+const ReadingBar = ({ stats, type }) => {
+  const cfg = TYPE_CONFIG[type];
+  const Icon = cfg.icon;
+  const total = (stats.not_started || 0) + (stats.reading || 0) + (stats.completed || 0);
+  if (total === 0) return null;
+  const completedPct = Math.round(((stats.completed || 0) / total) * 100);
+  const readingPct = Math.round(((stats.reading || 0) / total) * 100);
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs text-gray-400">
+        <div className="flex items-center gap-1.5">
+          <Icon className={cfg.color} />
+          <span>{cfg.label}</span>
+        </div>
+        <span className="text-gray-500">{total} series</span>
+      </div>
+      <div className="h-2 rounded-full bg-dark-lighter overflow-hidden flex">
+        {completedPct > 0 && (
+          <div className="bg-green-500 h-full" style={{ width: `${completedPct}%` }} />
+        )}
+        {readingPct > 0 && (
+          <div className="bg-blue-500 h-full" style={{ width: `${readingPct}%` }} />
+        )}
+        {(100 - completedPct - readingPct) > 0 && (
+          <div className="bg-gray-600 h-full" style={{ width: `${100 - completedPct - readingPct}%` }} />
+        )}
+      </div>
+      <div className="flex gap-3 text-[10px] text-gray-500">
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+          Completados {stats.completed || 0}
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+          En curso {stats.reading || 0}
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full bg-gray-600 inline-block" />
+          Sin empezar {stats.not_started || 0}
+        </span>
+      </div>
+    </div>
+  );
+};
 
 const Home = () => {
+  const navigate = useNavigate();
+  const [dashboard, setDashboard] = useState(null);
+  const [loadingDash, setLoadingDash] = useState(true);
   const [trending, setTrending] = useState([]);
   const [popular, setPopular] = useState([]);
   const [loadingTrending, setLoadingTrending] = useState(true);
   const [loadingPopular, setLoadingPopular] = useState(true);
   const [activeTab, setActiveTab] = useState('trending');
-  const [sortBy, setSortBy] = useState('default'); // default, rating, title, tomos
 
   useEffect(() => {
+    loadDashboard();
     loadTrending();
     loadPopular();
   }, []);
 
+  const loadDashboard = async () => {
+    try {
+      const { data } = await systemApi.getDashboard();
+      setDashboard(data);
+    } catch (err) {
+      if (err.response?.status !== 401) console.error('Error cargando dashboard:', err);
+    } finally {
+      setLoadingDash(false);
+    }
+  };
+
   const loadTrending = async () => {
     try {
       setLoadingTrending(true);
-      const response = await mangaApi.getTrending(1, 18);
+      const response = await mangaApi.getTrending(1, 12);
       setTrending(response.data);
     } catch (error) {
       console.error('Error cargando tendencias:', error);
@@ -32,7 +108,7 @@ const Home = () => {
   const loadPopular = async () => {
     try {
       setLoadingPopular(true);
-      const response = await mangaApi.getPopular(1, 18);
+      const response = await mangaApi.getPopular(1, 12);
       setPopular(response.data);
     } catch (error) {
       console.error('Error cargando populares:', error);
@@ -43,121 +119,174 @@ const Home = () => {
 
   const handleAddManga = async (manga) => {
     try {
-      await mangaApi.addFromAnilist({
-        anilist_id: manga.anilist_id,
-        monitored: true,
-        auto_download: true,
-      });
+      await mangaApi.addFromAnilist({ anilist_id: manga.anilist_id, monitored: true, auto_download: true });
       toast.success(`"${manga.title}" añadido a la biblioteca`);
-      loadTrending();
-      loadPopular();
+      loadDashboard();
     } catch (error) {
-      console.error('Error añadiendo manga:', error);
       toast.error('Error al añadir el manga');
     }
   };
 
-  // Sort function
-  const sortManga = (mangaList) => {
-    if (sortBy === 'default') return mangaList;
-
-    return [...mangaList].sort((a, b) => {
-      switch (sortBy) {
-        case 'rating':
-          return (b.average_score || 0) - (a.average_score || 0);
-        case 'title':
-          return (a.title || '').localeCompare(b.title || '');
-        case 'tomos':
-          return (b.chapters || b.total_chapters || 0) - (a.chapters || a.total_chapters || 0);
-        default:
-          return 0;
-      }
-    });
-  };
+  const lib = dashboard?.library || {};
+  const readingStats = dashboard?.reading_stats || {};
+  const recentDownloads = dashboard?.recent_downloads || [];
+  const errorCount = dashboard?.error_count || 0;
+  const totalItems = (lib.manga || 0) + (lib.comics || 0) + (lib.books || 0);
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="mb-8 text-center">
-        <h1 className="text-4xl font-bold mb-2">Descubrir Manga</h1>
-        <p className="text-gray-400">Encuentra tu próximo manga favorito desde Anilist</p>
-      </div>
+    <div className="container mx-auto px-4 py-6 max-w-7xl">
 
-      {/* Tabs and Sort */}
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-8 border-b border-gray-700 pb-4">
-        <div className="flex gap-4">
+      {/* === Mi Biblioteca === */}
+      <section className="mb-8">
+        <h2 className="text-xl font-bold mb-4">Mi Biblioteca</h2>
+
+        {loadingDash ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            {[0, 1, 2].map(i => (
+              <div key={i} className="bg-dark-card rounded-xl p-5 animate-pulse h-20" />
+            ))}
+          </div>
+        ) : totalItems === 0 ? (
+          <div className="bg-dark-card rounded-xl p-8 text-center text-gray-500 mb-4">
+            <p className="text-lg">Tu biblioteca está vacía</p>
+            <p className="text-sm mt-1">Busca y añade contenido para empezar</p>
+            <button
+              onClick={() => navigate('/search')}
+              className="mt-4 px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary/80 transition-colors"
+            >
+              Explorar contenido
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Stats cards */}
+            <div className="grid grid-cols-3 gap-4 mb-4">
+              {Object.entries(TYPE_CONFIG).map(([type, cfg]) => {
+                const Icon = cfg.icon;
+                const count = lib[type] || 0;
+                return (
+                  <button
+                    key={type}
+                    onClick={() => navigate(cfg.path)}
+                    className="bg-dark-card rounded-xl p-4 text-left hover:ring-1 hover:ring-gray-600 transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-lg ${cfg.bg} flex items-center justify-center`}>
+                        <Icon className={`${cfg.color} text-base`} />
+                      </div>
+                      <div>
+                        <p className="text-xl font-bold">{count}</p>
+                        <p className="text-xs text-gray-400">{cfg.label}</p>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Reading progress */}
+            {Object.keys(readingStats).length > 0 && (
+              <div className="bg-dark-card rounded-xl p-5 mb-4 space-y-4">
+                <h3 className="text-sm font-semibold text-gray-300">Progreso de lectura</h3>
+                {Object.entries(readingStats).map(([type, stats]) => (
+                  <ReadingBar key={type} stats={stats} type={type} />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Error badge */}
+        {!loadingDash && errorCount > 0 && (
           <button
-            onClick={() => setActiveTab('trending')}
-            className={`flex items-center gap-2 px-6 py-3 border-b-2 transition-colors ${
-              activeTab === 'trending'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-gray-400 hover:text-white'
-            }`}
+            onClick={() => navigate('/queue')}
+            className="flex items-center gap-2 w-full bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-red-400 hover:bg-red-500/20 transition-colors mb-4"
           >
-            <FaFire />
-            <span className="font-medium">Tendencias</span>
+            <FaExclamationTriangle className="flex-shrink-0 text-sm" />
+            <span className="text-sm">{errorCount} error{errorCount !== 1 ? 'es' : ''} en descargas</span>
+            <span className="ml-auto text-xs text-red-500 font-medium">Ver cola →</span>
           </button>
-          <button
-            onClick={() => setActiveTab('popular')}
-            className={`flex items-center gap-2 px-6 py-3 border-b-2 transition-colors ${
-              activeTab === 'popular'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-gray-400 hover:text-white'
-            }`}
-          >
-            <FaStar />
-            <span className="font-medium">Populares</span>
-          </button>
+        )}
+
+        {/* Recent activity */}
+        {!loadingDash && recentDownloads.length > 0 && (
+          <div className="bg-dark-card rounded-xl p-5">
+            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+              <FaDownload className="text-gray-500" />
+              Actividad reciente
+            </h3>
+            <div className="space-y-2">
+              {recentDownloads.map((item, i) => {
+                const tc = DOWNLOAD_TYPE_CONFIG[item.type] || DOWNLOAD_TYPE_CONFIG.manga;
+                const date = item.downloaded_at
+                  ? new Date(item.downloaded_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
+                  : '';
+                return (
+                  <div key={i} className="flex items-center gap-3 py-1">
+                    {item.cover ? (
+                      <img src={item.cover} alt="" className="w-8 h-10 object-cover rounded flex-shrink-0" loading="lazy" />
+                    ) : (
+                      <div className="w-8 h-10 bg-dark-lighter rounded flex-shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{item.title}</p>
+                      <p className="text-xs text-gray-500 truncate">{item.item_title}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className={`text-[10px] ${tc.color}`}>{tc.label}</p>
+                      <p className="text-[10px] text-gray-600">{date}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* === Descubre más === */}
+      <section>
+        <div className="flex items-center justify-between mb-4 border-b border-gray-700 pb-3">
+          <h2 className="text-xl font-bold">Descubre</h2>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setActiveTab('trending')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                activeTab === 'trending' ? 'bg-primary text-white' : 'text-gray-400 hover:text-white hover:bg-dark-lighter'
+              }`}
+            >
+              <FaFire className="text-xs" /> Tendencias
+            </button>
+            <button
+              onClick={() => setActiveTab('popular')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                activeTab === 'popular' ? 'bg-primary text-white' : 'text-gray-400 hover:text-white hover:bg-dark-lighter'
+              }`}
+            >
+              <FaStar className="text-xs" /> Populares
+            </button>
+          </div>
         </div>
 
-        {/* Sort Dropdown */}
-        <div className="flex items-center gap-2">
-          <FaSortAmountDown className="text-gray-400" />
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            className="px-4 py-2 bg-dark-lighter rounded border border-gray-700 focus:border-primary focus:outline-none"
-          >
-            <option value="default">Orden por defecto</option>
-            <option value="rating">Por puntuación</option>
-            <option value="title">Por título</option>
-            <option value="tomos">Por cantidad de tomos</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Content */}
-      {activeTab === 'trending' && (
-        <div>
-          <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-            <FaFire className="text-orange-500" />
-            Tendencias Actuales
-          </h2>
+        {activeTab === 'trending' && (
           <ContentGrid
-            items={sortManga(trending)}
+            items={trending}
             type="manga"
             loading={loadingTrending}
             showAddButton={true}
             onAdd={handleAddManga}
           />
-        </div>
-      )}
-
-      {activeTab === 'popular' && (
-        <div>
-          <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-            <FaStar className="text-yellow-500" />
-            Más Populares
-          </h2>
+        )}
+        {activeTab === 'popular' && (
           <ContentGrid
-            items={sortManga(popular)}
+            items={popular}
             type="manga"
             loading={loadingPopular}
             showAddButton={true}
             onAdd={handleAddManga}
           />
-        </div>
-      )}
+        )}
+      </section>
     </div>
   );
 };
