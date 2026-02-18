@@ -439,7 +439,8 @@ async def add_comic(
     data: ComicCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    force: bool = Query(False, description="Skip duplicate check")
 ):
     """
     Add comic to library from ComicVine
@@ -472,6 +473,17 @@ async def add_comic(
         existing = db.query(Comic).filter(Comic.comicvine_id == data.comicvine_id, Comic.user_id == current_user.id).first()
         if existing:
             raise HTTPException(status_code=400, detail="Comic already in library")
+
+    # Feature 6: Fuzzy duplicate check (skip if force=True)
+    if not force:
+        from app.services.content_matcher import ContentMatcher
+        matcher = ContentMatcher()
+        duplicate = matcher.find_duplicate(db, title, 'comic', current_user.id)
+        if duplicate:
+            raise HTTPException(
+                status_code=409,
+                detail={"message": "Posible duplicado encontrado", "matched_id": duplicate.id, "matched_title": duplicate.title}
+            )
 
     # Create comic
     comic = Comic(

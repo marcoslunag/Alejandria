@@ -60,8 +60,8 @@ export const mangaApi = {
     api.get(`/manga/library/stats`),
 
   // Add manga
-  addFromAnilist: (data) =>
-    api.post(`/manga/add/anilist`, data),
+  addFromAnilist: (data, force = false) =>
+    api.post(`/manga/add/anilist${force ? '?force=true' : ''}`, data),
 
   addFromURL: (data) =>
     api.post(`/manga/add/url`, data),
@@ -183,12 +183,12 @@ export const comicApi = {
     api.get(`/comics/stats`),
 
   // Add/Update/Delete
-  addComic: (payload) => {
+  addComic: (payload, force = false) => {
     // Support both old format (just ID) and new format (object with volume_to_add)
     const data = typeof payload === 'number'
       ? { comicvine_id: payload }
       : payload;
-    return api.post(`/comics/`, data);
+    return api.post(`/comics/${force ? '?force=true' : ''}`, data);
   },
 
   addComicFromUrl: (data) =>
@@ -263,8 +263,8 @@ export const bookApi = {
     api.get(`/books/library/stats`),
 
   // Add books
-  addFromGoogleBooks: (data) =>
-    api.post(`/books/from-google-books`, data),
+  addFromGoogleBooks: (data, force = false) =>
+    api.post(`/books/from-google-books${force ? '?force=true' : ''}`, data),
 
   addFromUrl: (data) =>
     api.post(`/books/from-url`, data),

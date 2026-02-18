@@ -1,18 +1,21 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { mangaApi, comicApi, bookApi } from '../services/api';
 import SearchBar from '../components/SearchBar';
 import ContentCard from '../components/ContentCard';
-import { FaSearch, FaBook, FaMask, FaBookReader } from 'react-icons/fa';
+import { FaSearch, FaBook, FaMask, FaBookReader, FaExclamationTriangle } from 'react-icons/fa';
 
 const Search = () => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('manga'); // manga, comics, books
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const initialQuery = searchParams.get('q') || '';
   const [hasSearched, setHasSearched] = useState(!!initialQuery);
+  // Feature 6: Duplicate detection modal
+  const [duplicateModal, setDuplicateModal] = useState(null); // { matched_id, matched_title, type, forceAdd }
 
   useEffect(() => {
     if (initialQuery) {
@@ -46,87 +49,108 @@ const Search = () => {
     }
   };
 
+  const _doAddManga = async (manga, force = false) => {
+    const url = force ? `/manga/add/anilist?force=true` : undefined;
+    await mangaApi.addFromAnilist({
+      anilist_id: manga.anilist_id,
+      monitored: true,
+      auto_download: true,
+    }, force);
+    toast.success(`"${manga.title}" añadido a la biblioteca`);
+    const query = searchParams.get('q') || initialQuery;
+    if (query) handleSearch(query);
+  };
+
   const handleAddManga = async (manga) => {
     try {
-      await mangaApi.addFromAnilist({
-        anilist_id: manga.anilist_id,
-        monitored: true,
-        auto_download: true,
-      });
-      toast.success(`"${manga.title}" añadido a la biblioteca`);
-      const query = searchParams.get('q') || initialQuery;
-      if (query) handleSearch(query);
+      await _doAddManga(manga);
     } catch (error) {
-      console.error('Error añadiendo manga:', error);
-      toast.error('Error al añadir el manga');
+      if (error.response?.status === 409) {
+        const detail = error.response.data?.detail || {};
+        setDuplicateModal({
+          matched_id: detail.matched_id,
+          matched_title: detail.matched_title,
+          type: 'manga',
+          forceAdd: () => _doAddManga(manga, true).catch(() => toast.error('Error al añadir')),
+        });
+      } else {
+        console.error('Error añadiendo manga:', error);
+        toast.error('Error al añadir el manga');
+      }
     }
+  };
+
+  const _doAddComic = async (comic, force = false) => {
+    if (comic.comicvine_id === 0 && comic.volume_to_add) {
+      const volume = comic.volume_to_add;
+      await comicApi.addComicFromUrl({
+        title: volume.title,
+        url: volume.url,
+        source: volume.source,
+        issues: volume.issues,
+        cover: volume.cover
+      });
+      toast.success(`"${volume.title}" añadido a la biblioteca`);
+    } else {
+      const payload = { comicvine_id: comic.comicvine_id };
+      if (comic.volume_to_add) payload.volume_to_add = comic.volume_to_add;
+      await comicApi.addComic(payload, force);
+      const label = comic.volume_to_add ? `${comic.title} Vol ${comic.volume_to_add.number}` : comic.title;
+      toast.success(`"${label}" añadido a la biblioteca`);
+    }
+    const query = searchParams.get('q') || initialQuery;
+    if (query) handleSearch(query);
   };
 
   const handleAddComic = async (comic) => {
     try {
-      // If comicvine_id is 0 (virtual result), add from scraper URL directly
-      if (comic.comicvine_id === 0 && comic.volume_to_add) {
-        const volume = comic.volume_to_add;
-        await comicApi.addComicFromUrl({
-          title: volume.title,
-          url: volume.url,
-          source: volume.source,
-          issues: volume.issues,
-          cover: volume.cover
-        });
-        toast.success(`"${volume.title}" añadido a la biblioteca`);
-      }
-      // Normal ComicVine comic
-      else {
-        const payload = {
-          comicvine_id: comic.comicvine_id
-        };
-
-        if (comic.volume_to_add) {
-          payload.volume_to_add = comic.volume_to_add;
-          await comicApi.addComic(payload);
-          toast.success(`"${comic.title} Vol ${comic.volume_to_add.number}" añadido a la biblioteca`);
-        } else {
-          await comicApi.addComic(payload);
-          toast.success(`"${comic.title}" añadido a la biblioteca`);
-        }
-      }
-
-      const query = searchParams.get('q') || initialQuery;
-      if (query) handleSearch(query);
+      await _doAddComic(comic);
     } catch (error) {
-      console.error('Error añadiendo comic:', error);
-      toast.error('Error al añadir el cómic');
+      if (error.response?.status === 409) {
+        const detail = error.response.data?.detail || {};
+        setDuplicateModal({
+          matched_id: detail.matched_id,
+          matched_title: detail.matched_title,
+          type: 'comics',
+          forceAdd: () => _doAddComic(comic, true).catch(() => toast.error('Error al añadir')),
+        });
+      } else {
+        console.error('Error añadiendo comic:', error);
+        toast.error('Error al añadir el cómic');
+      }
     }
+  };
+
+  const _doAddBook = async (book, force = false) => {
+    if (book.source_url && !book.google_books_id) {
+      await bookApi.addFromUrl({ source_url: book.source_url, monitored: true, auto_download: true });
+    } else if (book.google_books_id) {
+      await bookApi.addFromGoogleBooks({ google_books_id: book.google_books_id, monitored: true, auto_download: true }, force);
+    } else {
+      toast.error('Este libro no tiene suficiente información para ser añadido');
+      return;
+    }
+    toast.success(`"${book.title}" añadido a la biblioteca`);
+    const query = searchParams.get('q') || initialQuery;
+    if (query) handleSearch(query);
   };
 
   const handleAddBook = async (book) => {
     try {
-      // If book has source_url (from scrapers), use addFromUrl
-      // Otherwise use addFromGoogleBooks
-      if (book.source_url && !book.google_books_id) {
-        await bookApi.addFromUrl({
-          source_url: book.source_url,
-          monitored: true,
-          auto_download: true,
-        });
-      } else if (book.google_books_id) {
-        await bookApi.addFromGoogleBooks({
-          google_books_id: book.google_books_id,
-          monitored: true,
-          auto_download: true,
+      await _doAddBook(book);
+    } catch (error) {
+      if (error.response?.status === 409) {
+        const detail = error.response.data?.detail || {};
+        setDuplicateModal({
+          matched_id: detail.matched_id,
+          matched_title: detail.matched_title,
+          type: 'books',
+          forceAdd: () => _doAddBook(book, true).catch(() => toast.error('Error al añadir')),
         });
       } else {
-        toast.error('Este libro no tiene suficiente información para ser añadido');
-        return;
+        console.error('Error añadiendo libro:', error);
+        toast.error('Error al añadir el libro');
       }
-
-      toast.success(`"${book.title}" añadido a la biblioteca`);
-      const query = searchParams.get('q') || initialQuery;
-      if (query) handleSearch(query);
-    } catch (error) {
-      console.error('Error añadiendo libro:', error);
-      toast.error('Error al añadir el libro');
     }
   };
 
@@ -495,6 +519,50 @@ const Search = () => {
           <p className="text-gray-400">
             Introduce un término para buscar {activeTab === 'manga' ? 'manga' : activeTab === 'comics' ? 'cómics' : 'libros'}
           </p>
+        </div>
+      )}
+
+      {/* Feature 6: Duplicate detection modal */}
+      {duplicateModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="card p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-yellow-500/20 rounded-full">
+                <FaExclamationTriangle className="text-yellow-400 text-xl" />
+              </div>
+              <h3 className="text-lg font-bold">Posible duplicado</h3>
+            </div>
+            <p className="text-gray-300 mb-2">
+              Ya tienes <strong>"{duplicateModal.matched_title}"</strong> en tu biblioteca, que parece ser el mismo contenido.
+            </p>
+            <p className="text-sm text-gray-400 mb-6">¿Qué quieres hacer?</p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => {
+                  navigate(`/${duplicateModal.type}/${duplicateModal.matched_id}`);
+                  setDuplicateModal(null);
+                }}
+                className="btn btn-primary w-full"
+              >
+                Ver en biblioteca
+              </button>
+              <button
+                onClick={() => {
+                  duplicateModal.forceAdd();
+                  setDuplicateModal(null);
+                }}
+                className="btn btn-secondary w-full"
+              >
+                Añadir igualmente
+              </button>
+              <button
+                onClick={() => setDuplicateModal(null)}
+                className="text-gray-400 hover:text-gray-200 text-sm text-center"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

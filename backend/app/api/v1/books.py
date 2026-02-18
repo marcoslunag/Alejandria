@@ -317,7 +317,8 @@ async def add_book_from_google_books(
     data: BookCreateFromGoogleBooks,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    force: bool = Query(False, description="Skip duplicate check")
 ):
     """
     Add book to library from Google Books ID
@@ -338,6 +339,17 @@ async def add_book_from_google_books(
 
     if not metadata:
         raise HTTPException(status_code=404, detail="Book not found on Google Books")
+
+    # Feature 6: Fuzzy duplicate check (skip if force=True)
+    if not force:
+        from app.services.content_matcher import ContentMatcher
+        matcher = ContentMatcher()
+        duplicate = matcher.find_duplicate(db, metadata['title'], 'book', current_user.id)
+        if duplicate:
+            raise HTTPException(
+                status_code=409,
+                detail={"message": "Posible duplicado encontrado", "matched_id": duplicate.id, "matched_title": duplicate.title}
+            )
 
     # Create book
     book = Book(

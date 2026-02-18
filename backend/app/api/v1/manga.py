@@ -254,7 +254,8 @@ async def add_manga_from_anilist(
     data: MangaCreateFromAnilist,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    force: bool = Query(False, description="Skip duplicate check")
 ):
     """
     Add manga to library from Anilist ID (Kaizoku-style)
@@ -271,6 +272,17 @@ async def add_manga_from_anilist(
 
     if not metadata:
         raise HTTPException(status_code=404, detail="Manga not found on Anilist")
+
+    # Feature 6: Fuzzy duplicate check (skip if force=True)
+    if not force:
+        from app.services.content_matcher import ContentMatcher
+        matcher = ContentMatcher()
+        duplicate = matcher.find_duplicate(db, metadata['title'], 'manga', current_user.id)
+        if duplicate:
+            raise HTTPException(
+                status_code=409,
+                detail={"message": "Posible duplicado encontrado", "matched_id": duplicate.id, "matched_title": duplicate.title}
+            )
 
     # Create slug
     slug = slugify(metadata['title'])
