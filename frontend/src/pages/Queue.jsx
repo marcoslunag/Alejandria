@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { mangaApi, bookApi, comicApi } from '../services/api';
@@ -15,7 +15,8 @@ import {
   FaStop,
   FaBook,
   FaBookReader,
-  FaMask
+  FaMask,
+  FaCircle,
 } from 'react-icons/fa';
 
 const Queue = () => {
@@ -25,6 +26,8 @@ const Queue = () => {
   const [typeFilter, setTypeFilter] = useState('all');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [confirmAction, setConfirmAction] = useState(null);
+  const [sseConnected, setSseConnected] = useState(false);
+  const esRef = useRef(null);
 
   const loadQueue = useCallback(async () => {
     try {
@@ -37,15 +40,46 @@ const Queue = () => {
     }
   }, []);
 
+  // SSE for real-time updates
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token || typeof EventSource === 'undefined') return;
+
+    const apiBase = import.meta.env.VITE_API_URL || '/api/v1';
+    const url = `${apiBase}/queue/stream?token=${encodeURIComponent(token)}`;
+    const es = new EventSource(url);
+    esRef.current = es;
+
+    es.onopen = () => setSseConnected(true);
+    es.onerror = () => {
+      setSseConnected(false);
+      es.close();
+      esRef.current = null;
+    };
+    es.onmessage = (evt) => {
+      try {
+        const active = JSON.parse(evt.data);
+        if (active.length > 0) loadQueue();
+      } catch {}
+    };
+
+    return () => {
+      es.close();
+      esRef.current = null;
+      setSseConnected(false);
+    };
+  }, [loadQueue]);
+
   useEffect(() => {
     loadQueue();
   }, [loadQueue]);
 
+  // Polling fallback when SSE not available
   useEffect(() => {
-    if (!autoRefresh) return;
-    const interval = setInterval(loadQueue, 3000);
+    if (!autoRefresh || sseConnected) return;
+    const interval = setInterval(loadQueue, 5000);
     return () => clearInterval(interval);
-  }, [autoRefresh, loadQueue]);
+  }, [autoRefresh, loadQueue, sseConnected]);
 
   const retryDownload = async (item) => {
     try {
@@ -232,6 +266,12 @@ const Queue = () => {
             <h1 className="text-4xl font-bold flex items-center gap-3">
               <FaDownload className="text-primary" />
               Cola de Descargas
+              {sseConnected && (
+                <span className="flex items-center gap-1.5 text-xs font-normal text-green-400 bg-green-500/10 border border-green-500/20 px-2 py-0.5 rounded-full">
+                  <FaCircle className="text-[6px] animate-pulse" />
+                  En vivo
+                </span>
+              )}
             </h1>
             <p className="text-gray-400 mt-2">
               Monitoriza el estado de tus descargas

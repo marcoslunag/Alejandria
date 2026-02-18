@@ -4,9 +4,10 @@ Manages download queue
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models.chapter import Chapter
 from app.models.manga import Manga
 from app.models.book import Book
@@ -17,6 +18,8 @@ from app.schemas.download import DownloadQueueResponse, DownloadQueueDetailRespo
 from app.models.user import User
 from app.core.deps import get_current_user
 import logging
+import json
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -883,3 +886,116 @@ def get_queue_stats(db: Session = Depends(get_db), current_user: User = Depends(
         "completed": completed,
         "failed": failed
     }
+
+
+def _get_active_items_for_user(user_id: int, db: Session) -> list:
+    """Get currently active (downloading + error) queue items for a user."""
+    from sqlalchemy import case, desc
+
+    result = []
+
+    # Manga chapters that are downloading or error
+    chapters = (
+        db.query(Chapter, Manga)
+        .join(Manga, Chapter.manga_id == Manga.id)
+        .filter(
+            Manga.user_id == user_id,
+            Chapter.status.in_(["downloading", "error", "converting"]),
+        )
+        .all()
+    )
+    for ch, manga in chapters:
+        result.append({
+            "id": ch.id,
+            "content_type": "manga",
+            "status": ch.status,
+            "manga_title": manga.title,
+            "chapter_number": ch.number,
+            "error_message": ch.error_message,
+        })
+
+    # Comic issues that are downloading or error
+    issues = (
+        db.query(ComicIssue, Comic)
+        .join(Comic, ComicIssue.comic_id == Comic.id)
+        .filter(
+            Comic.user_id == user_id,
+            ComicIssue.status.in_(["downloading", "error"]),
+        )
+        .all()
+    )
+    for issue, comic in issues:
+        result.append({
+            "id": issue.id,
+            "content_type": "comic",
+            "status": issue.status,
+            "comic_title": comic.title,
+            "issue_number": issue.issue_number,
+            "error_message": issue.error_message,
+        })
+
+    # Book chapters that are downloading or error
+    bcs = (
+        db.query(BookChapter, Book)
+        .join(Book, BookChapter.book_id == Book.id)
+        .filter(
+            Book.user_id == user_id,
+            BookChapter.status.in_(["downloading", "error"]),
+        )
+        .all()
+    )
+    for bc, book in bcs:
+        result.append({
+            "id": bc.id,
+            "content_type": "book",
+            "status": bc.status,
+            "book_title": book.title,
+            "chapter_number": bc.number,
+            "error_message": bc.error_message,
+        })
+
+    return result
+
+
+@router.get("/stream")
+async def stream_queue(
+    token: str = Query(..., description="JWT auth token"),
+):
+    """
+    Server-Sent Events endpoint for real-time queue updates.
+    Streams active queue items every 3 seconds.
+    Accepts token as query param since EventSource doesn't support custom headers.
+    """
+    from app.core.security import decode_token
+    from app.models.user import User as UserModel
+
+    # Validate token
+    try:
+        payload = decode_token(token)
+        user_id = int(payload.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    async def event_generator():
+        while True:
+            db = SessionLocal()
+            try:
+                items = _get_active_items_for_user(user_id, db)
+                data = json.dumps(items, default=str)
+                yield f"data: {data}\n\n"
+            except Exception as e:
+                logger.warning(f"SSE queue error: {e}")
+                yield f"data: []\n\n"
+            finally:
+                db.close()
+            await asyncio.sleep(3)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
