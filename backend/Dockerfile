@@ -68,4 +68,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:7878/health || exit 1
 
 # Run application with start script (handles migrations)
-CMD ["./start.sh"]
+# Use bash explicitly so the execute bit isn't required on bind-mounted files
+CMD ["bash", "start.sh"]
