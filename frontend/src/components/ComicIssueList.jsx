@@ -300,6 +300,16 @@ const ComicIssueList = ({ comicId }) => {
               ).length
             : 1;
 
+          // Count downloaded issues in bundle (for "Parcial" badge)
+          const bundleDownloadedCount = bundleCount > 1
+            ? issues.filter(i =>
+                ((issue.bundle_id && i.bundle_id === issue.bundle_id) ||
+                 (!issue.bundle_id && i.download_url === issue.download_url)) &&
+                i.downloaded_at
+              ).length
+            : 0;
+          const isPartialBundle = bundleCount > 1 && bundleDownloadedCount > 0 && bundleDownloadedCount < bundleCount;
+
           return (
             <div
               key={issue.id}
@@ -355,6 +365,14 @@ const ComicIssueList = ({ comicId }) => {
                     >
                       <FaBox className="text-[9px]" />
                       Bundle ({bundleCount} issues)
+                    </span>
+                  )}
+                  {isPartialBundle && (
+                    <span
+                      className="text-xs px-2 py-0.5 bg-amber-500/20 text-amber-400 rounded-full"
+                      title={`${bundleDownloadedCount} de ${bundleCount} issues ya descargados`}
+                    >
+                      Parcial ({bundleDownloadedCount}/{bundleCount})
                     </span>
                   )}
                 </div>

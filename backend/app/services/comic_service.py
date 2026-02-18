@@ -357,12 +357,17 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
             elif len(resolved_links) >= max(2, len(issues) * 0.5):
                 # Multiple resolved links, no issue_range: assign sequentially per issue
                 logger.info(f"Assigning {len(resolved_links)} links sequentially to {len(issues)} issues")
-                for idx, issue in enumerate(issues):
-                    if idx < len(resolved_links):
-                        issue.download_url = resolved_links[idx].url
+                link_idx = 0
+                for issue in issues:
+                    if issue.downloaded_at:
+                        logger.info(f"  Issue #{issue.issue_number}: already downloaded, skipping link assignment")
+                        continue
+                    if link_idx < len(resolved_links):
+                        issue.download_url = resolved_links[link_idx].url
                         issue.source = source
-                        issue.link_status = resolved_links[idx].link_status
-                        logger.info(f"  Issue #{issue.issue_number}: {resolved_links[idx].host.value} link assigned")
+                        issue.link_status = resolved_links[link_idx].link_status
+                        logger.info(f"  Issue #{issue.issue_number}: {resolved_links[link_idx].host.value} link assigned")
+                        link_idx += 1
 
                 db.commit()
                 logger.info(f"Assigned individual links to {min(len(resolved_links), len(issues))} issues from {source}")
@@ -373,7 +378,8 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
                 bundle_title = scrape_result.title
                 bundle_range = f"#1-{issue_count}"
 
-                for idx, issue in enumerate(issues):
+                undownloaded = [iss for iss in issues if not iss.downloaded_at]
+                for idx, issue in enumerate(undownloaded):
                     issue.bundle_id = bundle_id
                     issue.bundle_title = bundle_title
                     issue.bundle_range = bundle_range
@@ -384,8 +390,9 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
                     if issue.is_bundle_master and len(resolved_links) > 1:
                         issue.backup_url = resolved_links[1].url
 
+                skipped = len(issues) - len(undownloaded)
                 db.commit()
-                logger.info(f"Volume bundle created: {bundle_title} with {len(issues)} issues")
+                logger.info(f"Volume bundle created: {bundle_title} with {len(undownloaded)} issues ({skipped} already downloaded)")
 
             else:
                 # No resolved links, use best available (including shorteners)
@@ -395,7 +402,8 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
                     bundle_title = scrape_result.title
                     bundle_range = f"#1-{issue_count}"
 
-                    for idx, issue in enumerate(issues):
+                    undownloaded = [iss for iss in issues if not iss.downloaded_at]
+                    for idx, issue in enumerate(undownloaded):
                         issue.bundle_id = bundle_id
                         issue.bundle_title = bundle_title
                         issue.bundle_range = bundle_range
@@ -405,7 +413,7 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
                         issue.link_status = best.link_status
 
                     db.commit()
-                    logger.info(f"Volume bundle (shortener) created: {bundle_title} with {len(issues)} issues")
+                    logger.info(f"Volume bundle (shortener) created: {bundle_title} with {len(undownloaded)} issues")
         else:
             logger.warning(f"No download links found for volume: {volume_url}")
 
@@ -669,6 +677,13 @@ async def _download_mediafire_folder_bundle(
 
     for bi, ff in download_plan:
         issue_num = bi.issue_number or "000"
+
+        # Skip already-downloaded issues (differential download)
+        if bi.downloaded_at:
+            logger.info(f"Issue #{issue_num}: already downloaded, skipping")
+            matched += 1
+            continue
+
         # Detect extension from original filename
         orig_ext = Path(ff["name"]).suffix.lower() or ".cbr"
         final_filename = f"{safe_title} - Issue {issue_num}{orig_ext}"
@@ -864,6 +879,13 @@ async def _download_mega_folder_bundle(
 
     for bi, ff in download_plan:
         issue_num = bi.issue_number or "000"
+
+        # Skip already-downloaded issues (differential download)
+        if bi.downloaded_at:
+            logger.info(f"Issue #{issue_num}: already downloaded, skipping")
+            matched += 1
+            continue
+
         # Detect extension from original MEGA filename
         orig_ext = Path(ff["name"]).suffix.lower() or ".cbr"
         final_filename = f"{safe_title} - Issue {issue_num}{orig_ext}"
