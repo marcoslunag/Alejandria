@@ -533,8 +533,9 @@ async def refresh_book(
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    # Re-search scrapers
+    # Re-search scrapers and enrich metadata
     background_tasks.add_task(_search_scrapers_for_book, book.id, book.title)
+    background_tasks.add_task(_enrich_book_metadata, book.id)
 
     return {"message": "Refresh started"}
 
@@ -1110,5 +1111,18 @@ async def _download_book_chapter(chapter_id: int):
             chapter.status = "error"
             chapter.error_message = str(e)
             db.commit()
+    finally:
+        db.close()
+
+
+async def _enrich_book_metadata(book_id: int):
+    """Background task to enrich book metadata from Google Books"""
+    from app.database import SessionLocal
+    from app.services.metadata_enricher import get_metadata_enricher
+
+    db = SessionLocal()
+    try:
+        enricher = get_metadata_enricher()
+        await enricher.enrich_book(book_id, db)
     finally:
         db.close()

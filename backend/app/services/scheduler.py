@@ -157,6 +157,15 @@ class ContentScheduler:
             max_instances=1
         )
 
+        # Enriquecer metadata semanalmente los domingos a las 3 AM (Feature 8)
+        self.scheduler.add_job(
+            self.refresh_metadata_weekly,
+            CronTrigger(day_of_week='sun', hour=3, minute=0),
+            id='refresh_metadata',
+            replace_existing=True,
+            max_instances=1
+        )
+
         self.scheduler.start()
         self.is_running = True
         logger.info(f"Scheduler started (check interval: {self.check_interval_hours}h)")
@@ -1398,6 +1407,16 @@ class ContentScheduler:
             await watcher.process_import_queue()
         except Exception as e:
             logger.error(f"Import folder processing error: {e}", exc_info=True)
+
+    async def refresh_metadata_weekly(self):
+        """Feature 8: Enriquece metadata semanalmente desde fuentes externas"""
+        try:
+            from app.services.metadata_enricher import get_metadata_enricher
+            enricher = get_metadata_enricher()
+            stats = await enricher.run_weekly_enrichment()
+            logger.info(f"Weekly metadata enrichment: {stats}")
+        except Exception as e:
+            logger.error(f"Weekly metadata enrichment error: {e}", exc_info=True)
 
     async def cleanup_old_files(self):
         """Limpia archivos descargados de más de X días"""

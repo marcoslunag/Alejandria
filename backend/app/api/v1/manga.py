@@ -709,6 +709,7 @@ async def refresh_manga(
         raise HTTPException(status_code=404, detail="Manga not found")
 
     background_tasks.add_task(_refresh_manga_task, manga_id)
+    background_tasks.add_task(_enrich_manga_metadata, manga_id)
 
     return {"status": "refresh_queued", "manga_id": manga_id}
 
@@ -1086,6 +1087,19 @@ async def _refresh_manga_task(manga_id: int):
 
         await _fetch_chapters_from_source(manga_id, manga.source_url)
 
+    finally:
+        db.close()
+
+
+async def _enrich_manga_metadata(manga_id: int):
+    """Background task to enrich manga metadata from AniList"""
+    from app.database import SessionLocal
+    from app.services.metadata_enricher import get_metadata_enricher
+
+    db = SessionLocal()
+    try:
+        enricher = get_metadata_enricher()
+        await enricher.enrich_manga(manga_id, db)
     finally:
         db.close()
 
