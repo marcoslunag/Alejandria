@@ -35,6 +35,7 @@ class DownloadQueue(Base):
     error_message = Column(Text)
     retry_count = Column(Integer, default=0)
     max_retries = Column(Integer, default=3)
+    next_retry_at = Column(DateTime, nullable=True)  # Exponential backoff — retry not before this time
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)

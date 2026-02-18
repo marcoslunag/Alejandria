@@ -27,6 +27,20 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
+# Exponential backoff delays in seconds: 5min, 30min, 2h, 24h
+RETRY_DELAYS = [5 * 60, 30 * 60, 2 * 3600, 24 * 3600]
+
+
+def _set_retry_backoff(item: DownloadQueue) -> None:
+    """Set next_retry_at on a failed DownloadQueue item using exponential backoff."""
+    idx = min(item.retry_count, len(RETRY_DELAYS) - 1)
+    delay = RETRY_DELAYS[idx]
+    item.next_retry_at = datetime.utcnow() + timedelta(seconds=delay)
+    logger.debug(
+        f"DownloadQueue {item.id}: retry #{item.retry_count} scheduled in {delay}s "
+        f"(at {item.next_retry_at.strftime('%H:%M:%S')} UTC)"
+    )
+
 
 class ContentScheduler:
     """
@@ -554,6 +568,7 @@ class ContentScheduler:
                 item.status = 'failed'
                 item.error_message = str(e)
                 item.retry_count += 1
+                _set_retry_backoff(item)
                 db.commit()
         finally:
             db.close()
@@ -630,6 +645,7 @@ class ContentScheduler:
             item.retry_count += 1
             item.error_message = "Download failed"
             chapter.status = 'error'
+            _set_retry_backoff(item)
             logger.error(f"Download failed: {filename}")
 
         db.commit()
@@ -746,6 +762,7 @@ class ContentScheduler:
             item.retry_count += 1
             item.error_message = "Download failed"
             book_chapter.status = 'error'
+            _set_retry_backoff(item)
             logger.error(f"Download failed: {filename}")
 
         db.commit()
@@ -791,6 +808,7 @@ class ContentScheduler:
             item.status = 'failed'
             item.error_message = issue.error_message or "Download failed"
             item.retry_count += 1
+            _set_retry_backoff(item)
             logger.error(f"Comic download failed: {comic.title} Issue #{issue_num}")
 
         db.commit()
@@ -1308,26 +1326,29 @@ class ContentScheduler:
             db.close()
 
     async def retry_failed_downloads(self):
-        """Reintenta descargas fallidas"""
-        logger.debug("Retrying failed downloads...")
+        """Reintenta descargas fallidas con backoff exponencial."""
+        logger.debug("Checking failed downloads for retry...")
 
         db: Session = SessionLocal()
         try:
-            # Obtener descargas fallidas que pueden reintentarse
+            now = datetime.utcnow()
+            # Solo reintenta si next_retry_at es NULL (primer fallo) o ya llegó su momento
             failed = db.query(DownloadQueue).filter(
                 and_(
                     DownloadQueue.status == 'failed',
-                    DownloadQueue.retry_count < DownloadQueue.max_retries
+                    DownloadQueue.retry_count < DownloadQueue.max_retries,
+                    (DownloadQueue.next_retry_at.is_(None)) | (DownloadQueue.next_retry_at <= now)
                 )
             ).all()
 
             if not failed:
                 return
 
-            logger.info(f"Retrying {len(failed)} failed downloads")
+            logger.info(f"Retrying {len(failed)} failed downloads (backoff elapsed)")
 
             for item in failed:
                 item.status = 'queued'
+                item.next_retry_at = None  # Clear — new backoff will be set if it fails again
                 db.commit()
 
         except Exception as e:

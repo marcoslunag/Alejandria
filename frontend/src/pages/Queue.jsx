@@ -126,6 +126,15 @@ const Queue = () => {
     });
   };
 
+  const formatRetryCountdown = (nextRetryAt) => {
+    if (!nextRetryAt) return null;
+    const diff = new Date(nextRetryAt) - new Date();
+    if (diff <= 0) return 'En breve';
+    const mins = Math.round(diff / 60000);
+    if (mins < 60) return `en ${mins} min`;
+    return `en ${Math.round(diff / 3600000)}h`;
+  };
+
   const getStatusIcon = (status) => {
     switch (status) {
       case 'downloading':
@@ -425,7 +434,7 @@ const Queue = () => {
                     )}
 
                     {/* Tiempo */}
-                    <div className="flex gap-4 text-xs text-gray-500 mt-2">
+                    <div className="flex gap-4 text-xs text-gray-500 mt-2 flex-wrap">
                       {item.created_at && <span>Creado: {formatTime(item.created_at)}</span>}
                       {item.completed_at && item.status === 'completed' && (
                         <span>Completado: {formatTime(item.completed_at)}</span>
@@ -433,6 +442,12 @@ const Queue = () => {
                       {item.retry_count > 0 && (
                         <span className="text-yellow-500">Reintentos: {item.retry_count}</span>
                       )}
+                      {item.status === 'failed' && item.next_retry_at && (() => {
+                        const countdown = formatRetryCountdown(item.next_retry_at);
+                        return countdown ? (
+                          <span className="text-orange-400">Reintento automático: {countdown}</span>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
 
@@ -490,10 +505,11 @@ const Queue = () => {
                     {item.status === 'failed' && (item.content_type === 'manga' || item.content_type === 'comic') && (
                       <button
                         onClick={() => retryDownload(item)}
-                        className="btn btn-sm btn-primary"
-                        title="Reintentar"
+                        className="btn btn-sm btn-primary flex items-center gap-1"
+                        title="Reintentar ahora (ignora el delay automático)"
                       >
-                        <FaSync />
+                        <FaSync className="text-xs" />
+                        <span>Ahora</span>
                       </button>
                     )}
                     {(item.status === 'completed' || item.status === 'failed') && (item.content_type === 'manga' || item.content_type === 'comic') && (

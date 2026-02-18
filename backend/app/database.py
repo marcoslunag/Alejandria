@@ -51,17 +51,26 @@ def _generate_password(length: int = 16) -> str:
 def _migrate_columns():
     """Add missing columns to existing tables (poor man's migration)"""
     inspector = inspect(engine)
-    if 'users' not in inspector.get_table_names():
+    tables = inspector.get_table_names()
+    if 'users' not in tables:
         return
 
-    existing = {col['name'] for col in inspector.get_columns('users')}
     with engine.begin() as conn:
+        # users table
+        existing = {col['name'] for col in inspector.get_columns('users')}
         if 'is_admin' not in existing:
             conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE"))
             logger.info("Added is_admin column to users table")
         if 'must_change_password' not in existing:
             conn.execute(text("ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT FALSE"))
             logger.info("Added must_change_password column to users table")
+
+        # download_queue table — exponential backoff (Feature 2)
+        if 'download_queue' in tables:
+            dq_cols = {col['name'] for col in inspector.get_columns('download_queue')}
+            if 'next_retry_at' not in dq_cols:
+                conn.execute(text("ALTER TABLE download_queue ADD COLUMN next_retry_at TIMESTAMP NULL"))
+                logger.info("Added next_retry_at column to download_queue table")
 
 
 def init_db():

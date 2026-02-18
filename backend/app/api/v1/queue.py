@@ -55,6 +55,12 @@ def list_queue(
 
     result = []
 
+    # Pre-fetch next_retry_at from DownloadQueue for failed items
+    failed_dq = db.query(DownloadQueue).filter(DownloadQueue.status == 'failed').all()
+    nra_by_chapter = {qi.chapter_id: qi.next_retry_at for qi in failed_dq if qi.chapter_id}
+    nra_by_book_chapter = {qi.book_chapter_id: qi.next_retry_at for qi in failed_dq if qi.book_chapter_id}
+    nra_by_comic_issue = {qi.comic_issue_id: qi.next_retry_at for qi in failed_dq if qi.comic_issue_id}
+
     # Query MANGA chapters with download activity
     manga_query = db.query(Chapter).join(Manga).filter(Manga.user_id == current_user.id)
 
@@ -112,7 +118,8 @@ def list_queue(
             "download_url": chapter.download_url,
             "sent_at": chapter.sent_at.isoformat() if chapter.sent_at else None,
             "has_epub": bool(chapter.converted_path),
-            "converted_path": chapter.converted_path
+            "converted_path": chapter.converted_path,
+            "next_retry_at": nra_by_chapter.get(chapter.id).isoformat() if nra_by_chapter.get(chapter.id) else None,
         })
 
     # Query BOOK chapters with download activity
@@ -171,7 +178,8 @@ def list_queue(
             "download_url": chapter.download_url,
             "sent_at": chapter.sent_at.isoformat() if chapter.sent_at else None,
             "has_epub": bool(chapter.file_path and chapter.file_path.endswith('.epub')),
-            "file_path": chapter.file_path
+            "file_path": chapter.file_path,
+            "next_retry_at": nra_by_book_chapter.get(chapter.id).isoformat() if nra_by_book_chapter.get(chapter.id) else None,
         })
 
     # Query COMIC issues with download activity
@@ -232,7 +240,8 @@ def list_queue(
             "has_cbz": bool(issue.file_path),
             "has_epub": bool(issue.converted_path),
             "converted_path": issue.converted_path,
-            "file_path": issue.file_path
+            "file_path": issue.file_path,
+            "next_retry_at": nra_by_comic_issue.get(issue.id).isoformat() if nra_by_comic_issue.get(issue.id) else None,
         })
 
     # Sort combined results by completion date (most recent first)
@@ -516,15 +525,24 @@ def retry_download(chapter_id: int, db: Session = Depends(get_db), current_user:
     if chapter.retry_count >= 3:
         raise HTTPException(status_code=400, detail="Maximum retries exceeded")
 
-    # Reset status for retry
+    # Reset status for manual retry (override backoff delay)
     chapter.status = 'pending'
     chapter.error_message = None
     chapter.retry_count += 1
 
+    # Clear next_retry_at so the queue item is picked up immediately
+    queue_item = db.query(DownloadQueue).filter(
+        DownloadQueue.chapter_id == chapter_id,
+        DownloadQueue.status == 'failed'
+    ).first()
+    if queue_item:
+        queue_item.status = 'queued'
+        queue_item.next_retry_at = None
+
     db.commit()
     db.refresh(chapter)
 
-    logger.info(f"Queued retry for chapter {chapter_id}")
+    logger.info(f"Queued manual retry for chapter {chapter_id}")
     return {"id": chapter.id, "status": "pending", "retry_count": chapter.retry_count}
 
 
