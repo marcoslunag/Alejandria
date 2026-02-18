@@ -17,6 +17,7 @@ import Settings from './pages/Settings';
 import Login from './pages/Login';
 import ChangePassword from './pages/ChangePassword';
 import AdminUsers from './pages/AdminUsers';
+import Discover from './pages/Discover';
 
 function ProtectedLayout() {
   const { mustChangePassword, isAdmin } = useAuth();
@@ -110,6 +111,7 @@ function App() {
               <Route path="/books/:id" element={<BookDetails />} />
               <Route path="/queue" element={<Queue />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/discover" element={<Discover />} />
             </Route>
 
             {/* Admin routes */}

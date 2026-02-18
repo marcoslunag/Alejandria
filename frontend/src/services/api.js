@@ -297,4 +297,10 @@ export const bookApi = {
     api.post(`/books/${bookId}/mark-all-read`),
 };
 
+// Recommendations API (Feature 10)
+export const recommendationsApi = {
+  get: (params = {}) =>
+    api.get('/recommendations', { params }),
+};
+
 export default api;

@@ -1,6 +1,6 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
-import { FaHome, FaBook, FaSearch, FaCog, FaDownload, FaMask, FaBookReader, FaSignOutAlt, FaUser, FaUserShield, FaBars, FaTimes } from 'react-icons/fa';
+import { FaHome, FaBook, FaSearch, FaCog, FaDownload, FaMask, FaBookReader, FaSignOutAlt, FaUser, FaUserShield, FaBars, FaTimes, FaCompass } from 'react-icons/fa';
 import { useAuth } from '../contexts/AuthContext';
 
 const Navbar = () => {
@@ -14,6 +14,7 @@ const Navbar = () => {
     { to: '/library', icon: FaBook, label: 'Manga' },
     { to: '/comics', icon: FaMask, label: 'Comics' },
     { to: '/books', icon: FaBookReader, label: 'Libros' },
+    { to: '/discover', icon: FaCompass, label: 'Descubrir' },
     { to: '/queue', icon: FaDownload, label: 'Descargas' },
     { to: '/settings', icon: FaCog, label: 'Ajustes' },
   ];
