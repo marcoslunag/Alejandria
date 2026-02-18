@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { mangaApi } from '../services/api';
+import api from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import {
   FaCog,
   FaServer,
@@ -20,13 +22,26 @@ import {
   FaSync,
   FaRedo,
   FaCheckSquare,
-  FaTimesCircle
+  FaTimesCircle,
+  FaList,
+  FaExclamationTriangle
 } from 'react-icons/fa';
 
+const LEVEL_STYLES = {
+  INFO:    'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  WARNING: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+  ERROR:   'bg-red-500/20 text-red-300 border-red-500/30',
+};
+
 const Settings = () => {
+  const { isAdmin } = useAuth();
   const [systemStatus, setSystemStatus] = useState(null);
   const [libraryStats, setLibraryStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Logs panel (admin only)
+  const [logs, setLogs] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logLevel, setLogLevel] = useState('');
 
   // Settings state
   const [settings, setSettings] = useState({
@@ -161,6 +176,20 @@ const Settings = () => {
 
   const handleInputChange = (field, value) => {
     setSettings(prev => ({ ...prev, [field]: value }));
+  };
+
+  const loadLogs = async (level = logLevel) => {
+    setLogsLoading(true);
+    try {
+      const params = { limit: 50 };
+      if (level) params.level = level;
+      const { data } = await api.get('/system/logs/recent', { params });
+      setLogs(data.logs || []);
+    } catch (err) {
+      console.error('Error loading logs:', err);
+    } finally {
+      setLogsLoading(false);
+    }
   };
 
   return (
@@ -734,6 +763,60 @@ const Settings = () => {
               </div>
             </div>
           </section>
+
+          {/* Logs del sistema (admin only) */}
+          {isAdmin && (
+            <section>
+              <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+                <FaList className="text-purple-400" />
+                Logs del sistema
+              </h2>
+              <div className="card p-6">
+                <div className="flex items-center gap-3 mb-4 flex-wrap">
+                  {['', 'INFO', 'WARNING', 'ERROR'].map(lvl => (
+                    <button
+                      key={lvl}
+                      onClick={() => { setLogLevel(lvl); loadLogs(lvl); }}
+                      className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                        logLevel === lvl ? 'bg-primary text-white' : 'bg-dark-lighter text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      {lvl || 'Todos'}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => loadLogs(logLevel)}
+                    disabled={logsLoading}
+                    className="ml-auto btn btn-secondary flex items-center gap-1.5 text-sm"
+                  >
+                    {logsLoading ? <FaSpinner className="animate-spin" /> : <FaSync />}
+                    Actualizar
+                  </button>
+                </div>
+
+                {logs.length === 0 && !logsLoading ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <FaList className="text-4xl mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">No hay logs disponibles. Haz clic en "Actualizar" para cargar.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1 max-h-96 overflow-y-auto">
+                    {logs.map((log) => (
+                      <div key={log.id} className="flex gap-3 text-xs p-2 rounded hover:bg-dark-lighter">
+                        <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold flex-shrink-0 ${LEVEL_STYLES[log.level] || LEVEL_STYLES.INFO}`}>
+                          {log.level}
+                        </span>
+                        <span className="text-gray-500 flex-shrink-0 tabular-nums">
+                          {new Date(log.created_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        <span className="text-gray-300 flex-1 break-all">{log.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
 
           {/* Estado del Sistema */}
           <section>

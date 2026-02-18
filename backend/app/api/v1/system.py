@@ -3,7 +3,7 @@ System API Endpoints
 System status, health checks, and configuration
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import get_db
@@ -489,21 +489,25 @@ async def trigger_cleanup(db: Session = Depends(get_db), current_user: User = De
 
 
 @router.get("/logs/recent")
-def get_recent_logs(lines: int = 50, current_user: User = Depends(require_admin)):
+def get_recent_logs(
+    limit: int = Query(50, ge=1, le=200),
+    level: str = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
     """
-    Get recent log entries
+    Get recent system log entries from DB.
 
     Args:
-        lines: Number of log lines to return
+        limit: Number of entries (default 50, max 200)
+        level: Filter by level (INFO, WARNING, ERROR)
 
     Returns:
-        Recent log entries
+        List of log entries ordered by date desc
     """
-    # TODO: Implement log reading from file
-    return {
-        "message": "Log endpoint not implemented yet",
-        "lines": lines
-    }
+    from app.services.log_service import get_system_logger
+    logs = get_system_logger().get_recent(level=level, limit=limit, db=db)
+    return {"logs": logs, "total": len(logs)}
 
 
 @router.post("/translate")

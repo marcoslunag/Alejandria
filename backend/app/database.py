@@ -141,6 +141,8 @@ def _migrate_columns():
 
 def init_db():
     """Initialize database tables and create admin user if not exists"""
+    # Ensure all models are registered with Base before create_all
+    from app.models import log_entry  # noqa: F401
     _migrate_columns()
     Base.metadata.create_all(bind=engine)
     _seed_admin()
