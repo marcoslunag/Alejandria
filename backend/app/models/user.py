@@ -35,6 +35,9 @@ class User(Base):
     max_file_size_mb = Column(Integer, default=0)          # 0 = no limit
     preferred_hosts = Column(Text, default='[]')           # JSON list of host names
 
+    # Notifications (Feature 3)
+    last_notification_check = Column(DateTime, nullable=True)  # When user last checked notifications
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

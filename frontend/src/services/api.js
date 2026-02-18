@@ -308,4 +308,10 @@ export const systemApi = {
   getDashboard: () => api.get('/system/dashboard'),
 };
 
+// Notifications API
+export const notificationsApi = {
+  getCount: () => api.get('/notifications/count'),
+  markSeen: () => api.post('/notifications/mark-seen'),
+};
+
 export default api;

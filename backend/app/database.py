@@ -131,6 +131,13 @@ def _migrate_columns():
                 conn.execute(text("ALTER TABLE books ADD COLUMN last_read_chapter INTEGER NULL"))
                 logger.info("Added last_read_chapter column to books table")
 
+        # Notifications (Feature 3 v3.0)
+        if 'users' in tables:
+            u_cols = {col['name'] for col in inspector.get_columns('users')}
+            if 'last_notification_check' not in u_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN last_notification_check TIMESTAMP NULL"))
+                logger.info("Added last_notification_check column to users table")
+
 
 def init_db():
     """Initialize database tables and create admin user if not exists"""
