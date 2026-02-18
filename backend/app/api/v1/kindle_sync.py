@@ -14,6 +14,8 @@ import os
 from app.database import get_db
 from app.models.chapter import Chapter
 from app.models.manga import Manga
+from app.models.user import User
+from app.core.deps import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +186,7 @@ async def download_epub(chapter_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/list")
-async def list_available(db: Session = Depends(get_db)):
+async def list_available(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     JSON list of available EPUBs
     """
@@ -215,7 +217,7 @@ async def list_available(db: Session = Depends(get_db)):
 
 
 @router.post("/mark-downloaded/{chapter_id}")
-async def mark_as_downloaded(chapter_id: int, db: Session = Depends(get_db)):
+async def mark_as_downloaded(chapter_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Mark chapter as downloaded/sent (for tracking)
     """

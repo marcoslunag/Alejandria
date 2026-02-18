@@ -8,8 +8,18 @@ from jose import JWTError, jwt
 import bcrypt
 import os
 
-# JWT Config
-SECRET_KEY = os.getenv("SECRET_KEY", "alejandria-secret-key-change-in-production")
+# JWT Config — SECRET_KEY is required; no insecure default allowed
+_secret = os.getenv("SECRET_KEY")
+if not _secret:
+    import secrets as _secrets
+    _secret = _secrets.token_hex(32)
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "SECRET_KEY env var not set — generated a random key. "
+        "JWT tokens will be invalidated on every restart. "
+        "Set SECRET_KEY in your .env file to fix this."
+    )
+SECRET_KEY = _secret
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 

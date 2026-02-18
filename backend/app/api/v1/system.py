@@ -3,23 +3,31 @@ System API Endpoints
 System status, health checks, and configuration
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import get_db
 from app.models.manga import Manga
 from app.models.chapter import Chapter
 from app.models.download import DownloadQueue
+from app.models.user import User
 from app.schemas.download import SystemStatusResponse
 from app.config import get_settings
 from app.services.scraper import TomosMangaScraper
 from app.services.converter import KCCConverter
+from app.core.deps import get_current_user
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/system", tags=["system"])
 settings = get_settings()
+
+
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
 
 
 @router.get("/status", response_model=SystemStatusResponse)
@@ -89,7 +97,7 @@ def get_config():
 
 
 @router.get("/test/scraper")
-def test_scraper():
+def test_scraper(current_user: User = Depends(require_admin)):
     """
     Test scraper connection
 
@@ -115,7 +123,7 @@ def test_scraper():
 
 
 @router.get("/test/kcc")
-def test_kcc():
+def test_kcc(current_user: User = Depends(require_admin)):
     """
     Test KCC installation
 
@@ -133,7 +141,7 @@ def test_kcc():
 
 
 @router.get("/test/stk")
-def test_stk():
+def test_stk(current_user: User = Depends(require_admin)):
     """
     Test STK (Send to Kindle) connection
 
@@ -170,7 +178,7 @@ def test_stk():
 
 
 @router.get("/stats")
-def get_detailed_stats(db: Session = Depends(get_db)):
+def get_detailed_stats(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """
     Get detailed system statistics
 
@@ -219,7 +227,7 @@ def get_detailed_stats(db: Session = Depends(get_db)):
 
 
 @router.post("/process-queue")
-async def trigger_process_queue(db: Session = Depends(get_db)):
+async def trigger_process_queue(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """
     Manually trigger processing of download queue
 
@@ -251,7 +259,7 @@ async def trigger_process_queue(db: Session = Depends(get_db)):
 
 
 @router.post("/process-conversions")
-async def trigger_process_conversions(db: Session = Depends(get_db)):
+async def trigger_process_conversions(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """
     Manually trigger processing of conversions (sync KCC output with DB)
 
@@ -282,7 +290,7 @@ async def trigger_process_conversions(db: Session = Depends(get_db)):
 
 
 @router.post("/cleanup")
-async def trigger_cleanup(db: Session = Depends(get_db)):
+async def trigger_cleanup(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
     """
     Manually trigger cleanup of old files
 
@@ -338,7 +346,7 @@ async def trigger_cleanup(db: Session = Depends(get_db)):
 
 
 @router.get("/logs/recent")
-def get_recent_logs(lines: int = 50):
+def get_recent_logs(lines: int = 50, current_user: User = Depends(require_admin)):
     """
     Get recent log entries
 
@@ -356,7 +364,7 @@ def get_recent_logs(lines: int = 50):
 
 
 @router.post("/translate")
-def translate_text(text: str, source: str = "en", target: str = "es"):
+def translate_text(text: str, source: str = "en", target: str = "es", current_user: User = Depends(get_current_user)):
     """
     Translate text using deep-translator (Google Translate)
 

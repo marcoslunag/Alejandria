@@ -42,7 +42,7 @@ RUN pip install --no-cache-dir \
     Pillow
 
 # Crear directorios necesarios
-RUN mkdir -p /downloads /library/kindle && chmod 777 /downloads /library/kindle
+RUN mkdir -p /downloads /library/kindle && chmod 755 /downloads /library/kindle
 
 # Copiar script
 COPY converter.py .

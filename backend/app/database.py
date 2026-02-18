@@ -95,10 +95,11 @@ def _seed_admin():
         db.commit()
 
         logger.warning("=" * 60)
-        logger.warning("  ADMIN USER CREATED")
+        logger.warning("  ADMIN USER CREATED — FIRST TIME ONLY")
         logger.warning(f"  Username: admin")
-        logger.warning(f"  Password: {password}")
-        logger.warning("  Please change this password on first login!")
+        logger.warning(f"  ADMIN PASSWORD: {password}")
+        logger.warning("  Change this password on first login!")
+        logger.warning("  This message will not appear again.")
         logger.warning("=" * 60)
     except Exception as e:
         logger.error(f"Error creating admin user: {e}")

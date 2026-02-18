@@ -171,7 +171,7 @@ async def search_manga(
             try:
                 scraper_results = await asyncio.wait_for(
                     loop.run_in_executor(None, scraper.search_manga, title),
-                    timeout=8.0
+                    timeout=45.0
                 )
                 if not scraper_results:
                     return {"sources": [], "tomo_count": 0, "url": None}

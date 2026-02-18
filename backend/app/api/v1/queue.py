@@ -291,8 +291,11 @@ def add_to_queue(
     Returns:
         Queue item
     """
-    # Check if chapter exists
-    chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+    # Check if chapter exists and belongs to current user
+    chapter = db.query(Chapter).join(Manga).filter(
+        Chapter.id == chapter_id,
+        Manga.user_id == current_user.id
+    ).first()
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
@@ -329,7 +332,10 @@ def remove_from_queue(chapter_id: int, db: Session = Depends(get_db), current_us
         chapter_id: Chapter ID
         db: Database session
     """
-    chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+    chapter = db.query(Chapter).join(Manga).filter(
+        Chapter.id == chapter_id,
+        Manga.user_id == current_user.id
+    ).first()
 
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
@@ -371,7 +377,10 @@ def cancel_download(chapter_id: int, db: Session = Depends(get_db), current_user
     import os
     from pathlib import Path
 
-    chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+    chapter = db.query(Chapter).join(Manga).filter(
+        Chapter.id == chapter_id,
+        Manga.user_id == current_user.id
+    ).first()
 
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
@@ -493,7 +502,10 @@ def retry_download(chapter_id: int, db: Session = Depends(get_db), current_user:
     Returns:
         Updated chapter info
     """
-    chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+    chapter = db.query(Chapter).join(Manga).filter(
+        Chapter.id == chapter_id,
+        Manga.user_id == current_user.id
+    ).first()
 
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
@@ -572,7 +584,10 @@ def delete_downloaded_file(chapter_id: int, db: Session = Depends(get_db), curre
     """
     import os
 
-    chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+    chapter = db.query(Chapter).join(Manga).filter(
+        Chapter.id == chapter_id,
+        Manga.user_id == current_user.id
+    ).first()
 
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
@@ -644,7 +659,10 @@ def cancel_comic_download(issue_id: int, db: Session = Depends(get_db), current_
     import os
     from pathlib import Path
 
-    issue = db.query(ComicIssue).filter(ComicIssue.id == issue_id).first()
+    issue = db.query(ComicIssue).join(Comic).filter(
+        ComicIssue.id == issue_id,
+        Comic.user_id == current_user.id
+    ).first()
     if not issue:
         raise HTTPException(status_code=404, detail="Comic issue not found")
 
@@ -716,7 +734,10 @@ def cancel_comic_download(issue_id: int, db: Session = Depends(get_db), current_
 @router.post("/comic/{issue_id}/retry")
 def retry_comic_download(issue_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Retry a failed comic issue download"""
-    issue = db.query(ComicIssue).filter(ComicIssue.id == issue_id).first()
+    issue = db.query(ComicIssue).join(Comic).filter(
+        ComicIssue.id == issue_id,
+        Comic.user_id == current_user.id
+    ).first()
     if not issue:
         raise HTTPException(status_code=404, detail="Comic issue not found")
 
@@ -748,7 +769,10 @@ def delete_comic_file(issue_id: int, db: Session = Depends(get_db), current_user
     import os
     from pathlib import Path
 
-    issue = db.query(ComicIssue).filter(ComicIssue.id == issue_id).first()
+    issue = db.query(ComicIssue).join(Comic).filter(
+        ComicIssue.id == issue_id,
+        Comic.user_id == current_user.id
+    ).first()
     if not issue:
         raise HTTPException(status_code=404, detail="Comic issue not found")
 

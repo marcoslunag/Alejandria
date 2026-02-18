@@ -80,15 +80,15 @@ async def lifespan(app: FastAPI):
         logger.info("Scheduler stopped")
 
 
-# Create FastAPI app
+# Create FastAPI app — disable interactive docs in production
 app = FastAPI(
     title=settings.APP_NAME,
     description="Tu biblioteca digital - manga, cómics y libros con descarga automática y envío a Kindle",
     version=settings.APP_VERSION,
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    docs_url="/docs" if settings.DEBUG else None,
+    redoc_url="/redoc" if settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
 # Configure CORS

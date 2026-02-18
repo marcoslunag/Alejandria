@@ -138,7 +138,7 @@ const AdminUsers = () => {
             <div className="flex-1 min-w-[200px]">
               <label className="block text-sm text-gray-400 mb-1">Contrasena</label>
               <input
-                type="text"
+                type="password"
                 value={newUser.password}
                 onChange={(e) => setNewUser(p => ({ ...p, password: e.target.value }))}
                 className="input w-full"

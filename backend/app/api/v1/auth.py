@@ -4,8 +4,10 @@ Login, user management (admin-only), and password change
 """
 
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
+from collections import defaultdict
+from time import time
 import logging
 
 from app.database import get_db
@@ -20,13 +22,34 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# Simple in-memory rate limiter: max 10 failed attempts per IP per 15 minutes
+_login_attempts: dict = defaultdict(list)
+_RATE_LIMIT_MAX = 10
+_RATE_LIMIT_WINDOW = 900  # 15 minutes
+
+
+def _check_rate_limit(ip: str):
+    now = time()
+    attempts = _login_attempts[ip]
+    # Remove old attempts outside the window
+    _login_attempts[ip] = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
+    if len(_login_attempts[ip]) >= _RATE_LIMIT_MAX:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Demasiados intentos de login. Espera 15 minutos."
+        )
+
 
 @router.post("/login", response_model=Token)
-async def login(data: UserLogin, db: Session = Depends(get_db)):
+async def login(data: UserLogin, request: Request, db: Session = Depends(get_db)):
     """Login with username and password"""
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip)
+
     user = db.query(User).filter(User.username == data.username).first()
 
     if not user or not verify_password(data.password, user.password_hash):
+        _login_attempts[client_ip].append(time())
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario o contrasena incorrectos"
