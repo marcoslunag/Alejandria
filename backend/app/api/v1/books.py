@@ -110,7 +110,7 @@ async def search_books(
         if source in ["all", "scrapers", "lectulandia"]:
             try:
                 lectulandia = LectulandiaScraper()
-                lect_results = await lectulandia.search(q, page=page)
+                lect_results = await asyncio.wait_for(lectulandia.search(q, page=page), timeout=45.0)
 
                 for item in lect_results:
                     in_library = db.query(Book).filter(
