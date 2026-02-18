@@ -3,7 +3,7 @@ User Model
 Represents a user with authentication and per-user settings
 """
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
 from datetime import datetime
 from app.database import Base
 
@@ -28,6 +28,12 @@ class User(Base):
     stk_device_serial = Column(String(50), nullable=True)
     stk_device_name = Column(String(100), nullable=True)
     auto_send_to_kindle = Column(Boolean, default=False)
+
+    # Download quality preferences (Feature 4)
+    preferred_quality = Column(String(10), default='hq')   # 'hq'|'lq'|'any'
+    preferred_format = Column(String(10), default='auto')  # 'epub'|'cbz'|'auto'
+    max_file_size_mb = Column(Integer, default=0)          # 0 = no limit
+    preferred_hosts = Column(Text, default='[]')           # JSON list of host names
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)

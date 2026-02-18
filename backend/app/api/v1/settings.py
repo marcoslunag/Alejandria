@@ -47,6 +47,11 @@ class SettingsResponse(BaseModel):
     stk_device_name: Optional[str] = None
     auto_send_to_kindle: bool = False
     is_stk_configured: bool = False
+    # Feature 4: Download quality preferences
+    preferred_quality: str = "hq"
+    preferred_format: str = "auto"
+    max_file_size_mb: int = 0
+    preferred_hosts: str = "[]"
 
     class Config:
         from_attributes = True
@@ -57,6 +62,11 @@ class SettingsUpdate(BaseModel):
     stk_device_serial: Optional[str] = None
     stk_device_name: Optional[str] = None
     auto_send_to_kindle: Optional[bool] = None
+    # Feature 4: Download quality preferences
+    preferred_quality: Optional[str] = None
+    preferred_format: Optional[str] = None
+    max_file_size_mb: Optional[int] = None
+    preferred_hosts: Optional[str] = None
 
 
 @router.get("", response_model=SettingsResponse)
@@ -67,7 +77,11 @@ async def get_settings(current_user: User = Depends(get_current_user)):
         stk_device_serial=current_user.stk_device_serial,
         stk_device_name=current_user.stk_device_name,
         auto_send_to_kindle=current_user.auto_send_to_kindle,
-        is_stk_configured=current_user.is_stk_configured
+        is_stk_configured=current_user.is_stk_configured,
+        preferred_quality=current_user.preferred_quality or "hq",
+        preferred_format=current_user.preferred_format or "auto",
+        max_file_size_mb=current_user.max_file_size_mb or 0,
+        preferred_hosts=current_user.preferred_hosts or "[]",
     )
 
 
@@ -91,6 +105,18 @@ async def save_settings(
     if data.auto_send_to_kindle is not None:
         current_user.auto_send_to_kindle = data.auto_send_to_kindle
 
+    if data.preferred_quality is not None:
+        current_user.preferred_quality = data.preferred_quality
+
+    if data.preferred_format is not None:
+        current_user.preferred_format = data.preferred_format
+
+    if data.max_file_size_mb is not None:
+        current_user.max_file_size_mb = data.max_file_size_mb
+
+    if data.preferred_hosts is not None:
+        current_user.preferred_hosts = data.preferred_hosts
+
     db.commit()
     db.refresh(current_user)
 
@@ -101,7 +127,11 @@ async def save_settings(
         stk_device_serial=current_user.stk_device_serial,
         stk_device_name=current_user.stk_device_name,
         auto_send_to_kindle=current_user.auto_send_to_kindle,
-        is_stk_configured=current_user.is_stk_configured
+        is_stk_configured=current_user.is_stk_configured,
+        preferred_quality=current_user.preferred_quality or "hq",
+        preferred_format=current_user.preferred_format or "auto",
+        max_file_size_mb=current_user.max_file_size_mb or 0,
+        preferred_hosts=current_user.preferred_hosts or "[]",
     )
 
 

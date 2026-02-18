@@ -64,6 +64,19 @@ def _migrate_columns():
         if 'must_change_password' not in existing:
             conn.execute(text("ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT FALSE"))
             logger.info("Added must_change_password column to users table")
+        # Download quality preferences (Feature 4)
+        if 'preferred_quality' not in existing:
+            conn.execute(text("ALTER TABLE users ADD COLUMN preferred_quality VARCHAR(10) DEFAULT 'hq'"))
+            logger.info("Added preferred_quality column to users table")
+        if 'preferred_format' not in existing:
+            conn.execute(text("ALTER TABLE users ADD COLUMN preferred_format VARCHAR(10) DEFAULT 'auto'"))
+            logger.info("Added preferred_format column to users table")
+        if 'max_file_size_mb' not in existing:
+            conn.execute(text("ALTER TABLE users ADD COLUMN max_file_size_mb INTEGER DEFAULT 0"))
+            logger.info("Added max_file_size_mb column to users table")
+        if 'preferred_hosts' not in existing:
+            conn.execute(text("ALTER TABLE users ADD COLUMN preferred_hosts TEXT DEFAULT '[]'"))
+            logger.info("Added preferred_hosts column to users table")
 
         # download_queue table — exponential backoff (Feature 2)
         if 'download_queue' in tables:

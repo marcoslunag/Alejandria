@@ -13,7 +13,9 @@ import {
   FaSave,
   FaCheck,
   FaTimes,
-  FaAmazon
+  FaAmazon,
+  FaDownload,
+  FaFilter
 } from 'react-icons/fa';
 
 const Settings = () => {
@@ -26,7 +28,11 @@ const Settings = () => {
     auto_send_to_kindle: false,
     kcc_profile: 'KPW5',
     stk_device_serial: null,
-    stk_device_name: null
+    stk_device_name: null,
+    preferred_quality: 'hq',
+    preferred_format: 'auto',
+    max_file_size_mb: 0,
+    preferred_hosts: '[]',
   });
 
   // Kindle device profiles for KCC
@@ -204,6 +210,119 @@ const Settings = () => {
                 <label htmlFor="autoSend" className="text-gray-300">
                   Enviar automáticamente a Kindle después de convertir
                 </label>
+              </div>
+            </div>
+          </section>
+
+          {/* Preferencias de Descarga */}
+          <section>
+            <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+              <FaDownload className="text-blue-500" />
+              Preferencias de Descarga
+            </h2>
+            <div className="card p-6 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Calidad preferida */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Calidad preferida
+                  </label>
+                  <select
+                    value={settings.preferred_quality || 'hq'}
+                    onChange={(e) => handleInputChange('preferred_quality', e.target.value)}
+                    className="w-full px-4 py-3 bg-white rounded-lg border border-gray-700 focus:border-primary focus:outline-none text-gray-900"
+                  >
+                    <option value="hq">Alta calidad (HQ)</option>
+                    <option value="lq">Baja calidad (LQ, archivos más pequeños)</option>
+                    <option value="any">Cualquiera</option>
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Prioriza fuentes de alta o baja calidad según tu preferencia.
+                  </p>
+                </div>
+
+                {/* Formato preferido */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Formato preferido
+                  </label>
+                  <select
+                    value={settings.preferred_format || 'auto'}
+                    onChange={(e) => handleInputChange('preferred_format', e.target.value)}
+                    className="w-full px-4 py-3 bg-white rounded-lg border border-gray-700 focus:border-primary focus:outline-none text-gray-900"
+                  >
+                    <option value="auto">Auto-detectar</option>
+                    <option value="epub">EPUB nativo</option>
+                    <option value="cbz">CBZ/CBR (cómic)</option>
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Formato preferido para descargas. "Auto" deja que el sistema decida.
+                  </p>
+                </div>
+              </div>
+
+              {/* Tamaño máximo */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Tamaño máximo por archivo (MB) — 0 = sin límite
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={settings.max_file_size_mb || 0}
+                  onChange={(e) => handleInputChange('max_file_size_mb', parseInt(e.target.value) || 0)}
+                  className="w-full md:w-48 px-4 py-3 bg-white rounded-lg border border-gray-700 focus:border-primary focus:outline-none text-gray-900"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Filtra fuentes por tamaño. Útil si tienes espacio limitado en el Kindle.
+                </p>
+              </div>
+
+              {/* Hosts preferidos */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+                  <FaFilter className="text-blue-400" />
+                  Hosts de descarga preferidos
+                </label>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {[
+                    { id: 'mediafire', label: 'MediaFire', color: 'text-blue-400' },
+                    { id: 'mega', label: 'MEGA', color: 'text-red-400' },
+                    { id: 'google_drive', label: 'Google Drive', color: 'text-green-400' },
+                    { id: 'fireload', label: 'Fireload', color: 'text-orange-400' },
+                    { id: '1fichier', label: '1fichier', color: 'text-purple-400' },
+                    { id: 'dropbox', label: 'Dropbox', color: 'text-sky-400' },
+                  ].map(({ id, label, color }) => {
+                    let hosts = [];
+                    try { hosts = JSON.parse(settings.preferred_hosts || '[]'); } catch {}
+                    const checked = hosts.includes(id);
+                    return (
+                      <label
+                        key={id}
+                        className={`flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors ${
+                          checked ? 'bg-primary/10 border border-primary/30' : 'bg-surface-light hover:bg-surface-lighter border border-transparent'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            let current = [];
+                            try { current = JSON.parse(settings.preferred_hosts || '[]'); } catch {}
+                            const updated = checked ? current.filter(h => h !== id) : [...current, id];
+                            handleInputChange('preferred_hosts', JSON.stringify(updated));
+                          }}
+                          className="w-4 h-4 text-primary rounded"
+                        />
+                        <span className={`text-sm font-medium ${color}`}>{label}</span>
+                        {checked && <FaCheck className="ml-auto text-primary text-xs" />}
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Si marcas hosts, el sistema los priorizará al elegir el enlace de descarga. Si ninguno está disponible, usará el mejor disponible automáticamente.
+                </p>
               </div>
             </div>
           </section>

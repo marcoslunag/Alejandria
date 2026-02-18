@@ -213,9 +213,10 @@ class ContentScheduler:
                 logger.info(f"Found {len(new_chapters)} new chapters for {manga.title}")
 
                 # Añadir nuevos capítulos a la DB
+                preferred_hosts = self._get_admin_preferred_hosts(db)
                 for ch_data in new_chapters:
                     # Usar el download_url y backup_url que ya vienen procesados del scraper
-                    download_url = ch_data.get('download_url') or self._select_best_download_link(ch_data.get('download_links', []))
+                    download_url = ch_data.get('download_url') or self._select_best_download_link(ch_data.get('download_links', []), preferred_hosts=preferred_hosts)
                     backup_url = ch_data.get('backup_url')
                     download_host = ch_data.get('download_host', 'unknown')
 
@@ -479,10 +480,21 @@ class ContentScheduler:
         except Exception as e:
             logger.error(f"Error marking bundled chapters: {e}")
 
-    def _select_best_download_link(self, links: list) -> str:
-        """Selecciona el mejor enlace de descarga según prioridad usando host_manager"""
+    def _select_best_download_link(self, links: list, preferred_hosts: list = None) -> str:
+        """Selecciona el mejor enlace de descarga según prioridad usando host_manager.
+        Si se especifican preferred_hosts, se priorizan esos antes del ranking global."""
         if not links:
             return ""
+
+        # Feature 4: If user has preferred hosts, try those first
+        if preferred_hosts:
+            for ph in preferred_hosts:
+                ph_lower = ph.lower()
+                for link in links:
+                    url = link.get('url', '').lower()
+                    if ph_lower in url:
+                        logger.debug(f"Using preferred host '{ph}' for download link")
+                        return link.get('url', '')
 
         try:
             from app.services.host_manager import select_best_links
@@ -507,6 +519,19 @@ class ContentScheduler:
         )
 
         return sorted_links[0]['url'] if sorted_links else ""
+
+    def _get_admin_preferred_hosts(self, db) -> list:
+        """Obtiene los hosts preferidos del usuario admin para la selección de enlaces."""
+        try:
+            import json
+            from app.models.user import User
+            admin = db.query(User).filter(User.is_admin == True).first()
+            if admin and admin.preferred_hosts:
+                hosts = json.loads(admin.preferred_hosts)
+                return hosts if isinstance(hosts, list) else []
+        except Exception:
+            pass
+        return []
 
     async def process_download_queue(self):
         """Procesa la cola de descargas pendientes"""
