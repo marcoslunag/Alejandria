@@ -41,6 +41,7 @@ class BookChapter(Base):
     downloaded_at = Column(DateTime)
     converted_at = Column(DateTime)
     sent_at = Column(DateTime)
+    read_at = Column(DateTime, nullable=True)  # Feature 3: reading progress
 
     # Relationship
     book = relationship("Book", back_populates="chapters")

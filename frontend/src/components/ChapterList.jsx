@@ -17,7 +17,8 @@ import {
   FaExclamationTriangle,
   FaSortAmountDown,
   FaSortAmountUp,
-  FaTabletAlt
+  FaTabletAlt,
+  FaEye
 } from 'react-icons/fa';
 
 const ChapterList = ({ mangaId }) => {
@@ -148,6 +149,32 @@ const ChapterList = ({ mangaId }) => {
     ));
   };
 
+  const handleMarkRead = async (tomoId) => {
+    try {
+      await mangaApi.markChapterRead(mangaId, tomoId);
+      setTomos(prev => prev.map(t =>
+        t.id === tomoId ? { ...t, read_at: new Date().toISOString() } : t
+      ));
+    } catch (error) {
+      console.error('Error marcando como leído:', error);
+      toast.error('Error al marcar como leído');
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await mangaApi.markAllRead(mangaId);
+      const now = new Date().toISOString();
+      setTomos(prev => prev.map(t =>
+        ['sent', 'converted', 'downloaded'].includes(t.status) ? { ...t, read_at: now } : t
+      ));
+      toast.success('Todos los tomos marcados como leídos');
+    } catch (error) {
+      console.error('Error marcando todos como leídos:', error);
+      toast.error('Error al marcar todos como leídos');
+    }
+  };
+
   const getFilteredTomos = () => {
     let filtered = statusFilter === 'all' ? tomos : tomos.filter(t => t.status === statusFilter);
 
@@ -195,6 +222,7 @@ const ChapterList = ({ mangaId }) => {
 
   const filteredTomos = getFilteredTomos();
   const downloadableTomos = filteredTomos.filter(t => t.status === 'pending' || t.status === 'error');
+  const readableTomos = tomos.filter(t => ['sent', 'converted', 'downloaded'].includes(t.status) && !t.read_at);
 
   return (
     <div className="mt-12">
@@ -239,8 +267,8 @@ const ChapterList = ({ mangaId }) => {
       </div>
 
       {/* Actions */}
-      {downloadableTomos.length > 0 && (
-        <div className="flex gap-4 mb-4">
+      <div className="flex gap-4 mb-4 flex-wrap">
+        {downloadableTomos.length > 0 && (<>
           <button
             onClick={handleSelectAll}
             className="btn btn-secondary flex items-center gap-2"
@@ -265,8 +293,17 @@ const ChapterList = ({ mangaId }) => {
               </>
             )}
           </button>
-        </div>
-      )}
+        </>)}
+        {readableTomos.length > 0 && (
+          <button
+            onClick={handleMarkAllRead}
+            className="btn btn-secondary flex items-center gap-2 text-green-400 hover:text-green-300"
+          >
+            <FaEye />
+            <span>Marcar todos como leídos ({readableTomos.length})</span>
+          </button>
+        )}
+      </div>
 
       {/* Tomo List */}
       <div className="space-y-2">
@@ -361,7 +398,7 @@ const ChapterList = ({ mangaId }) => {
               </div>
 
               {/* Status */}
-              <div className="flex-shrink-0 flex items-center gap-3">
+              <div className="flex-shrink-0 flex items-center gap-2">
                 <span className={`text-sm ${
                   tomo.status === 'downloaded' || tomo.status === 'sent' ? 'text-green-500' :
                   tomo.status === 'error' ? 'text-red-500' :
@@ -370,6 +407,23 @@ const ChapterList = ({ mangaId }) => {
                 }`}>
                   {getStatusText(tomo.status)}
                 </span>
+
+                {/* Read indicator / mark-read button */}
+                {['downloaded', 'converted', 'sent'].includes(tomo.status) && (
+                  tomo.read_at ? (
+                    <span title={`Leído`} className="text-green-400">
+                      <FaEye className="text-sm" />
+                    </span>
+                  ) : (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleMarkRead(tomo.id); }}
+                      title="Marcar como leído"
+                      className="text-gray-500 hover:text-green-400 transition-colors"
+                    >
+                      <FaEye className="text-sm" />
+                    </button>
+                  )
+                )}
 
                 {/* Send to Kindle button - show for converted/sent */}
                 {(tomo.status === 'converted' || tomo.status === 'sent' || tomo.converted_path) && (

@@ -689,6 +689,68 @@ async def send_book_to_kindle(
         raise HTTPException(status_code=500, detail=result['message'])
 
 
+@router.post("/{book_id}/chapters/{chapter_id}/mark-read")
+async def mark_book_chapter_read(
+    book_id: int,
+    chapter_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Mark a book chapter as read"""
+    book = db.query(Book).filter(Book.id == book_id, Book.user_id == current_user.id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    chapter = db.query(BookChapter).filter(BookChapter.id == chapter_id, BookChapter.book_id == book_id).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    chapter.read_at = datetime.utcnow()
+    book.last_read_chapter = chapter.number
+
+    total_sent = db.query(BookChapter).filter(
+        BookChapter.book_id == book_id,
+        BookChapter.status.in_(['sent', 'converted', 'downloaded'])
+    ).count()
+    total_read = db.query(BookChapter).filter(
+        BookChapter.book_id == book_id,
+        BookChapter.read_at.isnot(None)
+    ).count() + 1
+    book.reading_status = 'completed' if total_read >= total_sent and total_sent > 0 else 'reading'
+
+    db.commit()
+    return {"id": chapter_id, "read_at": chapter.read_at.isoformat()}
+
+
+@router.post("/{book_id}/mark-all-read")
+async def mark_all_book_chapters_read(
+    book_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Mark all sent/downloaded book chapters as read"""
+    book = db.query(Book).filter(Book.id == book_id, Book.user_id == current_user.id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    now = datetime.utcnow()
+    chapters = db.query(BookChapter).filter(
+        BookChapter.book_id == book_id,
+        BookChapter.status.in_(['sent', 'converted', 'downloaded']),
+        BookChapter.read_at.is_(None)
+    ).all()
+
+    for ch in chapters:
+        ch.read_at = now
+
+    if chapters:
+        book.last_read_chapter = max(ch.number for ch in chapters)
+        book.reading_status = 'completed'
+
+    db.commit()
+    return {"marked_read": len(chapters)}
+
+
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================

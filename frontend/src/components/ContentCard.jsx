@@ -186,6 +186,15 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onTog
           </div>
         )}
 
+        {/* Reading status badge */}
+        {item.in_library && item.reading_status === 'completed' && (
+          <div className="absolute bottom-2 left-0 right-0 flex justify-center pointer-events-none">
+            <span className="bg-green-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+              <FaEye className="text-[8px]" /> Leído
+            </span>
+          </div>
+        )}
+
         {/* In Library / Watchlist indicator */}
         {item.in_library && (
           <div className="absolute top-2 left-2 flex flex-col gap-1">

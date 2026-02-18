@@ -63,6 +63,10 @@ class Manga(Base):
     anilist_url = Column(String(500))
     country = Column(String(10))  # JP, KR, CN, etc.
 
+    # Reading progress (Feature 3)
+    reading_status = Column(String(20), default='not_started')  # not_started/reading/completed
+    last_read_chapter = Column(Float, nullable=True)  # Chapter number of last read chapter
+
     # System fields
     monitored = Column(Boolean, default=True, index=True)
     auto_download = Column(Boolean, default=True)  # Auto-download new chapters

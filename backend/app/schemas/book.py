@@ -111,6 +111,7 @@ class BookChapterResponse(BaseModel):
     created_at: datetime
     downloaded_at: Optional[datetime] = None
     sent_at: Optional[datetime] = None
+    read_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -142,6 +143,7 @@ class BookResponse(BaseModel):
     preferred_source: Optional[str] = None
     monitored: bool
     auto_download: bool
+    reading_status: str = 'not_started'
     created_at: datetime
     updated_at: datetime
 

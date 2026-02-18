@@ -123,6 +123,7 @@ class MangaResponse(BaseModel):
     # System
     monitored: bool
     auto_download: bool
+    reading_status: str = 'not_started'
     last_check: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

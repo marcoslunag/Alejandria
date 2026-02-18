@@ -1015,3 +1015,65 @@ async def send_issue_to_kindle(
     except Exception as e:
         logger.error(f"Error sending to Kindle: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{comic_id}/issues/{issue_id}/mark-read")
+async def mark_issue_read(
+    comic_id: int,
+    issue_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Mark a comic issue as read"""
+    comic = db.query(Comic).filter(Comic.id == comic_id, Comic.user_id == current_user.id).first()
+    if not comic:
+        raise HTTPException(status_code=404, detail="Comic not found")
+
+    issue = db.query(ComicIssue).filter(ComicIssue.id == issue_id, ComicIssue.comic_id == comic_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    issue.read_at = datetime.utcnow()
+    comic.last_read_issue = issue.issue_number
+
+    total_sent = db.query(ComicIssue).filter(
+        ComicIssue.comic_id == comic_id,
+        ComicIssue.status.in_(['sent', 'converted', 'downloaded'])
+    ).count()
+    total_read = db.query(ComicIssue).filter(
+        ComicIssue.comic_id == comic_id,
+        ComicIssue.read_at.isnot(None)
+    ).count() + 1
+    comic.reading_status = 'completed' if total_read >= total_sent and total_sent > 0 else 'reading'
+
+    db.commit()
+    return {"id": issue_id, "read_at": issue.read_at.isoformat()}
+
+
+@router.post("/{comic_id}/mark-all-read")
+async def mark_all_issues_read(
+    comic_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Mark all sent/downloaded issues as read"""
+    comic = db.query(Comic).filter(Comic.id == comic_id, Comic.user_id == current_user.id).first()
+    if not comic:
+        raise HTTPException(status_code=404, detail="Comic not found")
+
+    now = datetime.utcnow()
+    issues = db.query(ComicIssue).filter(
+        ComicIssue.comic_id == comic_id,
+        ComicIssue.status.in_(['sent', 'converted', 'downloaded']),
+        ComicIssue.read_at.is_(None)
+    ).all()
+
+    for iss in issues:
+        iss.read_at = now
+
+    if issues:
+        comic.last_read_issue = issues[-1].issue_number
+        comic.reading_status = 'completed'
+
+    db.commit()
+    return {"marked_read": len(issues)}

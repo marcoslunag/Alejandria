@@ -48,6 +48,7 @@ class ChapterResponse(BaseModel):
     downloaded_at: Optional[datetime]
     converted_at: Optional[datetime]
     sent_at: Optional[datetime]
+    read_at: Optional[datetime] = None
     created_at: datetime
     retry_count: int
     error_message: Optional[str] = None

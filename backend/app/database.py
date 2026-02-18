@@ -72,6 +72,52 @@ def _migrate_columns():
                 conn.execute(text("ALTER TABLE download_queue ADD COLUMN next_retry_at TIMESTAMP NULL"))
                 logger.info("Added next_retry_at column to download_queue table")
 
+        # Reading progress (Feature 3)
+        if 'chapters' in tables:
+            ch_cols = {col['name'] for col in inspector.get_columns('chapters')}
+            if 'read_at' not in ch_cols:
+                conn.execute(text("ALTER TABLE chapters ADD COLUMN read_at TIMESTAMP NULL"))
+                logger.info("Added read_at column to chapters table")
+
+        if 'book_chapters' in tables:
+            bc_cols = {col['name'] for col in inspector.get_columns('book_chapters')}
+            if 'read_at' not in bc_cols:
+                conn.execute(text("ALTER TABLE book_chapters ADD COLUMN read_at TIMESTAMP NULL"))
+                logger.info("Added read_at column to book_chapters table")
+
+        if 'comic_issues' in tables:
+            ci_cols = {col['name'] for col in inspector.get_columns('comic_issues')}
+            if 'read_at' not in ci_cols:
+                conn.execute(text("ALTER TABLE comic_issues ADD COLUMN read_at TIMESTAMP NULL"))
+                logger.info("Added read_at column to comic_issues table")
+
+        if 'manga' in tables:
+            mg_cols = {col['name'] for col in inspector.get_columns('manga')}
+            if 'reading_status' not in mg_cols:
+                conn.execute(text("ALTER TABLE manga ADD COLUMN reading_status VARCHAR(20) DEFAULT 'not_started'"))
+                logger.info("Added reading_status column to manga table")
+            if 'last_read_chapter' not in mg_cols:
+                conn.execute(text("ALTER TABLE manga ADD COLUMN last_read_chapter DOUBLE PRECISION NULL"))
+                logger.info("Added last_read_chapter column to manga table")
+
+        if 'comics' in tables:
+            co_cols = {col['name'] for col in inspector.get_columns('comics')}
+            if 'reading_status' not in co_cols:
+                conn.execute(text("ALTER TABLE comics ADD COLUMN reading_status VARCHAR(20) DEFAULT 'not_started'"))
+                logger.info("Added reading_status column to comics table")
+            if 'last_read_issue' not in co_cols:
+                conn.execute(text("ALTER TABLE comics ADD COLUMN last_read_issue VARCHAR(20) NULL"))
+                logger.info("Added last_read_issue column to comics table")
+
+        if 'books' in tables:
+            bk_cols = {col['name'] for col in inspector.get_columns('books')}
+            if 'reading_status' not in bk_cols:
+                conn.execute(text("ALTER TABLE books ADD COLUMN reading_status VARCHAR(20) DEFAULT 'not_started'"))
+                logger.info("Added reading_status column to books table")
+            if 'last_read_chapter' not in bk_cols:
+                conn.execute(text("ALTER TABLE books ADD COLUMN last_read_chapter INTEGER NULL"))
+                logger.info("Added last_read_chapter column to books table")
+
 
 def init_db():
     """Initialize database tables and create admin user if not exists"""

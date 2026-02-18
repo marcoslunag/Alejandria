@@ -83,6 +83,12 @@ export const mangaApi = {
   downloadChapters: (mangaId, chapterIds) =>
     api.post(`/manga/${mangaId}/chapters/download`, { chapter_ids: chapterIds }),
 
+  markChapterRead: (mangaId, chapterId) =>
+    api.post(`/manga/${mangaId}/chapters/${chapterId}/mark-read`),
+
+  markAllRead: (mangaId) =>
+    api.post(`/manga/${mangaId}/mark-all-read`),
+
   // System
   getSystemStatus: () =>
     api.get(`/system/status`),
@@ -207,6 +213,12 @@ export const comicApi = {
   sendToKindle: (comicId, issueId) =>
     api.post(`/comics/${comicId}/issues/${issueId}/send-to-kindle`),
 
+  markIssueRead: (comicId, issueId) =>
+    api.post(`/comics/${comicId}/issues/${issueId}/mark-read`),
+
+  markAllIssuesRead: (comicId) =>
+    api.post(`/comics/${comicId}/mark-all-read`),
+
   // Queue actions
   cancelDownload: (issueId) =>
     api.post(`/queue/comic/${issueId}/cancel`),
@@ -267,6 +279,12 @@ export const bookApi = {
   // Send to Kindle
   sendToKindle: (bookId, chapterId) =>
     api.post(`/books/${bookId}/chapters/${chapterId}/send-to-kindle`),
+
+  markChapterRead: (bookId, chapterId) =>
+    api.post(`/books/${bookId}/chapters/${chapterId}/mark-read`),
+
+  markAllRead: (bookId) =>
+    api.post(`/books/${bookId}/mark-all-read`),
 };
 
 export default api;

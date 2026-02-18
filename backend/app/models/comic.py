@@ -54,6 +54,10 @@ class Comic(Base):
     source_urls = Column(JSON)  # Dict of {scraper_name: url}
     preferred_source = Column(String(50))  # Preferred scraper
 
+    # Reading progress (Feature 3)
+    reading_status = Column(String(20), default='not_started')  # not_started/reading/completed
+    last_read_issue = Column(String(20), nullable=True)  # Issue number of last read issue
+
     # System fields
     monitored = Column(Boolean, default=True, index=True)
     auto_download = Column(Boolean, default=True)
@@ -138,6 +142,7 @@ class ComicIssue(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     downloaded_at = Column(DateTime)
     sent_at = Column(DateTime)  # When sent to Kindle
+    read_at = Column(DateTime, nullable=True)  # Feature 3: reading progress
 
     # Relationship
     comic = relationship("Comic", back_populates="issues")

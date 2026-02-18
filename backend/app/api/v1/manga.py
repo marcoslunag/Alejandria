@@ -776,6 +776,69 @@ def get_manga_chapters(
     return chapters
 
 
+@router.post("/{manga_id}/chapters/{chapter_id}/mark-read")
+def mark_chapter_read(
+    manga_id: int,
+    chapter_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Mark a chapter as read"""
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == current_user.id).first()
+    if not manga:
+        raise HTTPException(status_code=404, detail="Manga not found")
+
+    chapter = db.query(Chapter).filter(Chapter.id == chapter_id, Chapter.manga_id == manga_id).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    chapter.read_at = datetime.utcnow()
+
+    # Update manga reading status
+    manga.last_read_chapter = chapter.number
+    total_sent = db.query(Chapter).filter(
+        Chapter.manga_id == manga_id,
+        Chapter.status.in_(['sent', 'converted', 'downloaded'])
+    ).count()
+    total_read = db.query(Chapter).filter(
+        Chapter.manga_id == manga_id,
+        Chapter.read_at.isnot(None)
+    ).count() + 1  # +1 for current
+    manga.reading_status = 'completed' if total_read >= total_sent and total_sent > 0 else 'reading'
+
+    db.commit()
+    return {"id": chapter_id, "read_at": chapter.read_at.isoformat()}
+
+
+@router.post("/{manga_id}/mark-all-read")
+def mark_all_chapters_read(
+    manga_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Mark all sent/converted/downloaded chapters as read"""
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == current_user.id).first()
+    if not manga:
+        raise HTTPException(status_code=404, detail="Manga not found")
+
+    now = datetime.utcnow()
+    chapters = db.query(Chapter).filter(
+        Chapter.manga_id == manga_id,
+        Chapter.status.in_(['sent', 'converted', 'downloaded']),
+        Chapter.read_at.is_(None)
+    ).all()
+
+    for ch in chapters:
+        ch.read_at = now
+
+    if chapters:
+        manga.last_read_chapter = max(ch.number for ch in chapters)
+        manga.reading_status = 'completed'
+
+    db.commit()
+    return {"marked_read": len(chapters)}
+
+
 class ChapterDownloadRequest(BaseModel):
     """Request schema for downloading specific chapters"""
     chapter_ids: List[int]

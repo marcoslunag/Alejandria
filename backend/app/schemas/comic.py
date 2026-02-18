@@ -94,6 +94,7 @@ class ComicResponse(BaseModel):
     artists: Optional[List[str]] = None
     comicvine_url: Optional[str] = None
     monitored: bool = True
+    reading_status: str = 'not_started'
     total_issues: int = 0
     downloaded_issues: int = 0
 
@@ -118,6 +119,7 @@ class IssueResponse(BaseModel):
     source: Optional[str] = None
     link_status: str = "resolved"
     sent_at: Optional[str] = None
+    read_at: Optional[str] = None
     file_size: Optional[int] = None
 
     class Config:

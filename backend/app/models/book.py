@@ -59,6 +59,10 @@ class Book(Base):
     source_urls = Column(JSON)  # Dict of {scraper_name: url}
     preferred_source = Column(String(50))  # Preferred scraper
 
+    # Reading progress (Feature 3)
+    reading_status = Column(String(20), default='not_started')  # not_started/reading/completed
+    last_read_chapter = Column(Integer, nullable=True)  # Chapter number of last read chapter
+
     # System fields
     monitored = Column(Boolean, default=True, index=True)
     auto_download = Column(Boolean, default=True)
