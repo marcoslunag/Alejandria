@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { FaStar, FaBook, FaBookReader, FaMask, FaCheck, FaPlus } from 'react-icons/fa';
+import { FaStar, FaBook, FaBookReader, FaMask, FaCheck, FaPlus, FaEye, FaEyeSlash } from 'react-icons/fa';
 import { useState } from 'react';
 
 /**
@@ -11,9 +11,10 @@ import { useState } from 'react';
  *   onAdd            - Callback para añadir a biblioteca
  *   showAddButton    - Mostrar botón de añadir
  */
-const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false }) => {
+const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onToggleMonitor }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [isTogglingMonitor, setIsTogglingMonitor] = useState(false);
 
   const config = {
     manga: {
@@ -131,6 +132,18 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false }) => 
     }
   };
 
+  const handleToggleMonitor = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!onToggleMonitor || isTogglingMonitor) return;
+    setIsTogglingMonitor(true);
+    try {
+      await onToggleMonitor(item);
+    } finally {
+      setIsTogglingMonitor(false);
+    }
+  };
+
   const CardContent = () => (
     <div
       className="card group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl relative"
@@ -173,10 +186,41 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false }) => 
           </div>
         )}
 
-        {/* In Library indicator */}
+        {/* In Library / Watchlist indicator */}
         {item.in_library && (
-          <div className={`absolute top-2 left-2 ${c.badgeClass} rounded-full p-2`}>
-            <FaCheck className="text-white text-xs" />
+          <div className="absolute top-2 left-2 flex flex-col gap-1">
+            <div className={`${c.badgeClass} rounded-full p-1.5`}>
+              <FaCheck className="text-white text-xs" />
+            </div>
+            {onToggleMonitor ? (
+              <button
+                onClick={handleToggleMonitor}
+                disabled={isTogglingMonitor}
+                title={item.monitored ? 'Siguiendo — Click para dejar de seguir' : 'No siguiendo — Click para seguir'}
+                className={`rounded-full p-1.5 transition-colors ${
+                  item.monitored
+                    ? `${c.badgeClass} text-white opacity-90 hover:opacity-100`
+                    : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                }`}
+              >
+                {item.monitored
+                  ? <FaEye className="text-xs" />
+                  : <FaEyeSlash className="text-xs" />
+                }
+              </button>
+            ) : item.monitored !== undefined && (
+              <div
+                title={item.monitored ? 'Siguiendo' : 'No siguiendo'}
+                className={`rounded-full p-1.5 ${
+                  item.monitored ? `${c.badgeClass} opacity-80` : 'bg-gray-700'
+                }`}
+              >
+                {item.monitored
+                  ? <FaEye className="text-white text-xs" />
+                  : <FaEyeSlash className="text-gray-400 text-xs" />
+                }
+              </div>
+            )}
           </div>
         )}
       </div>

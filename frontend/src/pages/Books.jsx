@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { bookApi } from '../services/api';
 import ContentGrid from '../components/ContentGrid';
 import {
@@ -8,6 +9,7 @@ import {
   FaSearch,
   FaFilter,
   FaSortAmountDown,
+  FaEye,
 } from 'react-icons/fa';
 
 const Books = () => {
@@ -48,6 +50,19 @@ const Books = () => {
       setStats(response.data);
     } catch (error) {
       console.error('Error loading stats:', error);
+    }
+  };
+
+  const handleToggleMonitor = async (item) => {
+    try {
+      const newValue = !item.monitored;
+      await bookApi.updateBook(item.id, { monitored: newValue });
+      setBooks(prev => prev.map(b => b.id === item.id ? { ...b, monitored: newValue } : b));
+      toast(newValue ? `Siguiendo "${item.title}"` : `Dejaste de seguir "${item.title}"`, {
+        icon: newValue ? '👁' : '👁‍🗨',
+      });
+    } catch {
+      toast.error('Error al actualizar el seguimiento');
     }
   };
 
@@ -179,7 +194,12 @@ const Books = () => {
       </div>
 
       {/* Books Grid */}
-      <ContentGrid items={sortedBooks} type="book" loading={loading} />
+      <ContentGrid
+        items={sortedBooks}
+        type="book"
+        loading={loading}
+        onToggleMonitor={handleToggleMonitor}
+      />
 
       {/* Empty state */}
       {!loading && books.length === 0 && (

@@ -11,7 +11,8 @@ import {
   FaSearch,
   FaPlus,
   FaSpinner,
-  FaCheck
+  FaCheck,
+  FaEye,
 } from 'react-icons/fa';
 
 const Comics = () => {
@@ -61,6 +62,19 @@ const Comics = () => {
       setStats(response.data);
     } catch (error) {
       console.error('Error loading stats:', error);
+    }
+  };
+
+  const handleToggleMonitor = async (item) => {
+    try {
+      const newValue = !item.monitored;
+      await comicApi.updateComic(item.id, { monitored: newValue });
+      setComics(prev => prev.map(c => c.id === item.id ? { ...c, monitored: newValue } : c));
+      toast(newValue ? `Siguiendo "${item.title}"` : `Dejaste de seguir "${item.title}"`, {
+        icon: newValue ? '👁' : '👁‍🗨',
+      });
+    } catch {
+      toast.error('Error al actualizar el seguimiento');
     }
   };
 
@@ -339,7 +353,12 @@ const Comics = () => {
       {loading ? (
         <ContentGrid items={[]} type="comic" loading={true} />
       ) : sortedComics.length > 0 ? (
-        <ContentGrid items={sortedComics.map(c => ({ ...c, in_library: true }))} type="comic" loading={false} />
+        <ContentGrid
+          items={sortedComics.map(c => ({ ...c, in_library: true }))}
+          type="comic"
+          loading={false}
+          onToggleMonitor={handleToggleMonitor}
+        />
       ) : (
         <div className="text-center py-20">
           <FaMask className="text-6xl text-gray-600 mx-auto mb-4" />

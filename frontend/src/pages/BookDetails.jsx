@@ -72,10 +72,15 @@ const BookDetails = () => {
 
   const handleToggleMonitored = async () => {
     try {
-      await bookApi.updateBook(id, { monitored: !book.monitored });
-      setBook({ ...book, monitored: !book.monitored });
+      const newValue = !book.monitored;
+      await bookApi.updateBook(id, { monitored: newValue });
+      setBook({ ...book, monitored: newValue });
+      toast(newValue ? `Siguiendo "${book.title}"` : `Dejaste de seguir "${book.title}"`, {
+        icon: newValue ? '👁' : '👁‍🗨',
+      });
     } catch (error) {
       console.error('Error actualizando:', error);
+      toast.error('Error al actualizar el seguimiento');
     }
   };
 
@@ -97,12 +102,12 @@ const BookDetails = () => {
 
   const actions = [];
   actions.push({
-    label: book?.monitored ? '🔔 Monitoreado' : '🔕 No monitoreado',
+    label: book?.monitored ? 'Siguiendo' : 'Seguir',
     onClick: handleToggleMonitored,
     className: `btn ${book?.monitored ? 'bg-emerald-500 hover:bg-emerald-600 text-white' : 'btn-secondary'}`,
     tooltip: book?.monitored
-      ? 'Los nuevos archivos se descargaran automaticamente'
-      : 'Recibiras una notificacion cuando se encuentren nuevos archivos',
+      ? 'Nuevos archivos se descargarán automáticamente — Click para dejar de seguir'
+      : 'Click para seguir y descargar automáticamente',
   });
   actions.push({
     label: 'Actualizar',

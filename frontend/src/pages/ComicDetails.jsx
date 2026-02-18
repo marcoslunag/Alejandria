@@ -99,10 +99,15 @@ const ComicDetails = () => {
 
   const handleToggleMonitored = async () => {
     try {
-      await comicApi.updateComic(id, { monitored: !comic.monitored });
-      setComic({ ...comic, monitored: !comic.monitored });
+      const newValue = !comic.monitored;
+      await comicApi.updateComic(id, { monitored: newValue });
+      setComic({ ...comic, monitored: newValue });
+      toast(newValue ? `Siguiendo "${comic.title}"` : `Dejaste de seguir "${comic.title}"`, {
+        icon: newValue ? '👁' : '👁‍🗨',
+      });
     } catch (error) {
       console.error('Error updating comic:', error);
+      toast.error('Error al actualizar el seguimiento');
     }
   };
 
@@ -146,13 +151,13 @@ const ComicDetails = () => {
 
   const actions = [];
   actions.push({
-    label: comic?.monitored ? 'Monitorizado' : 'No monitorizado',
+    label: comic?.monitored ? 'Siguiendo' : 'Seguir',
     onClick: handleToggleMonitored,
     className: `btn ${comic?.monitored ? 'bg-red-500 hover:bg-red-600 text-white' : 'btn-secondary'} flex items-center gap-2`,
     icon: comic?.monitored ? <FaEye /> : <FaEyeSlash />,
     tooltip: comic?.monitored
-      ? 'Se buscarán fuentes automáticamente'
-      : 'No se buscarán fuentes automáticamente',
+      ? 'Fuentes buscadas automáticamente — Click para dejar de seguir'
+      : 'Click para seguir y buscar fuentes automáticamente',
   });
   actions.push({
     label: searchingSources ? 'Buscando...' : 'Buscar Fuentes',

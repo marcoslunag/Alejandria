@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { mangaApi } from '../services/api';
 import ContentGrid from '../components/ContentGrid';
-import { FaBook, FaFilter, FaSync, FaSortAmountDown, FaSearch } from 'react-icons/fa';
+import { FaBook, FaFilter, FaSync, FaSortAmountDown, FaSearch, FaEye } from 'react-icons/fa';
 
 const Library = () => {
   const navigate = useNavigate();
@@ -44,6 +45,19 @@ const Library = () => {
       setStats(response.data);
     } catch (error) {
       console.error('Error loading stats:', error);
+    }
+  };
+
+  const handleToggleMonitor = async (item) => {
+    try {
+      const newValue = !item.monitored;
+      await mangaApi.updateManga(item.id, { monitored: newValue });
+      setManga(prev => prev.map(m => m.id === item.id ? { ...m, monitored: newValue } : m));
+      toast(newValue ? `Siguiendo "${item.title}"` : `Dejaste de seguir "${item.title}"`, {
+        icon: newValue ? '👁' : '👁‍🗨',
+      });
+    } catch {
+      toast.error('Error al actualizar el seguimiento');
     }
   };
 
@@ -133,21 +147,40 @@ const Library = () => {
               className="input flex-1 min-w-[200px]"
             />
 
-            {/* Monitored filter */}
-            <select
-              value={filter.monitored === null ? 'all' : filter.monitored}
-              onChange={(e) =>
-                setFilter({
-                  ...filter,
-                  monitored: e.target.value === 'all' ? null : e.target.value === 'true',
-                })
-              }
-              className="input"
-            >
-              <option value="all">Todos</option>
-              <option value="true">Monitorizados</option>
-              <option value="false">No monitorizados</option>
-            </select>
+            {/* Monitored filter chips */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setFilter({ ...filter, monitored: null })}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                  filter.monitored === null
+                    ? 'bg-primary text-white'
+                    : 'bg-dark-lighter text-gray-400 hover:bg-dark-lighter/80'
+                }`}
+              >
+                Todos
+              </button>
+              <button
+                onClick={() => setFilter({ ...filter, monitored: true })}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium flex items-center gap-1.5 transition-colors ${
+                  filter.monitored === true
+                    ? 'bg-primary text-white'
+                    : 'bg-dark-lighter text-gray-400 hover:bg-dark-lighter/80'
+                }`}
+              >
+                <FaEye className="text-xs" />
+                Siguiendo
+              </button>
+              <button
+                onClick={() => setFilter({ ...filter, monitored: false })}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                  filter.monitored === false
+                    ? 'bg-gray-600 text-white'
+                    : 'bg-dark-lighter text-gray-400 hover:bg-dark-lighter/80'
+                }`}
+              >
+                No siguiendo
+              </button>
+            </div>
 
             {/* Status filter */}
             <select
@@ -190,7 +223,12 @@ const Library = () => {
       </div>
 
       {/* Manga Grid */}
-      <ContentGrid items={sortedManga} type="manga" loading={loading} />
+      <ContentGrid
+        items={sortedManga}
+        type="manga"
+        loading={loading}
+        onToggleMonitor={handleToggleMonitor}
+      />
 
       {/* Empty state */}
       {!loading && manga.length === 0 && (

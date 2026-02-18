@@ -11,6 +11,7 @@ import ContentCard from './ContentCard';
  *   showAddButton  - Mostrar botón de añadir
  *   emptyMessage   - Mensaje cuando no hay items
  *   keyExtractor   - Función para extraer key de cada item
+ *   onToggleMonitor - Callback para toggle monitored (item) => void
  */
 const ContentGrid = ({
   items,
@@ -20,6 +21,7 @@ const ContentGrid = ({
   showAddButton = false,
   emptyMessage,
   keyExtractor,
+  onToggleMonitor,
 }) => {
   if (loading) {
     return (
@@ -62,6 +64,7 @@ const ContentGrid = ({
           type={type}
           onAdd={onAdd}
           showAddButton={showAddButton}
+          onToggleMonitor={onToggleMonitor}
         />
       ))}
     </div>

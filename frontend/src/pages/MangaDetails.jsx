@@ -70,10 +70,15 @@ const MangaDetails = () => {
 
   const handleToggleMonitored = async () => {
     try {
-      await mangaApi.updateManga(id, { monitored: !manga.monitored });
-      setManga({ ...manga, monitored: !manga.monitored });
+      const newValue = !manga.monitored;
+      await mangaApi.updateManga(id, { monitored: newValue });
+      setManga({ ...manga, monitored: newValue });
+      toast(newValue ? `Siguiendo "${manga.title}"` : `Dejaste de seguir "${manga.title}"`, {
+        icon: newValue ? '👁' : '👁‍🗨',
+      });
     } catch (error) {
       console.error('Error actualizando:', error);
+      toast.error('Error al actualizar el seguimiento');
     }
   };
 
@@ -120,24 +125,14 @@ const MangaDetails = () => {
   if (manga?.source_url) externalLinks.push({ label: 'Fuente', url: manga.source_url });
 
   const actions = [];
-  if (manga?.status === 'RELEASING') {
-    actions.push({
-      label: manga.monitored ? '🔔 Monitorizado' : '🔕 No monitorizado',
-      onClick: handleToggleMonitored,
-      className: `btn ${manga.monitored ? 'btn-primary' : 'btn-secondary'}`,
-      tooltip: manga.monitored
-        ? 'Los nuevos tomos se descargarán automáticamente'
-        : 'Recibirás una notificación cuando salgan nuevos tomos pero no se descargarán automáticamente',
-    });
-  }
-  if (manga?.status === 'FINISHED') {
-    actions.push({
-      label: '📕 Finalizado',
-      onClick: () => {},
-      className: 'btn btn-secondary cursor-default opacity-75',
-      title: 'El manga ha finalizado, no hay nuevos tomos que monitorizar',
-    });
-  }
+  actions.push({
+    label: manga?.monitored ? 'Siguiendo' : 'Seguir',
+    onClick: handleToggleMonitored,
+    className: `btn flex items-center gap-2 ${manga?.monitored ? 'btn-primary' : 'btn-secondary'}`,
+    tooltip: manga?.monitored
+      ? 'Nuevos tomos se descargarán automáticamente — Click para dejar de seguir'
+      : 'Click para seguir esta serie y descargar nuevos tomos automáticamente',
+  });
   actions.push({
     label: 'Actualizar',
     onClick: handleRefresh,
