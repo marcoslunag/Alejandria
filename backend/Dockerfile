@@ -41,7 +41,7 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir --no-deps mega.py==1.0.8
+    pip install --no-cache-dir --no-deps mega.py==1.0.8 bypass-ouo==0.1.1
 
 # Install Playwright browsers to a fixed path (not ~/; accessible to all users)
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright

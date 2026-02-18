@@ -38,7 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r /app/backend/requirements.txt && \
-    pip install --no-cache-dir --no-deps mega.py==1.0.8
+    pip install --no-cache-dir --no-deps mega.py==1.0.8 bypass-ouo==0.1.1
 
 # Install Playwright browsers to a fixed path (accessible to all users)
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright

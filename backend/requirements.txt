@@ -22,7 +22,7 @@ Brotli==1.1.0
 
 # Link Bypass
 cloudscraper==1.2.71
-bypass-ouo==0.1.1
+# bypass-ouo installed with --no-deps in Dockerfile (pins requests==2.31.0 which conflicts with our >=2.32.3)
 
 # Scheduling
 apscheduler==3.10.4
