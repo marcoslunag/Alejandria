@@ -4,7 +4,7 @@ Combines all v1 endpoints
 """
 
 from fastapi import APIRouter
-from app.api.v1 import auth, manga, comic, books, system, queue, settings, kindle, kindle_sync, import_api, recommendations, notifications
+from app.api.v1 import auth, manga, comic, books, system, queue, settings, kindle, kindle_sync, import_api, recommendations, notifications, export
 
 api_router = APIRouter()
 
@@ -21,3 +21,4 @@ api_router.include_router(kindle_sync.router)
 api_router.include_router(import_api.router)
 api_router.include_router(recommendations.router)
 api_router.include_router(notifications.router)
+api_router.include_router(export.router)

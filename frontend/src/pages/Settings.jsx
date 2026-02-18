@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { mangaApi } from '../services/api';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import toast from 'react-hot-toast';
 import {
   FaCog,
   FaServer,
@@ -24,7 +25,9 @@ import {
   FaCheckSquare,
   FaTimesCircle,
   FaList,
-  FaExclamationTriangle
+  FaExclamationTriangle,
+  FaFileExport,
+  FaFileImport,
 } from 'react-icons/fa';
 
 const LEVEL_STYLES = {
@@ -42,6 +45,10 @@ const Settings = () => {
   const [logs, setLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logLevel, setLogLevel] = useState('');
+  // Backup/Export
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importFileRef = useRef(null);
 
   // Settings state
   const [settings, setSettings] = useState({
@@ -171,6 +178,43 @@ const Settings = () => {
       setStkMessage({ type: 'info', text: 'Sesion cerrada' });
     } catch (error) {
       console.error('Error logout STK:', error);
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const response = await api.get('/export', { responseType: 'blob' });
+      const url = URL.createObjectURL(response.data);
+      const a = document.createElement('a');
+      a.href = url;
+      const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.download = `alejandria-backup-${date}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Backup exportado correctamente');
+    } catch (err) {
+      toast.error('Error al exportar la biblioteca');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const { data } = await api.post('/export/import', payload);
+      toast.success(`Importados: ${data.imported}, Omitidos: ${data.skipped}${data.errors.length ? `, Errores: ${data.errors.length}` : ''}`);
+      if (data.errors.length) console.error('Import errors:', data.errors);
+    } catch (err) {
+      toast.error('Error al importar el backup');
+    } finally {
+      setImporting(false);
+      if (importFileRef.current) importFileRef.current.value = '';
     }
   };
 
@@ -817,6 +861,40 @@ const Settings = () => {
               </div>
             </section>
           )}
+
+          {/* Backup */}
+          <section>
+            <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+              <FaFileExport className="text-yellow-400" />
+              Backup de biblioteca
+            </h2>
+            <div className="card p-6 flex flex-wrap gap-4 items-center">
+              <div className="flex-1 min-w-[200px]">
+                <p className="text-sm text-gray-400">
+                  Exporta toda tu biblioteca (manga, cómics, libros) como un archivo JSON. Puedes importarlo más adelante para restaurar tu colección.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleExport}
+                  disabled={exporting}
+                  className="btn bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 border border-yellow-500/30 flex items-center gap-2"
+                >
+                  {exporting ? <FaSpinner className="animate-spin" /> : <FaFileExport />}
+                  Exportar
+                </button>
+                <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImportFile} />
+                <button
+                  onClick={() => importFileRef.current?.click()}
+                  disabled={importing}
+                  className="btn bg-green-500/20 hover:bg-green-500/30 text-green-400 border border-green-500/30 flex items-center gap-2"
+                >
+                  {importing ? <FaSpinner className="animate-spin" /> : <FaFileImport />}
+                  Importar
+                </button>
+              </div>
+            </div>
+          </section>
 
           {/* Estado del Sistema */}
           <section>
