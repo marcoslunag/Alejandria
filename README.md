@@ -4,7 +4,7 @@
 
 **Tu biblioteca digital personal · Manga · Comics · Libros · Kindle**
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/tu-usuario/alejandria/releases)
+[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](https://github.com/tu-usuario/alejandria/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104-009688.svg)](https://fastapi.tiangolo.com/)
@@ -18,7 +18,7 @@
 
 **Alejandria** automatiza tu biblioteca digital de cabo a rabo: busca en los scrapers, descarga, convierte a EPUB optimizado para Kindle y lo envia directamente a tu dispositivo. Tu solo añades el titulo; el sistema hace el resto.
 
-- **Manga** — metadata AniList, descarga desde MangaYComics/TomosManga
+- **Manga** — metadata AniList, descarga desde MangaYComics y TuMangaOnline (fallback), lector web integrado
 - **Comics americanos** — metadata ComicVine (busqueda ES→EN automatica), scrapers ZonaComics, CBRComics, MegaComics
 - **Libros** — metadata Google Books, EPUB desde Lectulandia y Epubera
 - **Kindle** — conversion CBZ/CBR → EPUB con KCC y envio via Send-to-Kindle por usuario
@@ -284,7 +284,7 @@ alejandria/
 │   │   ├── services/
 │   │   │   ├── comic_scrapers/    # ZonaComics, CBRComics, MegaComics, GetComics
 │   │   │   ├── book_scrapers/     # Lectulandia, Epubera
-│   │   │   ├── manga_scrapers/    # MangaYComics, TomosManga
+│   │   │   ├── manga_scrapers/    # MangaYComics, TomosManga, TuMangaOnline
 │   │   │   ├── generic_downloader.py  # MediaFire, MEGA, etc.
 │   │   │   ├── comic_service.py   # Logica de comics y bundles
 │   │   │   ├── scheduler.py       # ContentScheduler
@@ -296,7 +296,7 @@ alejandria/
 ├── frontend/
 │   └── src/
 │       ├── components/            # ContentDetailPage, ContentCard, ContentGrid...
-│       ├── pages/                 # Library, Comics, Books, Queue, Settings...
+│       ├── pages/                 # Library, Comics, Books, Queue, Settings, MangaReader...
 │       └── utils/sanitizeUrl.js   # Sanitizacion de URLs
 ├── workers/
 │   ├── kcc-converter/     # Conversion CBZ → EPUB
@@ -325,12 +325,33 @@ alejandria/
 - [x] Notificaciones toast en toda la UI
 - [x] Hardening de seguridad (usuarios no-root, rate limiting, IDOR fixes, etc.)
 
+### v2.0 — Completado
+- [x] Watchlist inteligente (toggle monitored + filtro "Siguiendo")
+- [x] Smart retry con backoff exponencial (5min → 30min → 2h → 24h)
+- [x] Reading progress (mark-as-read, reading_status, stats de biblioteca)
+- [x] Quality preferences por usuario (host preferido, formato, tamano maximo)
+- [x] Import folder — watcher automatico de `/imports` cada 5 minutos
+- [x] Content matching — anti-duplicados con Jaccard similarity ≥ 0.8
+- [x] Differential downloads — solo descarga issues faltantes en bundles
+- [x] Metadata enricher — refresh semanal desde AniList/ComicVine/Google Books
+- [x] PWA mobile — manifest, service worker, menu hamburguesa responsive
+- [x] Recomendaciones locales sin IA — pagina /discover con perfil de gustos
+
+### v3.0 — Completado
+- [x] Dashboard personal — stats de biblioteca, actividad reciente, progreso de lectura
+- [x] Filtros avanzados — genero, estado, ano, idioma en Biblioteca/Comics/Libros
+- [x] Badge de notificaciones — nuevos capitulos en la navbar con polling cada 60s
+- [x] Panel de logs — sistema de diagnostico persistente en Ajustes (solo admin)
+- [x] Export/Backup — JSON export/import de toda la biblioteca
+- [x] Cola en tiempo real — SSE (Server-Sent Events) para actualizaciones sin polling
+- [x] TuMangaOnline — segundo scraper de manga como fallback automatico
+- [x] Web reader — leer manga descargado directamente en el navegador (fullscreen, teclado)
+
 ### Futuro
 - [ ] Notificaciones push (Telegram, Discord)
 - [ ] Importacion desde Calibre
-- [ ] Estadisticas de lectura
 - [ ] Sincronizacion con AniList / MyAnimeList
-- [ ] PWA / soporte offline
+- [ ] Lector web para comics
 
 ---
 
