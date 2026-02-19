@@ -167,31 +167,56 @@ async def search_manga(
         loop = asyncio.get_event_loop()
         stop_words = {'the', 'a', 'an', 'of', 'and', 'or', 'el', 'la', 'de', 'los', 'las', 'en', 'y'}
 
+        from app.services.tumanga_scraper import get_tumanga_scraper
+        tumanga_scraper = get_tumanga_scraper()
+
+        def _keyword_match(title_lower, title_kw, results, source_name):
+            for r in results[:8]:
+                r_lower = r.get('title', '').lower()
+                r_kw = {w.strip('":,.-!?[]') for w in r_lower.split()
+                        if len(w.strip('":,.-!?[]')) > 2}
+                exact = title_lower in r_lower or r_lower in title_lower
+                keyword = len(title_kw & r_kw) >= min(2, max(1, len(title_kw) // 2))
+                if exact or keyword:
+                    return {
+                        "sources": [source_name],
+                        "tomo_count": len(results),
+                        "url": r.get("url")
+                    }
+            return None
+
         async def check_manga_in_scraper(title: str):
             try:
-                scraper_results = await asyncio.wait_for(
-                    loop.run_in_executor(None, scraper.search_manga, title),
-                    timeout=45.0
-                )
-                if not scraper_results:
-                    return {"sources": [], "tomo_count": 0, "url": None}
-
                 title_lower = title.lower()
                 title_kw = {w.strip('":,.-!?[]') for w in title_lower.split()
                             if w not in stop_words and len(w.strip('":,.-!?[]')) > 2}
 
-                for r in scraper_results[:8]:
-                    r_lower = r.get('title', '').lower()
-                    r_kw = {w.strip('":,.-!?[]') for w in r_lower.split()
-                            if len(w.strip('":,.-!?[]')) > 2}
-                    exact = title_lower in r_lower or r_lower in title_lower
-                    keyword = len(title_kw & r_kw) >= min(2, max(1, len(title_kw) // 2))
-                    if exact or keyword:
-                        return {
-                            "sources": ["MangayComics"],
-                            "tomo_count": len(scraper_results),
-                            "url": r.get("url")
-                        }
+                # Try MangayComics first
+                try:
+                    scraper_results = await asyncio.wait_for(
+                        loop.run_in_executor(None, scraper.search_manga, title),
+                        timeout=45.0
+                    )
+                    if scraper_results:
+                        match = _keyword_match(title_lower, title_kw, scraper_results, "MangayComics")
+                        if match:
+                            return match
+                except Exception:
+                    pass
+
+                # Fallback: try TuMangaOnline
+                try:
+                    tumanga_results = await asyncio.wait_for(
+                        loop.run_in_executor(None, tumanga_scraper.search_manga, title),
+                        timeout=8.0
+                    )
+                    if tumanga_results:
+                        match = _keyword_match(title_lower, title_kw, tumanga_results, "TuMangaOnline")
+                        if match:
+                            return match
+                except Exception:
+                    pass
+
                 return {"sources": [], "tomo_count": 0, "url": None}
             except Exception:
                 return {"sources": [], "tomo_count": 0, "url": None}
