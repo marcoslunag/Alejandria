@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { mangaApi } from '../services/api';
 import { sanitizeUrl } from '../utils/sanitizeUrl';
@@ -22,6 +23,7 @@ import {
 } from 'react-icons/fa';
 
 const ChapterList = ({ mangaId }) => {
+  const navigate = useNavigate();
   const [tomos, setTomos] = useState([]);
   const [selectedTomos, setSelectedTomos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -423,6 +425,17 @@ const ChapterList = ({ mangaId }) => {
                       <FaEye className="text-sm" />
                     </button>
                   )
+                )}
+
+                {/* Read button - show for downloaded chapters */}
+                {['downloaded', 'converting', 'converted', 'sent'].includes(tomo.status) && (
+                  <button
+                    onClick={() => navigate(`/manga/${mangaId}/chapters/${tomo.id}/read`)}
+                    title="Leer en línea"
+                    className="p-1.5 rounded text-purple-400 hover:text-purple-300 hover:bg-purple-900/30 transition-colors"
+                  >
+                    <FaBook className="text-sm" />
+                  </button>
                 )}
 
                 {/* Send to Kindle button - show for converted/sent */}

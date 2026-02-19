@@ -5,6 +5,7 @@ Kaizoku-inspired approach to manga library management
 
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func
 from typing import List, Optional
@@ -1311,3 +1312,113 @@ def _save_manga_metadata(manga: Manga, chapter: Chapter, file_path: str):
 
     except Exception as e:
         logger.warning(f"Could not save metadata for {file_path}: {e}")
+
+
+# ============================================================================
+# WEB READER
+# ============================================================================
+
+@router.get("/{manga_id}/chapters/{chapter_id}/pages")
+def get_chapter_pages(
+    manga_id: int,
+    chapter_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List pages available for reading in a downloaded chapter."""
+    import zipfile
+    import os
+
+    chapter = db.query(Chapter).join(Manga).filter(
+        Chapter.id == chapter_id,
+        Chapter.manga_id == manga_id,
+        Manga.user_id == current_user.id
+    ).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    if not chapter.file_path or not os.path.exists(chapter.file_path):
+        raise HTTPException(status_code=404, detail="Chapter file not available")
+
+    IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif'}
+    try:
+        with zipfile.ZipFile(chapter.file_path, 'r') as zf:
+            pages = sorted([
+                n for n in zf.namelist()
+                if os.path.splitext(n.lower())[1] in IMAGE_EXTS
+                and not os.path.basename(n).startswith('.')
+            ])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not read chapter: {e}")
+
+    return {
+        "chapter_id": chapter_id,
+        "chapter_number": chapter.number,
+        "chapter_title": chapter.title,
+        "total_pages": len(pages),
+        "pages": [{"index": i, "filename": p} for i, p in enumerate(pages)]
+    }
+
+
+@router.get("/{manga_id}/chapters/{chapter_id}/pages/{page_index}")
+def get_chapter_page(
+    manga_id: int,
+    chapter_id: int,
+    page_index: int,
+    token: Optional[str] = Query(None, description="JWT token (for img src requests)"),
+    db: Session = Depends(get_db)
+):
+    """Serve a single page image from a downloaded chapter.
+    Accepts token as query param since <img src> can't send Authorization headers.
+    """
+    import zipfile
+    import os
+    import mimetypes
+    from app.core.security import decode_token
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Token required")
+    try:
+        payload = decode_token(token)
+        user_id = int(payload.get("sub"))
+        current_user = db.query(User).filter(User.id == user_id).first()
+        if not current_user:
+            raise HTTPException(status_code=401, detail="User not found")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    chapter = db.query(Chapter).join(Manga).filter(
+        Chapter.id == chapter_id,
+        Chapter.manga_id == manga_id,
+        Manga.user_id == current_user.id
+    ).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    if not chapter.file_path or not os.path.exists(chapter.file_path):
+        raise HTTPException(status_code=404, detail="Chapter file not available")
+
+    IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif'}
+    try:
+        with zipfile.ZipFile(chapter.file_path, 'r') as zf:
+            pages = sorted([
+                n for n in zf.namelist()
+                if os.path.splitext(n.lower())[1] in IMAGE_EXTS
+                and not os.path.basename(n).startswith('.')
+            ])
+            if page_index < 0 or page_index >= len(pages):
+                raise HTTPException(status_code=404, detail="Page not found")
+            page_name = pages[page_index]
+            ext = os.path.splitext(page_name.lower())[1]
+            mime = mimetypes.types_map.get(ext, 'image/jpeg')
+            data = zf.read(page_name)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not read page: {e}")
+
+    return StreamingResponse(
+        iter([data]),
+        media_type=mime,
+        headers={"Cache-Control": "public, max-age=3600"}
+    )

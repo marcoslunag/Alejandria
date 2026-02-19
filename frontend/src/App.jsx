@@ -18,6 +18,7 @@ import Login from './pages/Login';
 import ChangePassword from './pages/ChangePassword';
 import AdminUsers from './pages/AdminUsers';
 import Discover from './pages/Discover';
+import MangaReader from './pages/MangaReader';
 
 function ProtectedLayout() {
   const { mustChangePassword, isAdmin } = useAuth();
@@ -113,6 +114,13 @@ function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/discover" element={<Discover />} />
             </Route>
+
+            {/* Fullscreen reader (no Navbar) */}
+            <Route path="/manga/:mangaId/chapters/:chapterId/read" element={
+              <ProtectedRoute>
+                <MangaReader />
+              </ProtectedRoute>
+            } />
 
             {/* Admin routes */}
             <Route element={<AdminLayout />}>
