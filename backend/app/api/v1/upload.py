@@ -22,8 +22,10 @@ from app.models.comic import Comic, ComicIssue
 from app.models.download import DownloadQueue
 from app.models.user import User
 from app.core.deps import get_current_user
-from app.config import settings
+from app.config import get_settings
 import logging
+
+settings = get_settings()
 from slugify import slugify
 
 logger = logging.getLogger(__name__)
