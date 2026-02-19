@@ -36,12 +36,14 @@ class TomosMangaSearch:
             Lista de resultados con {title, url, volumes_text}
         """
         try:
-            # Construir URL de búsqueda
-            search_url = f"{self.base_url}/?s={query.replace(' ', '+')}"
+            # FIX 8 (BAJO): Usar params= en lugar de f-string para construir la URL.
+            # La interpolación manual con .replace(' ', '+') no codificaba caracteres especiales
+            # como '&', '#', '?' presentes en títulos como "Dragon&Ball" o "Me & You",
+            # lo que inyectaba parámetros adicionales en la URL y devolvía resultados incorrectos.
+            # requests.get(params=...) aplica urllib.parse.urlencode correctamente.
+            logger.info(f"Searching TomosManga: {self.base_url}/?s={query!r}")
 
-            logger.info(f"Searching TomosManga: {search_url}")
-
-            response = self.session.get(search_url, timeout=10)
+            response = self.session.get(self.base_url + "/", params={"s": query}, timeout=10)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, 'html.parser')

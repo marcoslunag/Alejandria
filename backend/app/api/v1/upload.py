@@ -3,7 +3,9 @@ Upload API - File upload endpoint for manga, comics, and books
 Allows users to upload CBZ/CBR/EPUB/PDF files and add them to their library.
 """
 
+import re
 import shutil
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -30,10 +32,52 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 
 ALLOWED_EXTENSIONS = {".cbz", ".cbr", ".epub", ".pdf", ".zip"}
 
+# FIX 1 (CRÍTICO): Límite estricto de tamaño de archivo — sin esto cualquier usuario
+# autenticado puede agotar el disco del servidor con un único request.
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
+
+# FIX 3 (ALTO): Patrón que acepta únicamente IDs de Google Books válidos (base64url).
+# Impide que un valor malicioso como "../../users" altere la ruta de la API de Google.
+_GOOGLE_BOOKS_ID_RE = re.compile(r'^[A-Za-z0-9_\-]{4,30}$')
+
+# FIX 5 (MEDIO): Rango razonable para números de capítulo/tomo/issue.
+# float('inf'), float('nan') y valores fuera de rango corrompen las columnas Float de la BD.
+_MIN_ITEM_NUMBER = 0.5
+_MAX_ITEM_NUMBER = 9999.0
+
 
 def _safe_filename(filename: str) -> str:
     """Sanitize filename to prevent path traversal."""
     return Path(filename).name
+
+
+async def _read_file_chunked(file: UploadFile, dest: Path) -> int:
+    """
+    FIX 1 (CRÍTICO): Lee el archivo en fragmentos de 1 MB y aborta si supera MAX_UPLOAD_BYTES.
+    Usar shutil.copyfileobj() sin límite permitía subir archivos de tamaño arbitrario.
+    """
+    total = 0
+    CHUNK = 1024 * 1024  # 1 MB
+    try:
+        with open(dest, "wb") as f:
+            while True:
+                chunk = await file.read(CHUNK)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    dest.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds maximum allowed size ({MAX_UPLOAD_BYTES // (1024 ** 3)} GB)"
+                    )
+                f.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="Failed to save file to disk")
+    return total
 
 
 @router.post("")
@@ -64,13 +108,20 @@ async def upload_file(
             detail=f"File type not allowed. Allowed types: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
         )
 
-    # Parse item_number (tomo / chapter / issue number)
+    # FIX 5 (MEDIO): Validación estricta de item_number.
+    # float('inf'), float('nan') y valores negativos causaban datos corruptos en la columna Float.
     number = 1.0
     if item_number and item_number.strip():
         try:
             number = float(item_number.strip())
         except ValueError:
             raise HTTPException(status_code=400, detail="item_number must be a valid number (e.g. 1, 2.5)")
+        import math
+        if not math.isfinite(number) or number < _MIN_ITEM_NUMBER or number > _MAX_ITEM_NUMBER:
+            raise HTTPException(
+                status_code=400,
+                detail=f"item_number must be a finite number between {_MIN_ITEM_NUMBER} and {_MAX_ITEM_NUMBER}"
+            )
 
     # Find or create item in library
     if content_type == "manga":
@@ -83,26 +134,18 @@ async def upload_file(
         item_id, item_title = await _find_or_create_book(db, current_user, external_id)
         dir_path = Path(settings.DOWNLOAD_DIR) / "books" / slugify(item_title)
 
-    # Save file to disk
+    # FIX 4 (ALTO): Eliminar la comprobación TOCTOU (exists() + open).
+    # El patrón anterior tenía una race condition: dos uploads concurrentes del mismo fichero
+    # podían pasar el check de existencia y el segundo sobreescribir al primero.
+    # Solución: añadir un UUID al nombre para garantizar unicidad sin necesidad de comprobar.
     dir_path.mkdir(parents=True, exist_ok=True)
-    file_path = dir_path / original_name
+    stem = Path(original_name).stem
+    unique_name = f"{stem}_{uuid.uuid4().hex[:8]}{ext}"
+    file_path = dir_path / unique_name
 
-    # Avoid overwriting existing files
-    if file_path.exists():
-        stem = Path(original_name).stem
-        timestamp = int(datetime.utcnow().timestamp())
-        file_path = dir_path / f"{stem}_{timestamp}{ext}"
-
-    try:
-        with open(file_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-    except Exception as e:
-        logger.error(f"Failed to save uploaded file: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save file to disk")
-    finally:
-        await file.close()
-
-    file_size = file_path.stat().st_size
+    # FIX 1 (CRÍTICO): Leer el archivo con límite de tamaño.
+    file_size = await _read_file_chunked(file, file_path)
+    await file.close()
 
     # Create DB record and queue for conversion
     if content_type == "manga":
@@ -144,11 +187,14 @@ async def upload_file(
 
     logger.info(f"Uploaded {content_type} '{item_title}' #{number}: {file_path} ({file_size} bytes)")
 
+    # FIX 2 (ALTO): Eliminar file_path de la respuesta.
+    # Devolver la ruta interna del servidor (e.g. /downloads/manga/berserk/vol1.cbz)
+    # es information disclosure: revela la estructura de volúmenes Docker, nombres de
+    # directorios internos y configuración del servidor al cliente.
     return {
         "item_id": item_id,
         "item_title": item_title,
         "type": content_type,
-        "file_path": str(file_path),
         "file_size": file_size,
     }
 
@@ -226,6 +272,16 @@ async def _find_or_create_manga(db: Session, user: User, external_id: str):
 
 async def _find_or_create_book(db: Session, user: User, external_id: str):
     """Find existing book by google_books_id or create it from Google Books."""
+    # FIX 3 (ALTO): Validar el formato del google_books_id antes de usarlo en la URL de la API.
+    # Sin esta comprobación, un valor como "../../users" se insertaría en la ruta de la petición
+    # HTTP a googleapis.com: f'/volumes/{volume_id}' → '/volumes/../../users', potencialmente
+    # accediendo a endpoints no previstos. Los IDs de Google Books son base64url (alfanumérico + _-).
+    if not _GOOGLE_BOOKS_ID_RE.match(external_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid Google Books ID format. Expected alphanumeric string (e.g. 'OXoHygEACAAJ')"
+        )
+
     existing = db.query(Book).filter(
         Book.google_books_id == external_id,
         Book.user_id == user.id
@@ -241,9 +297,19 @@ async def _find_or_create_book(db: Session, user: User, external_id: str):
     if not metadata:
         raise HTTPException(status_code=404, detail=f"Book with Google Books ID '{external_id}' not found")
 
+    # FIX 6 (MEDIO): Deduplicar el slug para libros igual que se hace para manga.
+    # Sin esto, dos libros con el mismo título (p.ej. distintas ediciones) lanzaban
+    # una IntegrityError por violación del unique constraint de la columna slug.
+    slug = slugify(metadata['title'])
+    base_slug = slug
+    counter = 1
+    while db.query(Book).filter(Book.slug == slug).first():
+        slug = f"{base_slug}-{counter}"
+        counter += 1
+
     book = Book(
         title=metadata['title'],
-        slug=slugify(metadata['title']),
+        slug=slug,
         google_books_id=metadata['google_books_id'],
         subtitle=metadata.get('subtitle'),
         description=metadata.get('description'),
@@ -327,10 +393,13 @@ async def _find_or_create_comic(db: Session, user: User, external_id: str):
 # ============================================================================
 
 def _create_manga_chapter(db: Session, manga_id: int, number: float, file_path: str) -> int:
+    # FIX 7 (MEDIO): Usar "uploaded" como URL canónica en lugar de la ruta real del servidor.
+    # Almacenar f"uploaded:{file_path}" en el campo url exponía la ruta interna completa
+    # (/downloads/manga/berserk/vol1.cbz) en las respuestas JSON de la API.
     chapter = Chapter(
         manga_id=manga_id,
         number=number,
-        url=f"uploaded:{file_path}",
+        url="uploaded",
         file_path=file_path,
         status="downloaded",
         downloaded_at=datetime.utcnow(),
