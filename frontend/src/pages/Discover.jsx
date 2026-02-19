@@ -113,7 +113,8 @@ const Discover = () => {
       } else {
         // Fallback: show AniList trending when library is empty or no recs
         const trendingData = await mangaApi.getTrending(1, 24);
-        const trending = (trendingData.data?.results || []).map(m => ({
+        const rawTrending = Array.isArray(trendingData.data) ? trendingData.data : (trendingData.data?.results || []);
+        const trending = rawTrending.map(m => ({
           content_type: 'manga',
           external_id: String(m.anilist_id || m.id),
           title: m.title,

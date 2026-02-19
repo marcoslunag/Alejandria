@@ -23,6 +23,7 @@ Brotli==1.1.0
 # Link Bypass
 cloudscraper==1.2.71
 # bypass-ouo installed with --no-deps in Dockerfile (pins requests==2.31.0 which conflicts with our >=2.32.3)
+curl_cffi>=0.5.10
 
 # Scheduling
 apscheduler==3.10.4
@@ -54,3 +55,8 @@ stkclient
 
 # Translation
 deep-translator==1.11.4
+
+# Testing
+pytest>=7.4
+pytest-asyncio>=0.21
+httpx>=0.25

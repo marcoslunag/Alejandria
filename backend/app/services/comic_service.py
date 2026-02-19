@@ -481,6 +481,11 @@ async def download_comic_issue(issue_id: int):
         if resolved_url:
             download_url = resolved_url
             logger.info(f"Resolved URL: {download_url[:80]}")
+            # Persist resolved URL to DB so users see the real URL, not the shortener
+            if download_url != issue.download_url:
+                issue.download_url = download_url
+                issue.link_status = 'resolved'
+                db.commit()
         else:
             issue.status = "error"
             issue.error_message = f"Could not resolve URL shortener: {issue.download_url[:50]}"

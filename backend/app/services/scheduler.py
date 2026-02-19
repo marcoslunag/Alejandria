@@ -672,6 +672,13 @@ class ContentScheduler:
             chapter.file_path = str(file_path)
             chapter.downloaded_at = datetime.utcnow()
 
+            # Si la URL original era un acortador, guardar la URL final resuelta
+            resolved = self.downloader._resolved_urls.get(chapter.download_url)
+            if resolved:
+                chapter.download_url = resolved
+                chapter.link_status = 'resolved'
+                logger.info(f"Updated chapter {chapter.id} download_url to resolved: {resolved[:60]}...")
+
             # Guardar metadatos para ComicInfo.xml
             self._save_manga_metadata(manga, chapter, file_path)
 

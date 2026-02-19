@@ -39,6 +39,10 @@ class MangaDownloader:
         self.download_dir = Path(download_dir)
         self.download_dir.mkdir(parents=True, exist_ok=True)
 
+        # Tracks shortener resolutions: {original_shortener_url: resolved_final_url}
+        # Callers can check this after download to update the DB with the real URL
+        self._resolved_urls: Dict[str, str] = {}
+
         # Configure session headers
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -135,6 +139,7 @@ class MangaDownloader:
             resolved_url = await self._resolve_ouo_link(url)
             if resolved_url:
                 logger.info(f"OUO.io resolved to: {resolved_url[:60]}...")
+                self._resolved_urls[url] = resolved_url
                 # Llamar recursivamente con el enlace resuelto
                 return await self._download_single_url(resolved_url, filename, on_progress)
             else:
@@ -146,6 +151,7 @@ class MangaDownloader:
             resolved_url = await self._resolve_uii_link(url)
             if resolved_url:
                 logger.info(f"UII.io resolved to: {resolved_url[:60]}...")
+                self._resolved_urls[url] = resolved_url
                 # Llamar recursivamente con el enlace resuelto
                 return await self._download_single_url(resolved_url, filename, on_progress)
             else:

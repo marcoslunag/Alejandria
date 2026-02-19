@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import toast from 'react-hot-toast';
-import { mangaApi, systemApi } from '../services/api';
-import ContentGrid from '../components/ContentGrid';
+import { systemApi } from '../services/api';
 import {
-  FaFire, FaStar, FaBook, FaMask, FaBookReader,
-  FaExclamationTriangle, FaDownload,
+  FaBook, FaMask, FaBookReader,
+  FaExclamationTriangle, FaDownload, FaChartBar,
 } from 'react-icons/fa';
 
 const TYPE_CONFIG = {
@@ -70,16 +68,9 @@ const Home = () => {
   const navigate = useNavigate();
   const [dashboard, setDashboard] = useState(null);
   const [loadingDash, setLoadingDash] = useState(true);
-  const [trending, setTrending] = useState([]);
-  const [popular, setPopular] = useState([]);
-  const [loadingTrending, setLoadingTrending] = useState(true);
-  const [loadingPopular, setLoadingPopular] = useState(true);
-  const [activeTab, setActiveTab] = useState('trending');
 
   useEffect(() => {
     loadDashboard();
-    loadTrending();
-    loadPopular();
   }, []);
 
   const loadDashboard = async () => {
@@ -93,40 +84,6 @@ const Home = () => {
     }
   };
 
-  const loadTrending = async () => {
-    try {
-      setLoadingTrending(true);
-      const response = await mangaApi.getTrending(1, 12);
-      setTrending(response.data);
-    } catch (error) {
-      console.error('Error cargando tendencias:', error);
-    } finally {
-      setLoadingTrending(false);
-    }
-  };
-
-  const loadPopular = async () => {
-    try {
-      setLoadingPopular(true);
-      const response = await mangaApi.getPopular(1, 12);
-      setPopular(response.data);
-    } catch (error) {
-      console.error('Error cargando populares:', error);
-    } finally {
-      setLoadingPopular(false);
-    }
-  };
-
-  const handleAddManga = async (manga) => {
-    try {
-      await mangaApi.addFromAnilist({ anilist_id: manga.anilist_id, monitored: true, auto_download: true });
-      toast.success(`"${manga.title}" añadido a la biblioteca`);
-      loadDashboard();
-    } catch (error) {
-      toast.error('Error al añadir el manga');
-    }
-  };
-
   const lib = dashboard?.library || {};
   const readingStats = dashboard?.reading_stats || {};
   const recentDownloads = dashboard?.recent_downloads || [];
@@ -136,9 +93,18 @@ const Home = () => {
   return (
     <div className="container mx-auto px-4 py-6 max-w-7xl">
 
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-6">
+        <FaChartBar className="text-primary text-2xl" />
+        <div>
+          <h1 className="text-2xl font-bold">Mis Estadísticas</h1>
+          <p className="text-gray-400 text-sm">Resumen de tu biblioteca y actividad</p>
+        </div>
+      </div>
+
       {/* === Mi Biblioteca === */}
       <section className="mb-8">
-        <h2 className="text-xl font-bold mb-4">Mi Biblioteca</h2>
+        <h2 className="text-lg font-semibold mb-4 text-gray-300">Mi Biblioteca</h2>
 
         {loadingDash ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
@@ -241,50 +207,6 @@ const Home = () => {
               })}
             </div>
           </div>
-        )}
-      </section>
-
-      {/* === Descubre más === */}
-      <section>
-        <div className="flex items-center justify-between mb-4 border-b border-gray-700 pb-3">
-          <h2 className="text-xl font-bold">Descubre</h2>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setActiveTab('trending')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                activeTab === 'trending' ? 'bg-primary text-white' : 'text-gray-400 hover:text-white hover:bg-dark-lighter'
-              }`}
-            >
-              <FaFire className="text-xs" /> Tendencias
-            </button>
-            <button
-              onClick={() => setActiveTab('popular')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                activeTab === 'popular' ? 'bg-primary text-white' : 'text-gray-400 hover:text-white hover:bg-dark-lighter'
-              }`}
-            >
-              <FaStar className="text-xs" /> Populares
-            </button>
-          </div>
-        </div>
-
-        {activeTab === 'trending' && (
-          <ContentGrid
-            items={trending}
-            type="manga"
-            loading={loadingTrending}
-            showAddButton={true}
-            onAdd={handleAddManga}
-          />
-        )}
-        {activeTab === 'popular' && (
-          <ContentGrid
-            items={popular}
-            type="manga"
-            loading={loadingPopular}
-            showAddButton={true}
-            onAdd={handleAddManga}
-          />
         )}
       </section>
     </div>

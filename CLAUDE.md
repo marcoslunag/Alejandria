@@ -1,11 +1,12 @@
-# Alejandría v2.0 - Biblioteca Digital Automatizada
+# Alejandría v3.1 - Biblioteca Digital Automatizada
 
 ## 🎯 Descripción del Proyecto
 
 Alejandría es una plataforma de gestión automatizada de contenido digital (manga, cómics, libros) con integración a Kindle. El sistema descarga, convierte y envía contenido automáticamente.
 
-## 🚀 V2.0 Features (10/10 completadas)
+## 🚀 Versiones completadas
 
+### V2.0 Features (10/10)
 1. **Watchlist inteligente** - Toggle monitored en cards + filtro "Siguiendo" en Library
 2. **Smart retry** - Backoff exponencial: 5min → 30min → 2h → 24h para descargas fallidas
 3. **Reading progress** - mark-as-read, reading_status, biblioteca stats
@@ -16,6 +17,24 @@ Alejandría es una plataforma de gestión automatizada de contenido digital (man
 8. **Metadata enricher** - Refresh semanal desde AniList/ComicVine/Google Books + Open Library fallback
 9. **PWA mobile** - manifest.json, service worker, hamburger menu responsive
 10. **Local recommendations** - Engine sin IA: perfil de géneros/autores/scores, página /discover
+
+### V3.0 Features (8/8)
+1. **Dashboard personal** - stats de biblioteca, actividad reciente, progreso de lectura (`/dashboard`)
+2. **Filtros avanzados** - género, estado, año, idioma en Biblioteca/Comics/Libros
+3. **Badge notificaciones** - nuevos capítulos en navbar con polling cada 60s
+4. **Panel de logs** - sistema de diagnóstico persistente en Ajustes (solo admin)
+5. **Export/Backup** - JSON export/import de toda la biblioteca
+6. **Cola en tiempo real** - SSE (Server-Sent Events) para actualizaciones sin polling
+7. **TuMangaOnline** - segundo scraper de manga como fallback automático
+8. **Web reader** - leer manga descargado en el navegador (fullscreen, teclado, token en query param)
+
+### V3.1 Features (6/6)
+1. **TomosManga paralelo** - búsqueda simultánea TomosManga + MangayComics, ambas en badges
+2. **Scorer re-ediciones** - re-ediciones +25 (eran -50), bonus +5/año desde 2015
+3. **Reading status sin descarga** - `PATCH /{type}/{id}/reading-status` + menú 3-puntos en ContentCard
+4. **Discover como inicio** - `/` → Discover, `/dashboard` → Home stats
+5. **Discover fallback** - trending AniList con banner naranja cuando biblioteca vacía
+6. **Uploader** - `POST /upload` multipart; crea item si no existe; CBZ/CBR/EPUB/PDF/ZIP; 2 GB límite
 
 ## 🏗️ Arquitectura
 
@@ -119,11 +138,19 @@ import { sanitizeUrl } from '../utils/sanitizeUrl';
 
 ## 📚 Sistemas Implementados
 
+### 0. Config Import Pattern (CRÍTICO)
+- `app.config` exporta `get_settings()`, NO un objeto `settings`
+- **Correcto**: `from app.config import get_settings; settings = get_settings()`
+- **NUNCA**: `from app.config import settings` → ImportError en arranque
+
 ### 1. Manga (✅ Funcional)
 - **Metadata**: AniList
-- **Scrapers**: MangayComics
+- **Scrapers**: TomosManga (PRIMARIO) + MangayComics (paralelo) + TuMangaOnline (fallback)
+- **Búsqueda**: `check_manga_in_scraper` lanza TomosManga + MangayComics con `asyncio.gather()`
+- **Scorer** (`tomosmanga_search.py`): re-ediciones +25, reciente +5/año, color -20, guía -100
 - **Conversión**: CBZ → EPUB via KCC
 - **Envío**: STK (Send to Kindle)
+- **Web reader**: `GET /manga/{id}/chapters/{ch_id}/pages/{idx}?token=<jwt>` — token en query param porque `<img src>` no puede enviar Authorization headers
 
 ### 2. Libros (✅ Funcional)
 - **Metadata**: Google Books

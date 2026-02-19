@@ -169,9 +169,7 @@ async def search_manga(
         stop_words = {'the', 'a', 'an', 'of', 'and', 'or', 'el', 'la', 'de', 'los', 'las', 'en', 'y'}
 
         import re as _re
-        from app.services.tumanga_scraper import get_tumanga_scraper
         from app.services.tomosmanga_search import TomosMangaSearch
-        tumanga_scraper = get_tumanga_scraper()
         tomos_scraper = TomosMangaSearch()
 
         def _keyword_match(title_lower, title_kw, results, source_name):
@@ -239,20 +237,6 @@ async def search_manga(
                             url = match["url"]
                         if not tomo_count:
                             tomo_count = len(mac_results)
-
-                # Fallback: TuMangaOnline si ninguno encontró nada
-                if not sources:
-                    try:
-                        tumanga_results = await asyncio.wait_for(
-                            loop.run_in_executor(None, tumanga_scraper.search_manga, title),
-                            timeout=8.0
-                        )
-                        if tumanga_results:
-                            match = _keyword_match(title_lower, title_kw, tumanga_results, "TuMangaOnline")
-                            if match:
-                                return match
-                    except Exception:
-                        pass
 
                 if sources:
                     return {"sources": sources, "tomo_count": tomo_count, "url": url}

@@ -61,7 +61,7 @@ const Navbar = () => {
     { to: '/books', icon: FaBookReader, label: 'Libros' },
     { to: '/queue', icon: FaDownload, label: 'Descargas' },
     { to: '/upload', icon: FaUpload, label: 'Subir' },
-    { to: '/dashboard', icon: FaChartBar, label: 'Dashboard' },
+    { to: '/dashboard', icon: FaChartBar, label: 'Estadísticas' },
     { to: '/settings', icon: FaCog, label: 'Ajustes' },
   ];
 
