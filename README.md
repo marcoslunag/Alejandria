@@ -4,7 +4,7 @@
 
 **Tu biblioteca digital personal · Manga · Comics · Libros · Kindle**
 
-[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](https://github.com/tu-usuario/alejandria/releases)
+[![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)](https://github.com/tu-usuario/alejandria/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104-009688.svg)](https://fastapi.tiangolo.com/)
@@ -18,7 +18,7 @@
 
 **Alejandria** automatiza tu biblioteca digital de cabo a rabo: busca en los scrapers, descarga, convierte a EPUB optimizado para Kindle y lo envia directamente a tu dispositivo. Tu solo añades el titulo; el sistema hace el resto.
 
-- **Manga** — metadata AniList, descarga desde MangaYComics y TuMangaOnline (fallback), lector web integrado
+- **Manga** — metadata AniList, descarga desde TomosManga + MangaYComics (paralelo), lector web integrado
 - **Comics americanos** — metadata ComicVine (busqueda ES→EN automatica), scrapers ZonaComics, CBRComics, MegaComics
 - **Libros** — metadata Google Books, EPUB desde Lectulandia y Epubera
 - **Kindle** — conversion CBZ/CBR → EPUB con KCC y envio via Send-to-Kindle por usuario
@@ -180,6 +180,14 @@ cp .env.example .env
 1. **Buscar** → pestana **Libros** → selecciona de Google Books o Lectulandia
 2. Si hay EPUB disponible, aparece el badge "✓ EPUB disponible"
 3. Pulsa **Anadir** y el scheduler descargara el EPUB
+
+### Subir un archivo propio
+1. **Subir** en la navbar
+2. Selecciona el tipo (Manga / Comic / Libro)
+3. Busca el titulo en AniList / ComicVine / Google Books y seleccionalo
+4. Arrastra el archivo CBZ, EPUB o PDF (o haz clic para seleccionarlo)
+5. Indica el numero de tomo/capitulo (opcional) y pulsa **Subir archivo**
+6. El archivo se anade a la biblioteca y se convierte automaticamente
 
 ### Configurar Kindle (por usuario)
 1. **Ajustes** → **Cuenta Kindle**
@@ -346,6 +354,14 @@ alejandria/
 - [x] Cola en tiempo real — SSE (Server-Sent Events) para actualizaciones sin polling
 - [x] TuMangaOnline — segundo scraper de manga como fallback automatico
 - [x] Web reader — leer manga descargado directamente en el navegador (fullscreen, teclado)
+
+### v3.1 — Completado
+- [x] TomosManga como fuente principal — busqueda paralela TomosManga + MangaYComics, ambas fuentes aparecen en los badges
+- [x] Scorer mejorado — re-ediciones y ediciones recientes son preferidas (antes eran penalizadas)
+- [x] Estado de lectura sin descarga — marcar manga/comic/libro como "leido/leyendo/sin leer" directamente desde la card
+- [x] Pagina de inicio = Descubrir — `/` muestra recomendaciones; el dashboard esta en `/dashboard`
+- [x] Descubrir con fallback — si la biblioteca esta vacia, muestra tendencias de AniList con banner informativo
+- [x] Uploader de archivos — subir CBZ/CBR/EPUB/PDF directamente; crea el item en biblioteca si no existe
 
 ### Futuro
 - [ ] Notificaciones push (Telegram, Discord)

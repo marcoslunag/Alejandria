@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
-import { FaStar, FaBook, FaBookReader, FaMask, FaCheck, FaPlus, FaEye, FaEyeSlash } from 'react-icons/fa';
-import { useState } from 'react';
+import { FaStar, FaBook, FaBookReader, FaMask, FaCheck, FaPlus, FaEye, FaEyeSlash, FaEllipsisV } from 'react-icons/fa';
+import { useState, useRef, useEffect } from 'react';
+import toast from 'react-hot-toast';
+import { mangaApi, comicApi, bookApi } from '../services/api';
 
 /**
  * ContentCard - Tarjeta unificada para manga, cómics y libros.
@@ -11,10 +13,49 @@ import { useState } from 'react';
  *   onAdd            - Callback para añadir a biblioteca
  *   showAddButton    - Mostrar botón de añadir
  */
-const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onToggleMonitor }) => {
+const READ_STATUS_LABELS = {
+  not_started: 'Sin leer',
+  reading: 'Leyendo',
+  completed: 'Leído',
+};
+
+const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onToggleMonitor, onReadingStatusChange }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [isTogglingMonitor, setIsTogglingMonitor] = useState(false);
+  const [readingStatus, setReadingStatus] = useState(item.reading_status || 'not_started');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    setReadingStatus(item.reading_status || 'not_started');
+  }, [item.reading_status]);
+
+  useEffect(() => {
+    const handleOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    if (menuOpen) document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [menuOpen]);
+
+  const apiMap = { manga: mangaApi, comic: comicApi, book: bookApi };
+
+  const handleSetReadingStatus = async (e, status) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuOpen(false);
+    const id = item.library_id || item.id;
+    if (!id) return;
+    try {
+      await apiMap[type].setReadingStatus(id, status);
+      setReadingStatus(status);
+      onReadingStatusChange?.(id, status);
+      toast.success(`"${item.title}" marcado como ${READ_STATUS_LABELS[status].toLowerCase()}`);
+    } catch {
+      toast.error('Error actualizando estado de lectura');
+    }
+  };
 
   const config = {
     manga: {
@@ -304,6 +345,43 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onTog
             <FaPlus />
             {isAdding ? 'Agregando...' : 'Añadir a biblioteca'}
           </button>
+        )}
+
+        {/* Reading status quick-set (library items only) */}
+        {item.in_library && (
+          <div className="flex items-center justify-between mt-3 pt-2 border-t border-dark-lighter">
+            <span className={`text-xs ${
+              readingStatus === 'completed' ? 'text-green-400' :
+              readingStatus === 'reading' ? 'text-yellow-400' :
+              'text-gray-500'
+            }`}>
+              {READ_STATUS_LABELS[readingStatus]}
+            </span>
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMenuOpen(v => !v); }}
+                className="p-1 text-gray-500 hover:text-white rounded transition-colors"
+                title="Cambiar estado de lectura"
+              >
+                <FaEllipsisV className="text-xs" />
+              </button>
+              {menuOpen && (
+                <div className="absolute bottom-full right-0 mb-1 bg-dark-card border border-dark-lighter rounded-lg shadow-xl z-50 py-1 min-w-[130px]">
+                  {Object.entries(READ_STATUS_LABELS).map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={(e) => handleSetReadingStatus(e, key)}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-dark-lighter transition-colors ${
+                        readingStatus === key ? 'text-white font-medium' : 'text-gray-400'
+                      }`}
+                    >
+                      {readingStatus === key ? '✓ ' : ''}{label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from slugify import slugify
@@ -1089,3 +1090,40 @@ async def mark_all_issues_read(
 
     db.commit()
     return {"marked_read": len(issues)}
+
+
+class ComicReadingStatusUpdate(BaseModel):
+    status: str  # not_started | reading | completed
+
+
+@router.patch("/{comic_id}/reading-status")
+async def update_comic_reading_status(
+    comic_id: int,
+    body: ComicReadingStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Set reading status directly, without requiring downloaded issues."""
+    valid = {'not_started', 'reading', 'completed'}
+    if body.status not in valid:
+        raise HTTPException(status_code=400, detail=f"status must be one of {valid}")
+
+    comic = db.query(Comic).filter(Comic.id == comic_id, Comic.user_id == current_user.id).first()
+    if not comic:
+        raise HTTPException(status_code=404, detail="Comic not found")
+
+    comic.reading_status = body.status
+
+    if body.status == 'completed':
+        now = datetime.utcnow()
+        issues = db.query(ComicIssue).filter(
+            ComicIssue.comic_id == comic_id,
+            ComicIssue.read_at.is_(None)
+        ).all()
+        for iss in issues:
+            iss.read_at = now
+        if issues:
+            comic.last_read_issue = issues[-1].issue_number
+
+    db.commit()
+    return {"id": comic_id, "reading_status": comic.reading_status}

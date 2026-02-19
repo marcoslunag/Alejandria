@@ -1,6 +1,6 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
-import { FaHome, FaBook, FaSearch, FaCog, FaDownload, FaMask, FaBookReader, FaSignOutAlt, FaUser, FaUserShield, FaBars, FaTimes, FaCompass, FaBell } from 'react-icons/fa';
+import { FaHome, FaBook, FaSearch, FaCog, FaDownload, FaMask, FaBookReader, FaSignOutAlt, FaUser, FaUserShield, FaBars, FaTimes, FaCompass, FaBell, FaUpload, FaChartBar } from 'react-icons/fa';
 import { useAuth } from '../contexts/AuthContext';
 import { notificationsApi } from '../services/api';
 
@@ -54,13 +54,14 @@ const Navbar = () => {
   };
 
   const userNavItems = [
-    { to: '/', icon: FaHome, label: 'Inicio' },
+    { to: '/', icon: FaCompass, label: 'Descubrir' },
     { to: '/search', icon: FaSearch, label: 'Buscar' },
     { to: '/library', icon: FaBook, label: 'Manga' },
     { to: '/comics', icon: FaMask, label: 'Comics' },
     { to: '/books', icon: FaBookReader, label: 'Libros' },
-    { to: '/discover', icon: FaCompass, label: 'Descubrir' },
     { to: '/queue', icon: FaDownload, label: 'Descargas' },
+    { to: '/upload', icon: FaUpload, label: 'Subir' },
+    { to: '/dashboard', icon: FaChartBar, label: 'Dashboard' },
     { to: '/settings', icon: FaCog, label: 'Ajustes' },
   ];
 

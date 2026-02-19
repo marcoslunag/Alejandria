@@ -82,10 +82,14 @@ class TomosMangaSearch:
             logger.error(f"Error searching TomosManga: {e}")
             return []
 
+    def search_manga(self, query: str) -> List[Dict]:
+        """Alias de search() para compatibilidad con la interfaz de MangayComicsScraper."""
+        return self.search(query)
+
     def find_best_match(self, query: str) -> Optional[Dict]:
         """
         Busca y retorna el mejor match para un manga.
-        Prioriza: más tomos > versión completa > match exacto de título
+        Prioriza: re-ediciones/ediciones recientes > más tomos > versión completa > match exacto de título
 
         Args:
             query: Título del manga
@@ -94,6 +98,7 @@ class TomosMangaSearch:
             Mejor resultado o None
         """
         import re
+        from datetime import datetime
 
         results = self.search(query)
 
@@ -138,9 +143,18 @@ class TomosMangaSearch:
             if 'completo' in title_lower:
                 score += 30
 
-            # PENALIZAR versiones alternativas
-            if 're-edition' in title_lower or 'reedition' in title_lower:
-                score -= 50
+            # PREFERIR re-ediciones y ediciones más recientes (son versiones mejoradas)
+            if any(k in title_lower for k in ('re-edition', 'reedicion', 'reedición', 'nueva edicion', 'nueva edición')):
+                score += 25
+
+            # Bonus por año reciente en el título (ej: "Manga [2023]")
+            year_match = re.search(r'\b(20\d{2})\b', title)
+            if year_match:
+                year = int(year_match.group(1))
+                recency_bonus = max(0, (year - 2015) * 5)  # +5 pts por año desde 2015
+                score += recency_bonus
+
+            # PENALIZAR versiones de color (edición diferente al manga estándar)
             if 'color' in title_lower or 'full color' in title_lower:
                 score -= 20
             if 'guia' in title_lower or 'guía' in title_lower:

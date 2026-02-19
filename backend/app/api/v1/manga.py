@@ -168,8 +168,11 @@ async def search_manga(
         loop = asyncio.get_event_loop()
         stop_words = {'the', 'a', 'an', 'of', 'and', 'or', 'el', 'la', 'de', 'los', 'las', 'en', 'y'}
 
+        import re as _re
         from app.services.tumanga_scraper import get_tumanga_scraper
+        from app.services.tomosmanga_search import TomosMangaSearch
         tumanga_scraper = get_tumanga_scraper()
+        tomos_scraper = TomosMangaSearch()
 
         def _keyword_match(title_lower, title_kw, results, source_name):
             for r in results[:8]:
@@ -192,32 +195,67 @@ async def search_manga(
                 title_kw = {w.strip('":,.-!?[]') for w in title_lower.split()
                             if w not in stop_words and len(w.strip('":,.-!?[]')) > 2}
 
-                # Try MangayComics first
-                try:
-                    scraper_results = await asyncio.wait_for(
-                        loop.run_in_executor(None, scraper.search_manga, title),
-                        timeout=45.0
-                    )
-                    if scraper_results:
-                        match = _keyword_match(title_lower, title_kw, scraper_results, "MangayComics")
-                        if match:
-                            return match
-                except Exception:
-                    pass
+                # Lanzar TomosManga y MangayComics en PARALELO
+                tomos_task = asyncio.wait_for(
+                    loop.run_in_executor(None, tomos_scraper.search, title),
+                    timeout=10.0
+                )
+                mac_task = asyncio.wait_for(
+                    loop.run_in_executor(None, scraper.search_manga, title),
+                    timeout=15.0
+                )
+                tomos_results, mac_results = await asyncio.gather(
+                    tomos_task, mac_task, return_exceptions=True
+                )
 
-                # Fallback: try TuMangaOnline
-                try:
-                    tumanga_results = await asyncio.wait_for(
-                        loop.run_in_executor(None, tumanga_scraper.search_manga, title),
-                        timeout=8.0
-                    )
-                    if tumanga_results:
-                        match = _keyword_match(title_lower, title_kw, tumanga_results, "TuMangaOnline")
-                        if match:
-                            return match
-                except Exception:
-                    pass
+                sources = []
+                url = None
+                tomo_count = 0
 
+                # TomosManga es la fuente principal
+                if tomos_results and not isinstance(tomos_results, Exception):
+                    for r in tomos_results[:8]:
+                        r_lower = r.get('title', '').lower()
+                        r_kw = {w.strip('":,.-!?[]') for w in r_lower.split()
+                                if len(w.strip('":,.-!?[]')) > 2}
+                        exact = title_lower in r_lower or r_lower in title_lower
+                        keyword = len(title_kw & r_kw) >= min(2, max(1, len(title_kw) // 2))
+                        if exact or keyword:
+                            sources.append("TomosManga")
+                            url = r.get("url")
+                            # Extraer count de volumes_text "[01-21]" → 21
+                            vt = r.get("volumes_text", "")
+                            vm = _re.search(r'\[(\d+)\s*-\s*(\d+)\]', vt)
+                            if vm:
+                                tomo_count = int(vm.group(2)) - int(vm.group(1)) + 1
+                            break
+
+                # MangayComics como fuente adicional
+                if mac_results and not isinstance(mac_results, Exception):
+                    match = _keyword_match(title_lower, title_kw, mac_results, "MangayComics")
+                    if match:
+                        sources.append("MangayComics")
+                        if not url:
+                            url = match["url"]
+                        if not tomo_count:
+                            tomo_count = len(mac_results)
+
+                # Fallback: TuMangaOnline si ninguno encontró nada
+                if not sources:
+                    try:
+                        tumanga_results = await asyncio.wait_for(
+                            loop.run_in_executor(None, tumanga_scraper.search_manga, title),
+                            timeout=8.0
+                        )
+                        if tumanga_results:
+                            match = _keyword_match(title_lower, title_kw, tumanga_results, "TuMangaOnline")
+                            if match:
+                                return match
+                    except Exception:
+                        pass
+
+                if sources:
+                    return {"sources": sources, "tomo_count": tomo_count, "url": url}
                 return {"sources": [], "tomo_count": 0, "url": None}
             except Exception:
                 return {"sources": [], "tomo_count": 0, "url": None}
@@ -876,6 +914,44 @@ def mark_all_chapters_read(
 
     db.commit()
     return {"marked_read": len(chapters)}
+
+
+class ReadingStatusUpdate(BaseModel):
+    status: str  # not_started | reading | completed
+
+
+@router.patch("/{manga_id}/reading-status")
+def update_manga_reading_status(
+    manga_id: int,
+    body: ReadingStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Set reading status directly, without requiring downloaded chapters."""
+    valid = {'not_started', 'reading', 'completed'}
+    if body.status not in valid:
+        raise HTTPException(status_code=400, detail=f"status must be one of {valid}")
+
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == current_user.id).first()
+    if not manga:
+        raise HTTPException(status_code=404, detail="Manga not found")
+
+    manga.reading_status = body.status
+
+    # If marking completed, also mark all existing chapters as read
+    if body.status == 'completed':
+        now = datetime.utcnow()
+        chapters = db.query(Chapter).filter(
+            Chapter.manga_id == manga_id,
+            Chapter.read_at.is_(None)
+        ).all()
+        for ch in chapters:
+            ch.read_at = now
+        if chapters:
+            manga.last_read_chapter = max(ch.number for ch in chapters)
+
+    db.commit()
+    return {"id": manga_id, "reading_status": manga.reading_status}
 
 
 class ChapterDownloadRequest(BaseModel):

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { recommendationsApi, mangaApi, comicApi, bookApi } from '../services/api';
-import { FaCompass, FaSync, FaStar, FaPlus, FaCheck, FaFilter } from 'react-icons/fa';
+import { recommendationsApi, mangaApi, bookApi } from '../services/api';
+import { FaCompass, FaSync, FaStar, FaPlus, FaCheck, FaFire } from 'react-icons/fa';
 
 const TYPE_LABELS = {
   manga: { label: 'Manga', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
@@ -96,6 +96,7 @@ const Discover = () => {
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState('all');
   const [addedIds, setAddedIds] = useState(new Set());
+  const [usingFallback, setUsingFallback] = useState(false);
 
   useEffect(() => {
     loadRecommendations();
@@ -103,9 +104,29 @@ const Discover = () => {
 
   const loadRecommendations = async () => {
     setLoading(true);
+    setUsingFallback(false);
     try {
       const { data } = await recommendationsApi.get({ limit: 24, type: typeFilter });
-      setRecommendations(data.recommendations || []);
+      const recs = data.recommendations || [];
+      if (recs.length > 0) {
+        setRecommendations(recs);
+      } else {
+        // Fallback: show AniList trending when library is empty or no recs
+        const trendingData = await mangaApi.getTrending(1, 24);
+        const trending = (trendingData.data?.results || []).map(m => ({
+          content_type: 'manga',
+          external_id: String(m.anilist_id || m.id),
+          title: m.title,
+          cover: m.cover_image || m.cover,
+          authors: m.authors || [],
+          score: m.average_score,
+          anilist_id: m.anilist_id || m.id,
+          recommendation_score: 0,
+          reason_label: null,
+        }));
+        setRecommendations(trending);
+        setUsingFallback(trending.length > 0);
+      }
     } catch (err) {
       if (err.response?.status === 401) return;
       toast.error('Error cargando recomendaciones');
@@ -184,12 +205,23 @@ const Discover = () => {
         </div>
       </div>
 
+      {/* Fallback banner */}
+      {!loading && usingFallback && (
+        <div className="mb-4 flex items-center gap-2 bg-orange-500/10 border border-orange-500/20 rounded-lg px-4 py-2 text-sm text-orange-300">
+          <FaFire className="flex-shrink-0" />
+          <span>Tendencias de AniList · Añade contenido a tu biblioteca para recibir recomendaciones personalizadas</span>
+          <button onClick={() => navigate('/search')} className="ml-auto underline text-orange-200 hover:text-white">
+            Explorar
+          </button>
+        </div>
+      )}
+
       {/* Empty state */}
       {!loading && recommendations.length === 0 && (
         <div className="text-center py-20 text-gray-500">
           <FaCompass className="text-6xl mx-auto mb-4 opacity-30" />
-          <p className="text-lg">Añade más contenido a tu biblioteca</p>
-          <p className="text-sm mt-1">Las recomendaciones se generan basándose en tus géneros, autores y scores favoritos</p>
+          <p className="text-lg">No hay recomendaciones disponibles</p>
+          <p className="text-sm mt-1">Añade contenido a tu biblioteca para empezar</p>
           <button
             onClick={() => navigate('/search')}
             className="mt-4 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/80 transition-colors text-sm"

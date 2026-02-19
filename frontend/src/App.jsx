@@ -19,6 +19,7 @@ import ChangePassword from './pages/ChangePassword';
 import AdminUsers from './pages/AdminUsers';
 import Discover from './pages/Discover';
 import MangaReader from './pages/MangaReader';
+import Upload from './pages/Upload';
 
 function ProtectedLayout() {
   const { mustChangePassword, isAdmin } = useAuth();
@@ -102,7 +103,8 @@ function App() {
 
             {/* Protected routes (non-admin users) */}
             <Route element={<ProtectedLayout />}>
-              <Route path="/" element={<Home />} />
+              <Route path="/" element={<Discover />} />
+              <Route path="/dashboard" element={<Home />} />
               <Route path="/library" element={<Library />} />
               <Route path="/search" element={<Search />} />
               <Route path="/manga/:id" element={<MangaDetails />} />
@@ -112,7 +114,8 @@ function App() {
               <Route path="/books/:id" element={<BookDetails />} />
               <Route path="/queue" element={<Queue />} />
               <Route path="/settings" element={<Settings />} />
-              <Route path="/discover" element={<Discover />} />
+              <Route path="/upload" element={<Upload />} />
+              <Route path="/discover" element={<Navigate to="/" replace />} />
             </Route>
 
             {/* Fullscreen reader (no Navbar) */}

@@ -160,6 +160,9 @@ export const mangaApi = {
 
   retryFailedImport: (filename) =>
     api.post(`/import/retry/${encodeURIComponent(filename)}`),
+
+  setReadingStatus: (mangaId, status) =>
+    api.patch(`/manga/${mangaId}/reading-status`, { status }),
 };
 
 // Comics API
@@ -238,6 +241,9 @@ export const comicApi = {
 
   deleteFile: (issueId) =>
     api.delete(`/queue/comic/${issueId}/file`),
+
+  setReadingStatus: (comicId, status) =>
+    api.patch(`/comics/${comicId}/reading-status`, { status }),
 };
 
 // Books API
@@ -295,6 +301,18 @@ export const bookApi = {
 
   markAllRead: (bookId) =>
     api.post(`/books/${bookId}/mark-all-read`),
+
+  setReadingStatus: (bookId, status) =>
+    api.patch(`/books/${bookId}/reading-status`, { status }),
+};
+
+// Upload API
+export const uploadApi = {
+  upload: (formData, onProgress) =>
+    api.post('/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: onProgress,
+    }),
 };
 
 // Recommendations API (Feature 10)

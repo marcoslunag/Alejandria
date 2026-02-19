@@ -6,6 +6,7 @@ from datetime import datetime
 import asyncio
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func
 from typing import List, Optional
@@ -762,6 +763,43 @@ async def mark_all_book_chapters_read(
 
     db.commit()
     return {"marked_read": len(chapters)}
+
+
+class BookReadingStatusUpdate(BaseModel):
+    status: str  # not_started | reading | completed
+
+
+@router.patch("/{book_id}/reading-status")
+async def update_book_reading_status(
+    book_id: int,
+    body: BookReadingStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Set reading status directly, without requiring downloaded chapters."""
+    valid = {'not_started', 'reading', 'completed'}
+    if body.status not in valid:
+        raise HTTPException(status_code=400, detail=f"status must be one of {valid}")
+
+    book = db.query(Book).filter(Book.id == book_id, Book.user_id == current_user.id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    book.reading_status = body.status
+
+    if body.status == 'completed':
+        now = datetime.utcnow()
+        chapters = db.query(BookChapter).filter(
+            BookChapter.book_id == book_id,
+            BookChapter.read_at.is_(None)
+        ).all()
+        for ch in chapters:
+            ch.read_at = now
+        if chapters:
+            book.last_read_chapter = max(ch.number for ch in chapters)
+
+    db.commit()
+    return {"id": book_id, "reading_status": book.reading_status}
 
 
 # ============================================================================
