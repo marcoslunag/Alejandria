@@ -608,9 +608,14 @@ class ArchiveHandler(FileSystemEventHandler):
             volume_folders = self._detect_volume_folders(temp_extract_dir)
 
             if len(volume_folders) > 1:
-                # Hay múltiples tomos - convertir cada uno por separado
                 logger.info(f"📚 Detected {len(volume_folders)} separate volumes in archive: {sorted(volume_folders.keys())}")
-                return self._create_volume_cbzs(file_path.stem, volume_folders, metadata)
+                if min_parts <= 1:
+                    return self._create_volume_cbzs(file_path.stem, volume_folders, metadata)
+                else:
+                    # Retry with splitting: each volume gets split into parts
+                    parts_per_volume = max(2, min_parts // len(volume_folders))
+                    logger.info(f"Splitting each of {len(volume_folders)} volumes into ~{parts_per_volume} parts")
+                    return self._create_volume_cbzs_split(file_path.stem, volume_folders, metadata, parts_per_volume)
 
             # Si solo hay un tomo o no hay estructura de carpetas, proceder normal
             # Colectar imágenes válidas con sus tamaños
@@ -784,6 +789,72 @@ class ArchiveHandler(FileSystemEventHandler):
             vol_size = sum(p.stat().st_size for p, _ in image_files) / (1024 * 1024)
             logger.info(f"📖 Created volume {vol_num}: {clean_cbz_path.name} ({len(final_images)} images, ~{vol_size:.1f}MB)")
             result_paths.append(clean_cbz_path)
+
+        return result_paths
+
+    def _create_volume_cbzs_split(self, stem: str, volume_folders: dict, metadata: dict = None, parts_per_volume: int = 2) -> list[Path]:
+        """
+        Like _create_volume_cbzs, but splits each volume into multiple parts
+        so the converted EPUB stays under MAX_OUTPUT_SIZE_MB.
+        """
+        import re
+        result_paths = []
+
+        base_name = stem
+        base_name = re.sub(r'\s*\[?\d+\s*-\s*\d+\]?\s*$', '', base_name).strip()
+        base_name = re.sub(r'\s*-?\s*tomo\s*\d+\s*$', '', base_name, flags=re.IGNORECASE).strip()
+        base_name = re.sub(r'\s*tomos?\s*$', '', base_name, flags=re.IGNORECASE).strip()
+        base_name = base_name.rstrip(' -')
+
+        for vol_num in sorted(volume_folders.keys()):
+            vol_data = volume_folders[vol_num]
+            image_files = vol_data['images']
+            if not image_files:
+                continue
+
+            images_per_part = max(10, len(image_files) // parts_per_volume)
+            actual_parts = (len(image_files) + images_per_part - 1) // images_per_part
+
+            for part_idx in range(actual_parts):
+                start = part_idx * images_per_part
+                end = min(start + images_per_part, len(image_files))
+                part_images = image_files[start:end]
+
+                vol_name = f"{base_name} - Tomo {vol_num:03d} - Parte {part_idx + 1}"
+                clean_cbz_path = Path(tempfile.gettempdir()) / f"{vol_name}.clean.cbz"
+                if clean_cbz_path.exists():
+                    clean_cbz_path.unlink()
+
+                seen_names = set()
+                final_images = []
+                for img_path, _ in part_images:
+                    name = img_path.name
+                    counter = 1
+                    original_name = name
+                    while name in seen_names:
+                        s = Path(original_name).stem
+                        suffix = Path(original_name).suffix
+                        name = f"{s}_{counter:03d}{suffix}"
+                        counter += 1
+                    seen_names.add(name)
+                    final_images.append((img_path, name))
+
+                with zipfile.ZipFile(clean_cbz_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    if metadata:
+                        try:
+                            vol_metadata = metadata.copy()
+                            vol_metadata['volume_number'] = vol_num
+                            vol_metadata['chapter_title'] = f"Tomo {vol_num}"
+                            comicinfo_xml = generate_comicinfo_xml(vol_metadata, part_number=part_idx + 1)
+                            zf.writestr("ComicInfo.xml", comicinfo_xml)
+                        except Exception as e:
+                            logger.warning(f"Could not generate ComicInfo.xml: {e}")
+                    for src_path, arc_name in final_images:
+                        zf.write(src_path, arc_name)
+
+                part_size = sum(p.stat().st_size for p, _ in part_images) / (1024 * 1024)
+                logger.info(f"📖 Created volume {vol_num} part {part_idx + 1}/{actual_parts}: {clean_cbz_path.name} ({len(final_images)} images, ~{part_size:.1f}MB)")
+                result_paths.append(clean_cbz_path)
 
         return result_paths
 
