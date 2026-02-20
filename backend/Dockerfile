@@ -55,8 +55,8 @@ RUN chmod +x start.sh
 
 # Create non-root user and set up directories with correct ownership
 RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser && \
-    mkdir -p /downloads /library /library/kindle && \
-    chown -R appuser:appuser /downloads /library /app /ms-playwright
+    mkdir -p /downloads /library /library/kindle /imports /app/data && \
+    chown -R appuser:appuser /downloads /library /imports /app /app/data /ms-playwright
 
 USER appuser
 

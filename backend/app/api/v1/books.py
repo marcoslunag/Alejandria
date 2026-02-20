@@ -243,7 +243,7 @@ async def get_library_stats(db: Session = Depends(get_db), current_user: User = 
     """
     Get library statistics
     """
-    user_book_ids = db.query(Book.id).filter(Book.user_id == current_user.id).subquery()
+    user_book_ids = db.query(Book.id).filter(Book.user_id == current_user.id).scalar_subquery()
     total_books = db.query(Book).filter(Book.user_id == current_user.id).count()
     monitored_books = db.query(Book).filter(Book.user_id == current_user.id, Book.monitored == True).count()
 

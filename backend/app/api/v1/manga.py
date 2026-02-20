@@ -538,7 +538,7 @@ def get_library_stats(db: Session = Depends(get_db), current_user: User = Depend
     """
     Get overall library statistics
     """
-    user_manga_ids = db.query(Manga.id).filter(Manga.user_id == current_user.id).subquery()
+    user_manga_ids = db.query(Manga.id).filter(Manga.user_id == current_user.id).scalar_subquery()
     total_manga = db.query(func.count(Manga.id)).filter(Manga.user_id == current_user.id).scalar()
     monitored = db.query(func.count(Manga.id)).filter(Manga.user_id == current_user.id, Manga.monitored == True).scalar()
     total_chapters = db.query(func.count(Chapter.id)).filter(Chapter.manga_id.in_(user_manga_ids)).scalar()

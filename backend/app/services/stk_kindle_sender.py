@@ -15,6 +15,7 @@ import stkclient
 logger = logging.getLogger(__name__)
 
 DATA_DIR = Path("/app/data")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _client_file(user_id: int) -> Path:
@@ -50,10 +51,13 @@ class STKKindleSender:
     def _save_client(self):
         """Save client to file for future sessions"""
         if self.client:
-            f = _client_file(self.user_id)
-            f.parent.mkdir(parents=True, exist_ok=True)
-            f.write_text(self.client.dumps())
-            logger.info(f"Saved STK session for user {self.user_id}")
+            try:
+                f = _client_file(self.user_id)
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text(self.client.dumps())
+                logger.info(f"Saved STK session for user {self.user_id}")
+            except Exception as e:
+                logger.error(f"Failed to persist STK session for user {self.user_id}: {e}")
 
     def is_authenticated(self) -> bool:
         return self.client is not None
@@ -70,12 +74,13 @@ class STKKindleSender:
 
         try:
             self.client = self.oauth.create_client(redirect_url)
-            self._save_client()
-            logger.info(f"STK authorization completed for user {self.user_id}")
-            return True
         except Exception as e:
             logger.error(f"STK authorization failed for user {self.user_id}: {e}")
             return False
+
+        self._save_client()
+        logger.info(f"STK authorization completed for user {self.user_id}")
+        return True
 
     def _is_token_expired_error(self, error_message: str) -> bool:
         error_str = str(error_message).lower()

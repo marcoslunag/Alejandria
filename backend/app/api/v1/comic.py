@@ -552,7 +552,7 @@ async def get_stats(db: Session = Depends(get_db), current_user: User = Depends(
     """
     Get comic library statistics
     """
-    user_comic_ids = db.query(Comic.id).filter(Comic.user_id == current_user.id).subquery()
+    user_comic_ids = db.query(Comic.id).filter(Comic.user_id == current_user.id).scalar_subquery()
     total_comics = db.query(func.count(Comic.id)).filter(Comic.user_id == current_user.id).scalar()
     monitored_comics = db.query(func.count(Comic.id)).filter(Comic.user_id == current_user.id, Comic.monitored == True).scalar()
     total_issues = db.query(func.count(ComicIssue.id)).filter(ComicIssue.comic_id.in_(user_comic_ids)).scalar()

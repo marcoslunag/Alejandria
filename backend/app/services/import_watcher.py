@@ -116,7 +116,10 @@ class ImportWatcher:
 
     def _ensure_dirs(self):
         for d in [self.import_dir, self.processed_dir, self.failed_dir]:
-            d.mkdir(parents=True, exist_ok=True)
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                logger.warning(f"Cannot create {d} (permission denied) — skipping")
 
     async def process_import_queue(self):
         """Escanea /imports y procesa archivos pendientes."""
@@ -250,25 +253,37 @@ class ImportWatcher:
         """Devuelve el estado de la carpeta /imports."""
         self._ensure_dirs()
 
-        pending = [
-            f.name for f in self.import_dir.iterdir()
-            if f.is_file() and f.suffix.lower() in SUPPORTED_EXT
-        ]
-        processed = sorted(
-            [f.name for f in self.processed_dir.iterdir() if f.is_file()],
-            reverse=True
-        )[:20]
-        failed = sorted(
-            [f.name for f in self.failed_dir.iterdir() if f.is_file()],
-            reverse=True
-        )[:20]
+        pending = []
+        if self.import_dir.exists():
+            pending = [
+                f.name for f in self.import_dir.iterdir()
+                if f.is_file() and f.suffix.lower() in SUPPORTED_EXT
+            ]
+
+        processed = []
+        processed_total = 0
+        if self.processed_dir.exists():
+            processed = sorted(
+                [f.name for f in self.processed_dir.iterdir() if f.is_file()],
+                reverse=True
+            )[:20]
+            processed_total = sum(1 for f in self.processed_dir.iterdir() if f.is_file())
+
+        failed = []
+        failed_total = 0
+        if self.failed_dir.exists():
+            failed = sorted(
+                [f.name for f in self.failed_dir.iterdir() if f.is_file()],
+                reverse=True
+            )[:20]
+            failed_total = sum(1 for f in self.failed_dir.iterdir() if f.is_file())
 
         return {
             'import_dir': str(self.import_dir),
             'pending': pending,
             'pending_count': len(pending),
             'processed': processed,
-            'processed_count': sum(1 for f in self.processed_dir.iterdir() if f.is_file()),
+            'processed_count': processed_total,
             'failed': failed,
-            'failed_count': sum(1 for f in self.failed_dir.iterdir() if f.is_file()),
+            'failed_count': failed_total,
         }

@@ -863,7 +863,7 @@ def get_queue_stats(db: Session = Depends(get_db), current_user: User = Depends(
     from sqlalchemy import func
 
     # Count from chapters table - only real activity for this user
-    user_manga_ids = db.query(Manga.id).filter(Manga.user_id == current_user.id).subquery()
+    user_manga_ids = db.query(Manga.id).filter(Manga.user_id == current_user.id).scalar_subquery()
 
     downloading = db.query(func.count(Chapter.id)).filter(
         Chapter.manga_id.in_(user_manga_ids),
