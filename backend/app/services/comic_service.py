@@ -1800,6 +1800,7 @@ async def search_scrapers_for_comic(comic_id: int, title: str):
                                             logger.info(f"DEBUG: Backup URL also assigned")
 
                                     logger.info(f"Found verified link for {title} #{issue_num} on {scraper.name}")
+                                    db.commit()
                                     found_link = True
                                     break
                                 else:

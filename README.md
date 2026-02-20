@@ -281,6 +281,34 @@ docker volume prune
 
 ---
 
+## Tests
+
+El proyecto incluye tests de integracion que verifican scrapers, servicios de metadata, resolvers y downloaders contra los servicios reales.
+
+```bash
+# Tests de scrapers/downloaders (requiere servicios externos accesibles)
+docker exec alejandria-backend python -m pytest tests/test_scrapers.py -v
+
+# Tests unitarios del backend (auth, library, reading status, etc.)
+docker exec alejandria-backend python -m pytest tests/ -v
+
+# Solo una suite concreta
+docker exec alejandria-backend python -m pytest tests/test_auth.py -v
+```
+
+| Suite | Que cubre |
+|---|---|
+| `test_scrapers.py` | TomosManga, MangayComics, Lectulandia, CBRComics, MegaComics, AniList, GoogleBooks, ComicVine, OUO.io, TeraBox, MangaDownloader, HostManager, ContentMatcher, Translator |
+| `test_auth.py` | Login, registro, JWT, rate limiting |
+| `test_library.py` | CRUD de manga, comics y libros |
+| `test_reading_status.py` | Estados de lectura (read/reading/unread) |
+| `test_health.py` | Health check del backend |
+| `test_recommendations.py` | Motor de recomendaciones locales |
+
+> **Nota:** Los tests de `test_scrapers.py` dependen de servicios externos (OUO.io, TeraBox, AniList, etc.) y pueden fallar si esos servicios estan caidos o bloqueando. ComicVine requiere `COMICVINE_API_KEY` configurada.
+
+---
+
 ## Estructura del proyecto
 
 ```
@@ -300,6 +328,7 @@ alejandria/
 │   │   └── core/
 │   │       ├── security.py        # JWT, bcrypt
 │   │       └── deps.py            # FastAPI dependencies
+│   ├── tests/                 # Tests (pytest): scrapers, auth, library, etc.
 │   └── Dockerfile
 ├── frontend/
 │   └── src/

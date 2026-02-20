@@ -4,7 +4,7 @@ Represents a manga series being monitored
 Enhanced with Anilist metadata integration
 """
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float, JSON, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -14,20 +14,24 @@ class Manga(Base):
     """Manga model for storing manga series information with Anilist metadata"""
 
     __tablename__ = "manga"
+    __table_args__ = (
+        UniqueConstraint("user_id", "anilist_id", name="uq_manga_user_anilist"),
+        UniqueConstraint("user_id", "slug", name="uq_manga_user_slug"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Basic info
     title = Column(String(500), nullable=False, index=True)
-    slug = Column(String(255), unique=True, index=True)
+    slug = Column(String(255), index=True)
 
     # Download source (TomosManga, etc.)
-    source_url = Column(String(500))  # URL where to download from
-    source_type = Column(String(50), default='tomosmanga')  # Source identifier
+    source_url = Column(String(500))
+    source_type = Column(String(50), default='tomosmanga')
 
     # Anilist integration (metadata source)
-    anilist_id = Column(Integer, unique=True, index=True)  # Anilist ID
+    anilist_id = Column(Integer, index=True)
     mal_id = Column(Integer)  # MyAnimeList ID
 
     # Titles (multiple languages)

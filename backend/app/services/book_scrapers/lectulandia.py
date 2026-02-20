@@ -32,83 +32,75 @@ class LectulandiaScraper(BookScraperBase):
             search_url = f"{self.base_url}/page/{page}/?s={query}"
 
             page_obj = await playwright_scraper._create_page()
-            await page_obj.goto(search_url, wait_until='networkidle', timeout=30000)
-            await asyncio.sleep(2)  # Wait for JS to load
-
-            # Get all book links
-            book_links = await page_obj.query_selector_all('a[href*="/book/"]')
-            logger.info(f"Found {len(book_links)} book links")
-
-            results = []
-            seen_urls = set()
-
-            for idx, link in enumerate(book_links):
+            try:
                 try:
-                    href = await link.get_attribute('href')
-                    if not href or '/book/' not in href:
-                        logger.debug(f"Link {idx}: Skipped - no href or '/book/' not in href")
-                        continue
+                    await page_obj.goto(search_url, wait_until='domcontentloaded', timeout=30000)
+                except Exception:
+                    pass
+                await asyncio.sleep(3)
 
-                    # Skip non-book links
-                    if href == '/book/' or href.endswith('/autor/') or href.endswith('/serie/'):
-                        logger.debug(f"Link {idx}: Skipped - non-book link ({href})")
-                        continue
+                # Get all book links
+                book_links = await page_obj.query_selector_all('a[href*="/book/"]')
+                logger.info(f"Found {len(book_links)} book links")
 
-                    # Make URL absolute
-                    url = href if href.startswith('http') else f"{self.base_url}{href}"
+                results = []
+                seen_urls = set()
 
-                    # Get title FIRST (before checking duplicates)
-                    # Lectulandia has duplicate links: one without text (image link), one with text (title link)
-                    # We want to keep the one WITH text, so we get title first and skip if empty
-                    title = ''
+                for idx, link in enumerate(book_links):
                     try:
-                        title = (await link.text_content()) or ''
-                    except Exception as e:
-                        logger.debug(f"Link {idx}: Error getting text_content: {e}")
+                        href = await link.get_attribute('href')
+                        if not href or '/book/' not in href:
+                            continue
 
-                    title = title.strip()
+                        if href == '/book/' or href.endswith('/autor/') or href.endswith('/serie/'):
+                            continue
 
-                    # If no text, try to get from img alt attribute
-                    if not title:
+                        url = href if href.startswith('http') else f"{self.base_url}{href}"
+
+                        title = ''
                         try:
-                            img = await link.query_selector('img')
-                            if img:
-                                title = (await img.get_attribute('alt')) or ''
-                                title = title.strip()
-                        except Exception as e:
-                            logger.debug(f"Link {idx}: Error getting img alt: {e}")
+                            title = (await link.text_content()) or ''
+                        except Exception:
+                            pass
 
-                    # Skip if no title (these are usually image links that will have a duplicate title link)
-                    if not title:
-                        logger.debug(f"Link {idx}: Skipped - no title found for URL: {url}")
+                        title = title.strip()
+
+                        if not title:
+                            try:
+                                img = await link.query_selector('img')
+                                if img:
+                                    title = (await img.get_attribute('alt')) or ''
+                                    title = title.strip()
+                            except Exception:
+                                pass
+
+                        if not title:
+                            continue
+
+                        if url in seen_urls:
+                            continue
+                        seen_urls.add(url)
+
+                        img = await link.query_selector('img')
+                        cover = await img.get_attribute('src') if img else None
+
+                        logger.info(f"Link {idx}: Added - {title}")
+
+                        results.append({
+                            'title': title,
+                            'url': url,
+                            'cover': cover,
+                            'source': self.name
+                        })
+
+                    except Exception as e:
+                        logger.debug(f"Link {idx}: Error parsing link: {e}")
                         continue
 
-                    # NOW check for duplicates (after we know this link has a title)
-                    if url in seen_urls:
-                        logger.debug(f"Link {idx}: Skipped - duplicate URL ({url})")
-                        continue
-                    seen_urls.add(url)
-
-                    # Get cover
-                    img = await link.query_selector('img')
-                    cover = await img.get_attribute('src') if img else None
-
-                    logger.info(f"Link {idx}: Added - {title}")
-
-                    results.append({
-                        'title': title,
-                        'url': url,
-                        'cover': cover,
-                        'source': self.name
-                    })
-
-                except Exception as e:
-                    logger.debug(f"Link {idx}: Error parsing link: {e}")
-                    continue
-
-            await page_obj.close()
-            logger.info(f"Lectulandia: Found {len(results)} unique results")
-            return results
+                logger.info(f"Lectulandia: Found {len(results)} unique results")
+                return results
+            finally:
+                await page_obj.close()
 
         except Exception as e:
             logger.error(f"Lectulandia Playwright search error: {e}")

@@ -1,154 +1,115 @@
 """
 OUO.io Link Resolver
-Resuelve enlaces acortados de OUO.io para obtener el enlace final (generalmente Fireload)
-Usa la librería bypass-ouo para el bypass, con fallback manual
+Resuelve enlaces acortados de OUO.io para obtener el enlace final
+Usa Playwright para resolver el bypass de 2 pasos (JS-heavy anti-bot)
 """
 
 import asyncio
 import logging
 import re
-import time
 from typing import Optional, Dict
-from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
-# Thread pool para ejecutar bypass síncrono
-_executor = ThreadPoolExecutor(max_workers=2)
 
+async def _resolve_ouo_with_playwright(ouo_url: str) -> Optional[str]:
+    """
+    Resolve an OUO.io link using Playwright headless browser.
+    OUO.io requires real JS execution — libraries and curl_cffi get 403.
+    Uses the existing PlaywrightBookScraper singleton for browser management.
+    """
+    from app.services.book_scrapers.playwright_scraper import get_playwright_scraper
 
-def _bypass_ouo_manual(ouo_url: str) -> Optional[str]:
-    """
-    Bypass manual de OUO.io usando requests y curl_cffi
-    Fallback cuando la librería bypass-ouo falla
-    """
+    page = None
     try:
-        from curl_cffi import requests as cffi_requests
-        from bs4 import BeautifulSoup
-        import re
-        
-        logger.info(f"OUO: Trying manual bypass for {ouo_url}")
-        
-        session = cffi_requests.Session(impersonate="chrome110")
-        
-        # Primera petición para obtener el formulario
-        resp1 = session.get(ouo_url, timeout=30)
-        
-        if resp1.status_code != 200:
-            logger.warning(f"OUO: First request failed with {resp1.status_code}")
-            return None
-        
-        # Buscar el enlace final directamente en la respuesta
-        # A veces OUO.io tiene el enlace en un meta refresh o redirect
-        html = resp1.text
-        
-        # Buscar patrones comunes de redirección
-        patterns = [
-            r'href=["\']?(https?://(?:www\.)?fireload\.com[^"\'>\s]+)',
-            r'href=["\']?(https?://(?:www\.)?mediafire\.com[^"\'>\s]+)',
-            r'href=["\']?(https?://(?:www\.)?mega\.nz[^"\'>\s]+)',
-            r'href=["\']?(https?://[^"\'>\s]+\.rar[^"\'>\s]*)',
-            r'href=["\']?(https?://[^"\'>\s]+\.zip[^"\'>\s]*)',
-            r'action=["\']?(https?://[^"\'>\s]+)',
-            r'window\.location\s*=\s*["\']?(https?://[^"\'>\s]+)',
+        pw_scraper = await get_playwright_scraper()
+        page = await pw_scraper._create_page()
+        logger.info(f"OUO Playwright: Navigating to {ouo_url}")
+
+        await page.goto(ouo_url, wait_until='domcontentloaded', timeout=20000)
+        await asyncio.sleep(2)
+
+        current_url = page.url
+
+        if 'ouo.io' not in current_url and 'ouo.press' not in current_url:
+            logger.info(f"OUO Playwright: Direct redirect to {current_url[:80]}")
+            return current_url
+
+        # OUO.io 2-step form bypass
+        for step in range(2):
+            form = await page.query_selector('form#form-bypass')
+            if not form:
+                form = await page.query_selector('form')
+
+            if form:
+                await asyncio.sleep(6)
+
+                submit_btn = await page.query_selector(
+                    'input[type="submit"], button[type="submit"], '
+                    '.btn-main, #btn-main, a.btn'
+                )
+
+                if submit_btn:
+                    try:
+                        await submit_btn.click()
+                        await asyncio.sleep(3)
+                        try:
+                            await page.wait_for_load_state('networkidle', timeout=10000)
+                        except:
+                            pass
+                    except Exception as e:
+                        logger.debug(f"OUO Playwright: Click failed step {step+1}: {e}")
+
+                current_url = page.url
+                if 'ouo.io' not in current_url and 'ouo.press' not in current_url:
+                    logger.info(f"OUO Playwright: Resolved after step {step+1}: {current_url[:80]}")
+                    return current_url
+
+        # Fallback: search HTML for known host URLs
+        html_content = await page.content()
+        host_patterns = [
+            (r'https?://(?:www\.)?fireload\.com/[^\s"\'<>]+', 'fireload'),
+            (r'https?://(?:www\.)?mediafire\.com/[^\s"\'<>]+', 'mediafire'),
+            (r'https?://(?:www\.)?mega\.nz/[^\s"\'<>]+', 'mega'),
+            (r'https?://drive\.google\.com/[^\s"\'<>]+', 'gdrive'),
+            (r'https?://(?:www\.)?terabox\.com/[^\s"\'<>]+', 'terabox'),
+            (r'https?://1fichier\.com/[^\s"\'<>]+', '1fichier'),
         ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, html, re.IGNORECASE)
-            if match:
-                url = match.group(1)
-                if 'ouo.io' not in url.lower() and 'ouo.press' not in url.lower():
-                    logger.info(f"OUO: Found direct link via pattern: {url[:60]}...")
-                    return url
-        
-        # Si no encontramos el enlace directo, intentar el flujo normal
-        soup = BeautifulSoup(html, 'html.parser')
-        
-        # Buscar el formulario de bypass
-        form = soup.find('form', {'id': 'form-bypass'}) or soup.find('form')
-        
-        if form:
-            action = form.get('action', '')
-            if action and action.startswith('http') and 'ouo' not in action.lower():
-                logger.info(f"OUO: Found form action: {action[:60]}...")
-                return action
-            
-            # Intentar enviar el formulario
-            form_data = {}
-            for inp in form.find_all('input'):
-                name = inp.get('name')
-                value = inp.get('value', '')
-                if name:
-                    form_data[name] = value
-            
-            if form_data:
-                # Esperar un poco (OUO tiene un timer)
-                time.sleep(2)
-                
-                post_url = action if action.startswith('http') else ouo_url
-                resp2 = session.post(post_url, data=form_data, timeout=30, allow_redirects=True)
-                
-                if resp2.status_code == 200:
-                    # Buscar el enlace final en la respuesta
-                    final_html = resp2.text
-                    for pattern in patterns:
-                        match = re.search(pattern, final_html, re.IGNORECASE)
-                        if match:
-                            url = match.group(1)
-                            if 'ouo.io' not in url.lower():
-                                logger.info(f"OUO: Found link after form submit: {url[:60]}...")
-                                return url
-        
-        logger.warning(f"OUO: Manual bypass could not find final URL")
-        return None
-        
-    except Exception as e:
-        logger.error(f"OUO: Manual bypass error: {e}")
+
+        for pattern, host_name in host_patterns:
+            matches = re.findall(pattern, html_content)
+            if matches:
+                resolved = matches[0].rstrip('"\'')
+                logger.info(f"OUO Playwright: Found {host_name} in HTML: {resolved[:80]}")
+                return resolved
+
+        # Last resort: scan all anchor hrefs
+        page_links = await page.query_selector_all('a[href]')
+        for link in page_links:
+            href = await link.get_attribute('href')
+            if href and 'ouo' not in href.lower():
+                known_hosts = ['mega.nz', 'mediafire.com', 'drive.google.com',
+                               'terabox.com', '1fichier.com', 'fireload.com']
+                if any(h in href.lower() for h in known_hosts):
+                    logger.info(f"OUO Playwright: Found host link: {href[:80]}")
+                    return href
+
+        logger.warning(f"OUO Playwright: Could not resolve {ouo_url}, final URL: {page.url[:80]}")
         return None
 
-
-def _bypass_ouo_sync(ouo_url: str) -> Optional[str]:
-    """
-    Bypass de OUO.io usando la librería bypass-ouo
-    Ejecutado en thread pool porque es síncrono
-    Con fallback a método manual si la librería falla
-    """
-    # Primero intentar con la librería
-    try:
-        from bypass_ouo import bypass_ouo
-
-        logger.info(f"OUO: Bypassing {ouo_url}")
-        result = bypass_ouo(ouo_url)
-
-        logger.debug(f"OUO: Raw result: {result}")
-
-        # El resultado es un diccionario con 'bypassed_link'
-        if isinstance(result, dict):
-            bypassed = result.get('bypassed_link')
-            if bypassed and 'http' in bypassed:
-                logger.info(f"OUO: Bypass successful: {bypassed[:60]}...")
-                return bypassed
-        elif isinstance(result, str) and 'http' in result:
-            logger.info(f"OUO: Bypass successful (string): {result[:60]}...")
-            return result
-
-        logger.warning(f"OUO: Library returned invalid result: {result}")
-
+    except asyncio.TimeoutError:
+        logger.warning(f"OUO Playwright: Timeout resolving {ouo_url}")
+        return None
     except Exception as e:
-        logger.error(f"OUO: Library bypass error: {e}")
-    
-    # Fallback a método manual
-    logger.info(f"OUO: Trying manual fallback...")
-    return _bypass_ouo_manual(ouo_url)
+        logger.error(f"OUO Playwright: Error resolving {ouo_url}: {e}")
+        return None
+    finally:
+        if page:
+            await page.close()
 
 
 class OUOResolver:
-    """
-    Resolver para enlaces de OUO.io usando bypass-ouo
-    """
-
-    def __init__(self):
-        pass
+    """Resolver para enlaces de OUO.io usando Playwright"""
 
     async def resolve(self, ouo_url: str, timeout: int = 60000) -> Dict:
         """
@@ -163,18 +124,13 @@ class OUOResolver:
         """
         logger.info(f"OUO: Resolving {ouo_url}")
 
-        loop = asyncio.get_event_loop()
-
         try:
-            # Ejecutar el bypass síncrono en un thread pool
-            result = await loop.run_in_executor(
-                _executor,
-                _bypass_ouo_sync,
-                ouo_url
+            result = await asyncio.wait_for(
+                _resolve_ouo_with_playwright(ouo_url),
+                timeout=timeout / 1000
             )
 
             if result:
-                # Identificar el host
                 final_host = 'unknown'
                 result_lower = result.lower()
                 if 'fireload' in result_lower:
@@ -187,6 +143,8 @@ class OUOResolver:
                     final_host = '1fichier'
                 elif 'drive.google' in result_lower:
                     final_host = 'google_drive'
+                elif 'terabox' in result_lower:
+                    final_host = 'terabox'
 
                 logger.info(f"OUO: Successfully resolved to {final_host}: {result}")
                 return {
@@ -197,6 +155,9 @@ class OUOResolver:
 
             return {"ok": False, "error": "No se pudo resolver el enlace de OUO.io"}
 
+        except asyncio.TimeoutError:
+            logger.error(f"OUO: Global timeout ({timeout}ms) resolving {ouo_url}")
+            return {"ok": False, "error": f"Timeout after {timeout}ms"}
         except Exception as e:
             logger.error(f"OUO: Error: {e}")
             return {"ok": False, "error": str(e)}

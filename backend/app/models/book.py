@@ -4,7 +4,7 @@ Represents a book or book series being monitored
 Integrated with Google Books/Open Library for metadata
 """
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float, JSON, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -14,16 +14,20 @@ class Book(Base):
     """Book model for storing book information with metadata"""
 
     __tablename__ = "books"
+    __table_args__ = (
+        UniqueConstraint("user_id", "google_books_id", name="uq_book_user_googlebooks"),
+        UniqueConstraint("user_id", "slug", name="uq_book_user_slug"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Basic info
     title = Column(String(500), nullable=False, index=True)
-    slug = Column(String(255), unique=True, index=True)
+    slug = Column(String(255), index=True)
 
     # Metadata source integration
-    google_books_id = Column(String(100), unique=True, index=True)  # Google Books volume ID
+    google_books_id = Column(String(100), index=True)
     openlibrary_id = Column(String(100), index=True)  # Open Library work ID
     isbn_10 = Column(String(20))  # ISBN-10
     isbn_13 = Column(String(20), index=True)  # ISBN-13

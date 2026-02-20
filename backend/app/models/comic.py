@@ -4,7 +4,7 @@ Represents a comic series (American comics) being monitored
 Integrated with ComicVine API for metadata
 """
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float, JSON, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -14,16 +14,20 @@ class Comic(Base):
     """Comic model for storing comic series information with ComicVine metadata"""
 
     __tablename__ = "comics"
+    __table_args__ = (
+        UniqueConstraint("user_id", "comicvine_id", name="uq_comic_user_comicvine"),
+        UniqueConstraint("user_id", "slug", name="uq_comic_user_slug"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Basic info
     title = Column(String(500), nullable=False, index=True)
-    slug = Column(String(255), unique=True, index=True)
+    slug = Column(String(255), index=True)
 
     # ComicVine integration (metadata source)
-    comicvine_id = Column(Integer, unique=True, index=True)  # ComicVine volume ID
+    comicvine_id = Column(Integer, index=True)
     
     # Titles
     title_original = Column(String(500))  # Original title
