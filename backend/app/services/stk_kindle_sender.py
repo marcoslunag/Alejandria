@@ -8,14 +8,28 @@ Each user has their own isolated STK session stored at /app/data/stk_{user_id}.j
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import stkclient
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path("/app/data")
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+def _init_data_dir() -> Path:
+    primary = Path(os.environ.get("STK_DATA_DIR", "/app/data"))
+    try:
+        primary.mkdir(parents=True, exist_ok=True)
+        test_file = primary / ".write_test"
+        test_file.write_text("ok")
+        test_file.unlink()
+        return primary
+    except (PermissionError, OSError):
+        fallback = Path("/tmp/stk_data")
+        fallback.mkdir(parents=True, exist_ok=True)
+        logger.warning(f"Cannot write to {primary}, using fallback {fallback}")
+        return fallback
+
+DATA_DIR = _init_data_dir()
 
 
 def _client_file(user_id: int) -> Path:

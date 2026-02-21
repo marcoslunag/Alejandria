@@ -496,3 +496,13 @@ class AnilistService:
         except Exception as e:
             logger.error(f"Error fetching popular manga: {e}")
             return []
+
+
+_anilist_service = None
+
+
+def get_anilist_service() -> AnilistService:
+    global _anilist_service
+    if _anilist_service is None:
+        _anilist_service = AnilistService()
+    return _anilist_service

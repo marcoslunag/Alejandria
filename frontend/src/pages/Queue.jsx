@@ -14,9 +14,10 @@ import {
   FaSpinner,
   FaStop,
   FaBook,
-  FaBookReader,
-  FaMask,
-  FaCircle,
+    FaBookReader,
+    FaMask,
+    FaCircle,
+    FaCog,
 } from 'react-icons/fa';
 
 const Queue = () => {
@@ -173,6 +174,8 @@ const Queue = () => {
     switch (status) {
       case 'downloading':
         return <FaSpinner className="animate-spin text-blue-500" />;
+      case 'converting':
+        return <FaCog className="animate-spin text-purple-500" />;
       case 'completed':
         return <FaCheckCircle className="text-green-500" />;
       case 'failed':
@@ -185,6 +188,7 @@ const Queue = () => {
   const getStatusText = (status) => {
     const map = {
       'downloading': 'Descargando',
+      'converting': 'Convirtiendo',
       'completed': 'Completado',
       'failed': 'Error'
     };
@@ -236,9 +240,9 @@ const Queue = () => {
     };
   };
 
-  // Calcular stats del queue actual (solo actividad real)
   const stats = {
     downloading: queue.filter(d => d.status === 'downloading').length,
+    converting: queue.filter(d => d.status === 'converting').length,
     completed: queue.filter(d => d.status === 'completed').length,
     failed: queue.filter(d => d.status === 'failed').length
   };
@@ -299,13 +303,22 @@ const Queue = () => {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <div className="card p-4 border-l-4 border-blue-500">
             <div className="flex items-center gap-3">
               <FaSpinner className={`text-blue-500 text-xl ${stats.downloading > 0 ? 'animate-spin' : ''}`} />
               <div>
                 <p className="text-gray-400 text-sm">Descargando</p>
                 <p className="text-2xl font-bold">{stats.downloading}</p>
+              </div>
+            </div>
+          </div>
+          <div className="card p-4 border-l-4 border-purple-500">
+            <div className="flex items-center gap-3">
+              <FaCog className={`text-purple-500 text-xl ${stats.converting > 0 ? 'animate-spin' : ''}`} />
+              <div>
+                <p className="text-gray-400 text-sm">Convirtiendo</p>
+                <p className="text-2xl font-bold">{stats.converting}</p>
               </div>
             </div>
           </div>
@@ -334,7 +347,7 @@ const Queue = () => {
           {/* Filtro por estado */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-gray-400">Estado:</span>
-            {['all', 'downloading', 'completed', 'failed'].map((f) => (
+            {['all', 'downloading', 'converting', 'completed', 'failed'].map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -404,7 +417,8 @@ const Queue = () => {
             const info = getItemInfo(item);
             const IconComponent = info.icon;
             const ringColorMap = { emerald: 'ring-emerald-500', red: 'ring-red-500', blue: 'ring-blue-500' };
-            const ringColor = item.status === 'downloading' ? (ringColorMap[info.accentColor] || 'ring-blue-500') : '';
+            const ringColor = item.status === 'downloading' ? (ringColorMap[info.accentColor] || 'ring-blue-500')
+              : item.status === 'converting' ? 'ring-purple-500' : '';
             const badgeColorMap = { emerald: 'bg-emerald-500', red: 'bg-red-500', blue: 'bg-primary' };
             const badgeColor = badgeColorMap[info.accentColor] || 'bg-primary';
 
@@ -412,7 +426,7 @@ const Queue = () => {
               <div
                 key={item.id}
                 className={`card p-4 transition-all ${
-                  item.status === 'downloading' ? `ring-2 ${ringColor}` : ''
+                  (item.status === 'downloading' || item.status === 'converting') ? `ring-2 ${ringColor}` : ''
                 }`}
               >
                 <div className="flex items-center gap-4">
@@ -455,7 +469,6 @@ const Queue = () => {
                       <span className="text-gray-400">{info.itemLabel} {info.isComic ? `#${info.itemNumber}` : info.itemNumber}</span>
                     </div>
 
-                    {/* Barra de progreso para downloading */}
                     {item.status === 'downloading' && (
                       <div className="mt-2">
                         <div className="w-full bg-gray-700 rounded-full h-2">
@@ -465,6 +478,12 @@ const Queue = () => {
                           />
                         </div>
                         <p className="text-xs text-gray-500 mt-1">{item.progress || 0}%</p>
+                      </div>
+                    )}
+                    {item.status === 'converting' && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <FaCog className="animate-spin text-purple-500 text-xs" />
+                        <span className="text-xs text-purple-400">Convirtiendo a EPUB para Kindle...</span>
                       </div>
                     )}
 

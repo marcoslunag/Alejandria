@@ -610,12 +610,36 @@ class ArchiveHandler(FileSystemEventHandler):
             if len(volume_folders) > 1:
                 logger.info(f"📚 Detected {len(volume_folders)} separate volumes in archive: {sorted(volume_folders.keys())}")
                 if min_parts <= 1:
-                    return self._create_volume_cbzs(file_path.stem, volume_folders, metadata)
-                else:
-                    # Retry with splitting: each volume gets split into parts
-                    parts_per_volume = max(2, min_parts // len(volume_folders))
-                    logger.info(f"Splitting each of {len(volume_folders)} volumes into ~{parts_per_volume} parts")
-                    return self._create_volume_cbzs_split(file_path.stem, volume_folders, metadata, parts_per_volume)
+                    # First attempt: check if any volume is large enough to need splitting
+                    is_comic = bool(metadata and (metadata.get('comicvine_id') or metadata.get('publisher')))
+                    size_factor = 2.5 if is_comic else 1.3
+                    needs_split = False
+                    for vol_num, vol_data in volume_folders.items():
+                        vol_size_mb = sum(s for _, s in vol_data['images']) / (1024 * 1024)
+                        estimated_epub = vol_size_mb * size_factor
+                        if estimated_epub > MAX_OUTPUT_SIZE_MB:
+                            needs_split = True
+                            break
+                    if not needs_split:
+                        return self._create_volume_cbzs(file_path.stem, volume_folders, metadata)
+                    logger.info(f"Some volumes estimated to exceed {MAX_OUTPUT_SIZE_MB}MB, splitting proactively")
+
+                # Split each volume based on its estimated output size
+                is_comic = bool(metadata and (metadata.get('comicvine_id') or metadata.get('publisher')))
+                size_factor = 2.5 if is_comic else 1.3
+                per_volume_parts = {}
+                for vol_num, vol_data in volume_folders.items():
+                    vol_size_mb = sum(s for _, s in vol_data['images']) / (1024 * 1024)
+                    estimated_epub = vol_size_mb * size_factor
+                    parts_needed = max(1, int(estimated_epub / MAX_OUTPUT_SIZE_MB) + 1)
+                    if min_parts > 1:
+                        parts_needed = max(parts_needed, max(2, min_parts // len(volume_folders)))
+                    per_volume_parts[vol_num] = parts_needed
+                    logger.info(f"Volume {vol_num}: {vol_size_mb:.0f}MB raw -> ~{estimated_epub:.0f}MB EPUB -> {parts_needed} parts")
+
+                max_parts = max(per_volume_parts.values())
+                logger.info(f"Splitting volumes into up to {max_parts} parts each")
+                return self._create_volume_cbzs_split(file_path.stem, volume_folders, metadata, max_parts)
 
             # Si solo hay un tomo o no hay estructura de carpetas, proceder normal
             # Colectar imágenes válidas con sus tamaños

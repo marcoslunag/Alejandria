@@ -49,9 +49,9 @@ def list_queue(
     Returns:
         List of chapters with download activity
     """
-    # Map frontend status to chapter status
     status_map = {
         'downloading': ['downloading'],
+        'converting': ['converting'],
         'completed': ['downloaded', 'converted', 'sent'],
         'failed': ['error']
     }
@@ -71,14 +71,15 @@ def list_queue(
         chapter_statuses = status_map.get(status, [status])
         manga_query = manga_query.filter(Chapter.status.in_(chapter_statuses))
     else:
-        manga_query = manga_query.filter(Chapter.status.in_(['downloading', 'downloaded', 'converted', 'sent', 'error']))
+        manga_query = manga_query.filter(Chapter.status.in_(['downloading', 'converting', 'downloaded', 'converted', 'sent', 'error']))
 
     from sqlalchemy import case, desc
     manga_query = manga_query.order_by(
         case(
             (Chapter.status == 'downloading', 0),
-            (Chapter.status == 'error', 1),
-            else_=2
+            (Chapter.status == 'converting', 1),
+            (Chapter.status == 'error', 2),
+            else_=3
         ),
         desc(Chapter.downloaded_at),
         desc(Chapter.created_at)
@@ -86,11 +87,11 @@ def list_queue(
 
     manga_chapters = manga_query.all()
 
-    # Format manga chapters
     for chapter in manga_chapters:
         manga = chapter.manga
         queue_status = {
             'downloading': 'downloading',
+            'converting': 'converting',
             'pending': 'pending',
             'downloaded': 'completed',
             'converted': 'completed',
@@ -132,13 +133,14 @@ def list_queue(
         chapter_statuses = status_map.get(status, [status])
         book_query = book_query.filter(BookChapter.status.in_(chapter_statuses))
     else:
-        book_query = book_query.filter(BookChapter.status.in_(['downloading', 'downloaded', 'converted', 'sent', 'error']))
+        book_query = book_query.filter(BookChapter.status.in_(['downloading', 'converting', 'downloaded', 'converted', 'sent', 'error']))
 
     book_query = book_query.order_by(
         case(
             (BookChapter.status == 'downloading', 0),
-            (BookChapter.status == 'error', 1),
-            else_=2
+            (BookChapter.status == 'converting', 1),
+            (BookChapter.status == 'error', 2),
+            else_=3
         ),
         desc(BookChapter.downloaded_at),
         desc(BookChapter.created_at)
@@ -146,11 +148,11 @@ def list_queue(
 
     book_chapters = book_query.all()
 
-    # Format book chapters
     for chapter in book_chapters:
         book = chapter.book
         queue_status = {
             'downloading': 'downloading',
+            'converting': 'converting',
             'pending': 'pending',
             'downloaded': 'completed',
             'converted': 'completed',
@@ -192,13 +194,14 @@ def list_queue(
         chapter_statuses = status_map.get(status, [status])
         comic_query = comic_query.filter(ComicIssue.status.in_(chapter_statuses))
     else:
-        comic_query = comic_query.filter(ComicIssue.status.in_(['downloading', 'downloaded', 'converted', 'sent', 'error']))
+        comic_query = comic_query.filter(ComicIssue.status.in_(['downloading', 'converting', 'downloaded', 'converted', 'sent', 'error']))
 
     comic_query = comic_query.order_by(
         case(
             (ComicIssue.status == 'downloading', 0),
-            (ComicIssue.status == 'error', 1),
-            else_=2
+            (ComicIssue.status == 'converting', 1),
+            (ComicIssue.status == 'error', 2),
+            else_=3
         ),
         desc(ComicIssue.downloaded_at),
         desc(ComicIssue.created_at)
@@ -206,11 +209,11 @@ def list_queue(
 
     comic_issues = comic_query.all()
 
-    # Format comic issues
     for issue in comic_issues:
         comic = issue.comic
         queue_status = {
             'downloading': 'downloading',
+            'converting': 'converting',
             'pending': 'pending',
             'downloaded': 'completed',
             'converted': 'completed',

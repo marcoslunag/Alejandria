@@ -46,10 +46,13 @@ services:
       - DISABLE_SCHEDULER=true
       # Import folder for external files (Feature 5)
       - IMPORT_DIR=/imports
+      # STK data directory (outside /app to survive bind mount)
+      - STK_DATA_DIR=/stk-data
     volumes:
       - downloads:/downloads
       - library:/library
       - imports:/imports
+      - stk_data:/stk-data
       - ./backend:/app
     ports:
       - "9878:7878"
@@ -149,6 +152,8 @@ volumes:
   library:
     driver: local
   imports:
+    driver: local
+  stk_data:
     driver: local
 
 networks:

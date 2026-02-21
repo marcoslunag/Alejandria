@@ -158,7 +158,7 @@ const Comics = () => {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => setShowSearch(!showSearch)}
+              onClick={() => navigate('/search')}
               className="btn bg-red-500 hover:bg-red-600 text-white flex items-center gap-2"
             >
               <FaSearch />
@@ -404,7 +404,7 @@ const Comics = () => {
             Busca y anade comics desde ComicVine usando el boton de busqueda
           </p>
           <button
-            onClick={() => setShowSearch(true)}
+            onClick={() => navigate('/search')}
             className="btn bg-red-500 hover:bg-red-600 text-white"
           >
             <FaSearch className="mr-2" />

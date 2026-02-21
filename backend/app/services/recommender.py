@@ -187,7 +187,7 @@ class LocalRecommender:
             if not query_parts:
                 return []
 
-            search_results = await gb.search_books(query_parts[0], max_results=10)
+            search_results = await gb.search_books(query_parts[0], per_page=10)
             results = []
             for item in search_results.get('results', []):
                 if item.get('google_books_id') not in profile['google_books_ids']:

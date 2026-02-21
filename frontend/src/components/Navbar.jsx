@@ -31,24 +31,29 @@ const Navbar = () => {
     return () => clearInterval(interval);
   }, [user, isAdmin]);
 
-  // Close notif dropdown on outside click
   useEffect(() => {
-    const handler = (e) => {
+    const handler = async (e) => {
       if (notifRef.current && !notifRef.current.contains(e.target)) {
+        if (notifOpen && notifCount > 0) {
+          try {
+            await notificationsApi.markSeen();
+            setNotifCount(0);
+          } catch {}
+        }
         setNotifOpen(false);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  }, [notifOpen, notifCount]);
 
   const handleNotifOpen = async () => {
+    const wasOpen = notifOpen;
     setNotifOpen(prev => !prev);
-    if (!notifOpen && notifCount > 0) {
+    if (wasOpen && notifCount > 0) {
       try {
         await notificationsApi.markSeen();
         setNotifCount(0);
-        setNotifItems([]);
       } catch {}
     }
   };

@@ -1064,13 +1064,50 @@ def _select_best_download_link(download_links: list) -> str:
     return sorted_links[0]['url'] if sorted_links else ""
 
 
+async def _resolve_ouo_link(url: str) -> tuple:
+    """
+    Resolve an ouo.io/ouo.press link to the final download URL.
+    Returns (resolved_url, host) or (original_url, 'unknown') if resolution fails.
+    """
+    if not url:
+        return url, 'unknown'
+
+    url_lower = url.lower()
+    if 'ouo.io' not in url_lower and 'ouo.press' not in url_lower:
+        return url, None
+
+    try:
+        from app.services.ouo_resolver import _resolve_ouo_with_playwright
+        logger.info(f"Manga: Resolving ouo.io link: {url}")
+        resolved = await _resolve_ouo_with_playwright(url)
+        if resolved and 'ouo.io' not in resolved.lower() and 'ouo.press' not in resolved.lower():
+            host = 'unknown'
+            resolved_lower = resolved.lower()
+            if 'mega.nz' in resolved_lower or 'mega.io' in resolved_lower:
+                host = 'MEGA'
+            elif 'mediafire.com' in resolved_lower:
+                host = 'MediaFire'
+            elif 'drive.google.com' in resolved_lower:
+                host = 'Google Drive'
+            elif 'terabox' in resolved_lower or '1024tera' in resolved_lower:
+                host = 'TeraBox'
+            elif 'fireload' in resolved_lower:
+                host = 'Fireload'
+            logger.info(f"Manga: Resolved ouo.io -> {host}: {resolved[:80]}")
+            return resolved, host
+        logger.warning(f"Manga: Could not resolve ouo.io link: {url}")
+    except Exception as e:
+        logger.error(f"Manga: Error resolving ouo.io link: {e}")
+
+    return url, None
+
+
 async def _fetch_chapters_from_source(manga_id: int, source_url: str):
     """Background task to fetch chapters from source"""
     from app.database import SessionLocal
 
     db = SessionLocal()
     try:
-        # Detect which scraper to use based on URL
         parsed_url = urlparse(source_url)
         domain = parsed_url.netloc.lower()
 
@@ -1082,7 +1119,6 @@ async def _fetch_chapters_from_source(manga_id: int, source_url: str):
             scraper = MangayComicsScraper()
             logger.info(f"Using MangayComics scraper for {source_url}")
         else:
-            # Default to TomosManga scraper
             scraper = TomosMangaScraper()
             logger.warning(f"Unknown domain {domain}, using TomosManga scraper as fallback")
 
@@ -1093,15 +1129,58 @@ async def _fetch_chapters_from_source(manga_id: int, source_url: str):
             return
 
         chapters_added = 0
+        ouo_links_to_resolve = []
+
         for ch_data in details['chapters']:
-            # Obtener URLs priorizadas del scraper (ya vienen procesadas)
             download_url = ch_data.get('download_url') or (
                 _select_best_download_link(ch_data.get('download_links', []))
             )
             backup_url = ch_data.get('backup_url')
             download_host = ch_data.get('download_host', 'unknown')
 
-            # Check if chapter already exists
+            if download_url and ('ouo.io' in download_url.lower() or 'ouo.press' in download_url.lower()):
+                ouo_links_to_resolve.append((ch_data['number'], download_url))
+
+            if backup_url and ('ouo.io' in backup_url.lower() or 'ouo.press' in backup_url.lower()):
+                ouo_links_to_resolve.append((f"backup_{ch_data['number']}", backup_url))
+
+        # Batch-resolve ouo.io links before saving
+        resolved_map = {}
+        if ouo_links_to_resolve:
+            logger.info(f"Manga: Resolving {len(ouo_links_to_resolve)} ouo.io links with Playwright...")
+            import asyncio
+            tasks = []
+            for key, ouo_url in ouo_links_to_resolve:
+                tasks.append((key, ouo_url, _resolve_ouo_link(ouo_url)))
+
+            results = await asyncio.gather(*[t[2] for t in tasks], return_exceptions=True)
+            for (key, original_url, _), result in zip(tasks, results):
+                if isinstance(result, Exception):
+                    logger.error(f"Manga: Failed to resolve {original_url}: {result}")
+                    continue
+                resolved_url, resolved_host = result
+                if resolved_url != original_url:
+                    resolved_map[original_url] = (resolved_url, resolved_host)
+
+            if resolved_map:
+                logger.info(f"Manga: Resolved {len(resolved_map)}/{len(ouo_links_to_resolve)} ouo.io links")
+
+        for ch_data in details['chapters']:
+            download_url = ch_data.get('download_url') or (
+                _select_best_download_link(ch_data.get('download_links', []))
+            )
+            backup_url = ch_data.get('backup_url')
+            download_host = ch_data.get('download_host', 'unknown')
+
+            # Apply resolved URLs
+            if download_url and download_url in resolved_map:
+                download_url, resolved_host = resolved_map[download_url]
+                if resolved_host:
+                    download_host = resolved_host
+
+            if backup_url and backup_url in resolved_map:
+                backup_url, _ = resolved_map[backup_url]
+
             existing = db.query(Chapter).filter(
                 and_(
                     Chapter.manga_id == manga_id,
@@ -1110,10 +1189,8 @@ async def _fetch_chapters_from_source(manga_id: int, source_url: str):
             ).first()
 
             if existing:
-                # Update URLs si los nuevos son mejores
                 updated = False
                 if download_url:
-                    # Actualizar si el nuevo URL es mejor o si no tenía
                     current_is_bad = existing.download_url and (
                         'terabox' in existing.download_url.lower() or
                         'ouo.io' in existing.download_url.lower()
@@ -1127,7 +1204,6 @@ async def _fetch_chapters_from_source(manga_id: int, source_url: str):
                         existing.download_host = download_host
                         updated = True
 
-                # Siempre actualizar backup si no existe
                 if backup_url and not existing.backup_url:
                     existing.backup_url = backup_url
                     updated = True

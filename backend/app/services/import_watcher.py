@@ -253,30 +253,25 @@ class ImportWatcher:
         """Devuelve el estado de la carpeta /imports."""
         self._ensure_dirs()
 
-        pending = []
-        if self.import_dir.exists():
-            pending = [
-                f.name for f in self.import_dir.iterdir()
-                if f.is_file() and f.suffix.lower() in SUPPORTED_EXT
-            ]
+        def _safe_list(directory, filter_fn=None):
+            try:
+                if not directory.exists():
+                    return []
+                files = [f.name for f in directory.iterdir() if f.is_file() and (not filter_fn or filter_fn(f))]
+                return files
+            except PermissionError:
+                logger.warning(f"Cannot read {directory} (permission denied)")
+                return []
 
-        processed = []
-        processed_total = 0
-        if self.processed_dir.exists():
-            processed = sorted(
-                [f.name for f in self.processed_dir.iterdir() if f.is_file()],
-                reverse=True
-            )[:20]
-            processed_total = sum(1 for f in self.processed_dir.iterdir() if f.is_file())
+        pending = _safe_list(self.import_dir, lambda f: f.suffix.lower() in SUPPORTED_EXT)
 
-        failed = []
-        failed_total = 0
-        if self.failed_dir.exists():
-            failed = sorted(
-                [f.name for f in self.failed_dir.iterdir() if f.is_file()],
-                reverse=True
-            )[:20]
-            failed_total = sum(1 for f in self.failed_dir.iterdir() if f.is_file())
+        processed_all = _safe_list(self.processed_dir)
+        processed = sorted(processed_all, reverse=True)[:20]
+        processed_total = len(processed_all)
+
+        failed_all = _safe_list(self.failed_dir)
+        failed = sorted(failed_all, reverse=True)[:20]
+        failed_total = len(failed_all)
 
         return {
             'import_dir': str(self.import_dir),

@@ -27,7 +27,7 @@ from app.schemas.book import (
 )
 from app.services.google_books import get_google_books_service
 from app.services.openlibrary import get_openlibrary_service
-from app.services.book_scrapers import LectulandiaScraper
+from app.services.book_scrapers import LectulandiaScraper, EpuberaScraper
 import logging
 from slugify import slugify
 from app.models.user import User
@@ -103,56 +103,75 @@ async def search_books(
                     'source': 'openlibrary'
                 })
 
-        # Search in scrapers
+        # Search in scrapers (parallel)
         scraper_results = []
-        # Maps normalized title → (source_name, source_url) for cross-referencing
         scraper_title_index: dict = {}
 
+        scraper_tasks = []
         if source in ["all", "scrapers", "lectulandia"]:
-            try:
-                lectulandia = LectulandiaScraper()
-                lect_results = await asyncio.wait_for(lectulandia.search(q, page=page), timeout=45.0)
+            scraper_tasks.append(("lectulandia", asyncio.wait_for(LectulandiaScraper().search(q, page=page), timeout=45.0)))
+        if source in ["all", "scrapers", "epubera"]:
+            scraper_tasks.append(("epubera", asyncio.wait_for(EpuberaScraper().search(q, page=page), timeout=30.0)))
 
-                for item in lect_results:
+        if scraper_tasks:
+            gathered = await asyncio.gather(
+                *[task for _, task in scraper_tasks],
+                return_exceptions=True
+            )
+
+            for (scraper_name, _), result in zip(scraper_tasks, gathered):
+                if isinstance(result, Exception):
+                    logger.error(f"{scraper_name} search error: {result}")
+                    continue
+
+                for item in (result or []):
+                    title_norm = item['title'].lower().strip()
+
+                    # If already indexed by another scraper, merge sources
+                    if title_norm in scraper_title_index:
+                        existing_src, existing_url = scraper_title_index[title_norm]
+                        scraper_title_index[title_norm] = (f"{existing_src},{scraper_name}", existing_url)
+                        for sr in scraper_results:
+                            if sr['title'].lower().strip() == title_norm:
+                                sr['scraper_sources'].append(scraper_name)
+                                break
+                        continue
+
+                    scraper_title_index[title_norm] = (scraper_name, item['url'])
+
                     in_library = db.query(Book).filter(
                         Book.title.ilike(f"%{item['title'][:40]}%"),
                         Book.user_id == current_user.id
                     ).first()
 
-                    title_norm = item['title'].lower().strip()
-                    scraper_title_index[title_norm] = ('lectulandia', item['url'])
-
                     scraper_results.append({
                         'title': item['title'],
                         'cover_image': item.get('cover'),
                         'thumbnail': item.get('cover'),
-                        'source': 'lectulandia',
+                        'source': scraper_name,
                         'source_url': item['url'],
-                        'scraper_sources': ['lectulandia'],
+                        'scraper_sources': [scraper_name],
                         'scraper_url': item['url'],
                         'in_library': bool(in_library),
                         'library_id': in_library.id if in_library else None,
-                        'authors': [],
+                        'authors': [item['author']] if item.get('author') else [],
                         'google_books_id': None,
                         'description': None,
                         'published_date': None,
                         'publisher': None,
                     })
-            except Exception as e:
-                logger.error(f"Lectulandia search error: {e}")
 
         # Cross-reference: annotate Google Books results with scraper availability
         for result in results:
             title_key = result['title'].lower().strip()
-            matched_source = None
+            matched_sources = []
             matched_url = None
-            # Fuzzy: check 30-char prefix match against scraper titles
-            for lect_title, (src_name, src_url) in scraper_title_index.items():
-                if title_key[:35] in lect_title or lect_title[:35] in title_key:
-                    matched_source = src_name
+            for scraper_title, (src_names, src_url) in scraper_title_index.items():
+                if title_key[:35] in scraper_title or scraper_title[:35] in title_key:
+                    matched_sources = [s for s in src_names.split(",") if s]
                     matched_url = src_url
                     break
-            result['scraper_sources'] = [matched_source] if matched_source else []
+            result['scraper_sources'] = matched_sources
             result['scraper_url'] = matched_url
 
         # Add scraper results (as separate cards when not found via Google Books)
@@ -401,14 +420,8 @@ async def add_book_from_url(
     Add book from scraper URL directly
     """
     # Detect scraper from URL
-    scrapers = {
-        'epubera': EpuberaScraper(),
-        'lectulandia': LectulandiaScraper()
-    }
-
     scraper_name = data.scraper_name
     if not scraper_name:
-        # Auto-detect from URL
         if 'epubera.com' in data.source_url:
             scraper_name = 'epubera'
         elif 'lectulandia' in data.source_url:
@@ -416,9 +429,15 @@ async def add_book_from_url(
         else:
             raise HTTPException(status_code=400, detail="Could not detect scraper from URL")
 
-    scraper = scrapers.get(scraper_name)
-    if not scraper:
+    scrapers = {
+        'epubera': EpuberaScraper,
+        'lectulandia': LectulandiaScraper,
+    }
+
+    scraper_cls = scrapers.get(scraper_name)
+    if not scraper_cls:
         raise HTTPException(status_code=400, detail=f"Unknown scraper: {scraper_name}")
+    scraper = scraper_cls()
 
     # Scrape book page
     result = await scraper.get_download_links(data.source_url)
@@ -808,8 +827,8 @@ async def update_book_reading_status(
 
 async def _search_scrapers_for_book(book_id: int, title: str):
     """
-    Search all scrapers for a book and create chapters
-    Background task
+    Search all scrapers for a book and create chapters.
+    Runs Lectulandia + Epubera in parallel, picks best link across all sources.
     """
     from app.database import SessionLocal
     db = SessionLocal()
@@ -819,54 +838,102 @@ async def _search_scrapers_for_book(book_id: int, title: str):
         if not book:
             return
 
-        scrapers = [
-            LectulandiaScraper()
-        ]
+        scrapers = [LectulandiaScraper(), EpuberaScraper()]
+        title_lower = title.lower().strip()
+        title_keywords = set(w for w in title_lower.split() if len(w) > 2)
 
-        for scraper in scrapers:
+        async def _search_one(scraper):
             try:
-                # Search for book
-                search_results = await scraper.search(title, page=1)
+                results = await asyncio.wait_for(scraper.search(title, page=1), timeout=45.0)
+                if not results:
+                    return None
 
-                if search_results:
-                    # Take first result
-                    first_result = search_results[0]
+                # Find best matching result by title similarity
+                best = None
+                best_score = 0
+                for r in results:
+                    r_title = r['title'].lower().strip()
+                    r_keywords = set(w for w in r_title.split() if len(w) > 2)
 
-                    # Get download links
-                    result = await scraper.get_download_links(first_result['url'])
+                    if r_title == title_lower or title_lower in r_title or r_title in title_lower:
+                        score = 100
+                    else:
+                        overlap = len(title_keywords & r_keywords)
+                        min_needed = min(2, max(1, len(title_keywords) // 2))
+                        score = overlap * 10 if overlap >= min_needed else 0
 
-                    if result.success and result.best_link:
-                        # Update source URLs
-                        if not book.source_urls:
-                            book.source_urls = {}
-                        book.source_urls[scraper.name] = first_result['url']
+                    if score > best_score:
+                        best_score = score
+                        best = r
 
-                        if not book.preferred_source:
-                            book.preferred_source = scraper.name
+                if not best or best_score == 0:
+                    logger.info(f"{scraper.name}: No good title match for '{title}'")
+                    return None
 
-                        # Create chapter if doesn't exist
-                        existing_chapter = db.query(BookChapter).filter(
-                            BookChapter.book_id == book_id,
-                            BookChapter.source == scraper.name
-                        ).first()
+                logger.info(f"{scraper.name}: Best match '{best['title']}' (score={best_score})")
+                dl_result = await asyncio.wait_for(scraper.get_download_links(best['url']), timeout=60.0)
 
-                        if not existing_chapter:
-                            chapter = BookChapter(
-                                book_id=book_id,
-                                number=1,
-                                title=book.title,
-                                download_url=result.best_link.url,
-                                backup_url=result.backup_link.url if result.backup_link else None,
-                                source=scraper.name,
-                                status="pending"
-                            )
-                            db.add(chapter)
-
-                        db.commit()
-
+                if dl_result.success and dl_result.best_link:
+                    return (scraper.name, best, dl_result)
+                return None
             except Exception as e:
                 logger.error(f"Error searching {scraper.name} for book {book_id}: {e}")
+                return None
+
+        # Run all scrapers in parallel
+        gathered = await asyncio.gather(*[_search_one(s) for s in scrapers], return_exceptions=True)
+
+        all_links = []
+        for result in gathered:
+            if isinstance(result, Exception) or result is None:
                 continue
+            scraper_name, search_hit, dl_result = result
+
+            if not book.source_urls:
+                book.source_urls = {}
+            book.source_urls[scraper_name] = search_hit['url']
+
+            for link in dl_result.download_links:
+                all_links.append((scraper_name, link))
+
+        if not all_links:
+            logger.info(f"No download links found for book {book_id} across any scraper")
+            db.commit()
+            return
+
+        # Sort by quality score descending
+        all_links.sort(key=lambda x: x[1].quality_score, reverse=True)
+
+        best_name, best_link = all_links[0]
+        backup_link = all_links[1][1] if len(all_links) > 1 else None
+
+        logger.info(f"Book {book_id}: best link from {best_name} ({best_link.host.value}, score={best_link.quality_score})")
+
+        if not book.preferred_source:
+            book.preferred_source = best_name
+
+        existing_chapter = db.query(BookChapter).filter(
+            BookChapter.book_id == book_id,
+            BookChapter.number == 1
+        ).first()
+
+        if existing_chapter:
+            existing_chapter.download_url = best_link.url
+            existing_chapter.backup_url = backup_link.url if backup_link else existing_chapter.backup_url
+            existing_chapter.source = best_name
+        else:
+            chapter = BookChapter(
+                book_id=book_id,
+                number=1,
+                title=book.title,
+                download_url=best_link.url,
+                backup_url=backup_link.url if backup_link else None,
+                source=best_name,
+                status="pending"
+            )
+            db.add(chapter)
+
+        db.commit()
 
     finally:
         db.close()

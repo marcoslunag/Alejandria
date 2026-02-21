@@ -50,15 +50,17 @@ RUN playwright install chromium
 # Copy application code
 COPY . .
 
-# Make start script executable
-RUN chmod +x start.sh
+# Make scripts executable
+RUN chmod +x start.sh entrypoint.sh
+
+# Install gosu for privilege de-escalation in entrypoint
+RUN apt-get update && apt-get install -y --no-install-recommends gosu \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user and set up directories with correct ownership
 RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser && \
-    mkdir -p /downloads /library /library/kindle /imports /app/data && \
-    chown -R appuser:appuser /downloads /library /imports /app /app/data /ms-playwright
-
-USER appuser
+    mkdir -p /downloads /library /library/kindle /imports /stk-data /app/data && \
+    chown -R appuser:appuser /downloads /library /imports /stk-data /app /app/data /ms-playwright
 
 # Expose port
 EXPOSE 7878
@@ -67,6 +69,5 @@ EXPOSE 7878
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:7878/health || exit 1
 
-# Run application with start script (handles migrations)
-# Use bash explicitly so the execute bit isn't required on bind-mounted files
-CMD ["bash", "start.sh"]
+# Entrypoint fixes volume permissions then drops to appuser
+ENTRYPOINT ["bash", "entrypoint.sh"]
