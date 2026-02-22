@@ -24,27 +24,42 @@ class PlaywrightBookScraper(BookScraperBase):
         self.browser: Optional[Browser] = None
         self._playwright = None
 
+    _BROWSER_ARGS = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-blink-features=AutomationControlled',
+        '--js-flags=--max-old-space-size=256',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-translate',
+    ]
+
     async def _ensure_browser(self):
-        """Inicializa el navegador si no está activo"""
-        if self.browser is None:
+        """Inicializa el navegador si no está activo o se ha caído."""
+        if self.browser is not None and self.browser.is_connected():
+            return
+        if self.browser is not None:
+            logger.warning("Playwright browser crashed or disconnected, relaunching...")
+            await self._cleanup_browser()
+        if self._playwright is None:
             self._playwright = await async_playwright().start()
-            self.browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=[
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--disable-blink-features=AutomationControlled',
-                    '--js-flags=--max-old-space-size=256',
-                    '--disable-extensions',
-                    '--disable-background-networking',
-                    '--disable-default-apps',
-                    '--disable-translate',
-                    '--single-process',
-                ]
-            )
-            logger.info("Playwright book scraper browser initialized")
+        self.browser = await self._playwright.chromium.launch(
+            headless=True,
+            args=self._BROWSER_ARGS,
+        )
+        logger.info("Playwright book scraper browser initialized")
+
+    async def _cleanup_browser(self):
+        """Safely close a dead/crashed browser reference."""
+        try:
+            if self.browser:
+                await self.browser.close()
+        except Exception:
+            pass
+        self.browser = None
 
     async def _create_page(self) -> Page:
         """Crea una nueva página con configuración stealth"""
@@ -55,7 +70,6 @@ class PlaywrightBookScraper(BookScraperBase):
         )
         page = await context.new_page()
 
-        # Stealth básico
         await page.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
             window.chrome = {runtime: {}};
@@ -65,9 +79,10 @@ class PlaywrightBookScraper(BookScraperBase):
 
     async def close(self):
         """Cierra el navegador"""
-        if self.browser:
-            await self.browser.close()
-            self.browser = None
+        await self._cleanup_browser()
+        if self._playwright:
+            await self._playwright.stop()
+            self._playwright = None
         if self._playwright:
             await self._playwright.stop()
             self._playwright = None

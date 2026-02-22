@@ -105,7 +105,12 @@ async def _resolve_ouo_with_playwright(ouo_url: str) -> Optional[str]:
         return None
     finally:
         if page:
-            await page.close()
+            try:
+                ctx = page.context
+                await page.close()
+                await ctx.close()
+            except Exception:
+                pass
 
 
 class OUOResolver:

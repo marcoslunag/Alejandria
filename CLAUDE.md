@@ -209,6 +209,9 @@ Búsquedas en español → Metadata en inglés:
 Muchos sitios usan acortadores:
 - **ouo.io / ouo.press**: ZonaComics los resuelve automáticamente con Playwright (2-step form bypass)
   - También: `ouo_resolver.py` con bypass-ouo library + curl_cffi fallback
+  - **Resolución manga**: secuencial (no paralelo) con dedup de URLs únicas — evita memory exhaustion
+  - **Browser recovery**: `_ensure_browser()` detecta `is_connected()` y relanza Chromium si crasheó
+  - **Memory limits**: `--js-flags=--max-old-space-size=256` + gc.collect entre resoluciones
 - **uii.io / wordcount.im**: reCAPTCHA (2captcha o manual)
 - **Detección**: ZonaComics resuelve ouo.io automáticamente; otros acortadores se guardan y resuelven al descargar
 

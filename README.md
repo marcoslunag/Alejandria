@@ -29,7 +29,7 @@
 
 ### Descarga inteligente
 - Busca en multiples scrapers en paralelo con fallback automatico
-- Resolucion de acortadores: ouo.io en background, uii.io con captcha opcional
+- Resolucion de acortadores: ouo.io secuencial en background (dedup + auto-recovery de browser), uii.io con captcha opcional
 - Descarga desde MediaFire (individual y carpetas), MEGA (individual y carpetas via megatools CLI), Google Drive, Krakenfiles y mas
 - Bundles inteligentes: detecta TPB, HC y colecciones completas y las descarga de una vez
 
@@ -304,6 +304,8 @@ docker exec alejandria-backend python -m pytest tests/test_auth.py -v
 | `test_reading_status.py` | Estados de lectura (read/reading/unread) |
 | `test_health.py` | Health check del backend |
 | `test_recommendations.py` | Motor de recomendaciones locales |
+| `test_recommender_score.py` | Scoring con None/edge cases en recomendaciones |
+| `test_ouo_dedup.py` | Deduplicacion de links ouo.io antes de resolver |
 
 > **Nota:** Los tests de `test_scrapers.py` dependen de servicios externos (OUO.io, TeraBox, AniList, etc.) y pueden fallar si esos servicios estan caidos o bloqueando. ComicVine requiere `COMICVINE_API_KEY` configurada.
 
