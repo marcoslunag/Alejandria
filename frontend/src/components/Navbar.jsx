@@ -61,9 +61,9 @@ const Navbar = () => {
   const userNavItems = [
     { to: '/', icon: FaCompass, label: 'Descubrir' },
     { to: '/search', icon: FaSearch, label: 'Buscar' },
+    { to: '/books', icon: FaBookReader, label: 'Libros' },
     { to: '/library', icon: FaBook, label: 'Manga' },
     { to: '/comics', icon: FaMask, label: 'Comics' },
-    { to: '/books', icon: FaBookReader, label: 'Libros' },
     { to: '/queue', icon: FaDownload, label: 'Descargas' },
     { to: '/upload', icon: FaUpload, label: 'Subir' },
     { to: '/dashboard', icon: FaChartBar, label: 'Estadísticas' },

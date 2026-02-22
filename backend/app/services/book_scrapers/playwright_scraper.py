@@ -36,6 +36,12 @@ class PlaywrightBookScraper(BookScraperBase):
                     '--disable-dev-shm-usage',
                     '--disable-gpu',
                     '--disable-blink-features=AutomationControlled',
+                    '--js-flags=--max-old-space-size=256',
+                    '--disable-extensions',
+                    '--disable-background-networking',
+                    '--disable-default-apps',
+                    '--disable-translate',
+                    '--single-process',
                 ]
             )
             logger.info("Playwright book scraper browser initialized")

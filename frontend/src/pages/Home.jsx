@@ -7,15 +7,15 @@ import {
 } from 'react-icons/fa';
 
 const TYPE_CONFIG = {
+  books:  { label: 'Libros',  color: 'text-green-400', bg: 'bg-green-500/20', icon: FaBookReader, path: '/books'   },
   manga:  { label: 'Manga',   color: 'text-blue-400',  bg: 'bg-blue-500/20',  icon: FaBook,       path: '/library' },
   comics: { label: 'Cómics',  color: 'text-red-400',   bg: 'bg-red-500/20',   icon: FaMask,       path: '/comics'  },
-  books:  { label: 'Libros',  color: 'text-green-400', bg: 'bg-green-500/20', icon: FaBookReader, path: '/books'   },
 };
 
 const DOWNLOAD_TYPE_CONFIG = {
+  book:   { color: 'text-green-400', label: 'Libro'  },
   manga:  { color: 'text-blue-400',  label: 'Manga'  },
   comic:  { color: 'text-red-400',   label: 'Comic'  },
-  book:   { color: 'text-green-400', label: 'Libro'  },
 };
 
 const ReadingBar = ({ stats, type }) => {

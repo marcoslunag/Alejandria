@@ -368,6 +368,12 @@ const Queue = () => {
               Todos
             </button>
             <button
+              onClick={() => setTypeFilter('book')}
+              className={`btn btn-sm flex items-center gap-1 ${typeFilter === 'book' ? 'bg-emerald-500 text-white' : 'btn-secondary'}`}
+            >
+              <FaBookReader className="text-xs" /> Libros {typeStats.book > 0 && `(${typeStats.book})`}
+            </button>
+            <button
               onClick={() => setTypeFilter('manga')}
               className={`btn btn-sm flex items-center gap-1 ${typeFilter === 'manga' ? 'bg-blue-500 text-white' : 'btn-secondary'}`}
             >
@@ -378,12 +384,6 @@ const Queue = () => {
               className={`btn btn-sm flex items-center gap-1 ${typeFilter === 'comic' ? 'bg-red-500 text-white' : 'btn-secondary'}`}
             >
               <FaMask className="text-xs" /> Comics {typeStats.comic > 0 && `(${typeStats.comic})`}
-            </button>
-            <button
-              onClick={() => setTypeFilter('book')}
-              className={`btn btn-sm flex items-center gap-1 ${typeFilter === 'book' ? 'bg-emerald-500 text-white' : 'btn-secondary'}`}
-            >
-              <FaBookReader className="text-xs" /> Libros {typeStats.book > 0 && `(${typeStats.book})`}
             </button>
           </div>
         </div>

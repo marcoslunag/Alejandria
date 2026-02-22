@@ -162,8 +162,8 @@ const Discover = () => {
 
   const typeFilters = [
     { value: 'all', label: 'Todo' },
-    { value: 'manga', label: 'Manga' },
     { value: 'books', label: 'Libros' },
+    { value: 'manga', label: 'Manga' },
   ];
 
   return (

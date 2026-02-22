@@ -3,6 +3,8 @@ Manga API Endpoints - Enhanced with Anilist Integration
 Kaizoku-inspired approach to manga library management
 """
 
+import asyncio
+import gc
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
@@ -132,8 +134,6 @@ async def search_manga(
     """
     Search manga on AniList + check availability in MangayComics scraper.
     """
-    import asyncio
-
     results = []
 
     try:
@@ -1144,26 +1144,26 @@ async def _fetch_chapters_from_source(manga_id: int, source_url: str):
             if backup_url and ('ouo.io' in backup_url.lower() or 'ouo.press' in backup_url.lower()):
                 ouo_links_to_resolve.append((f"backup_{ch_data['number']}", backup_url))
 
-        # Batch-resolve ouo.io links before saving
         resolved_map = {}
         if ouo_links_to_resolve:
-            logger.info(f"Manga: Resolving {len(ouo_links_to_resolve)} ouo.io links with Playwright...")
-            import asyncio
-            tasks = []
-            for key, ouo_url in ouo_links_to_resolve:
-                tasks.append((key, ouo_url, _resolve_ouo_link(ouo_url)))
-
-            results = await asyncio.gather(*[t[2] for t in tasks], return_exceptions=True)
-            for (key, original_url, _), result in zip(tasks, results):
-                if isinstance(result, Exception):
-                    logger.error(f"Manga: Failed to resolve {original_url}: {result}")
-                    continue
-                resolved_url, resolved_host = result
-                if resolved_url != original_url:
-                    resolved_map[original_url] = (resolved_url, resolved_host)
+            unique_urls = list({url for _, url in ouo_links_to_resolve})
+            logger.info(
+                f"Manga: Resolving {len(unique_urls)} unique ouo.io links "
+                f"(from {len(ouo_links_to_resolve)} total) sequentially..."
+            )
+            for idx, ouo_url in enumerate(unique_urls, 1):
+                logger.info(f"Manga: Resolving ouo.io link {idx}/{len(unique_urls)}: {ouo_url}")
+                try:
+                    resolved_url, resolved_host = await _resolve_ouo_link(ouo_url)
+                    if resolved_url != ouo_url:
+                        resolved_map[ouo_url] = (resolved_url, resolved_host)
+                except Exception as e:
+                    logger.error(f"Manga: Failed to resolve {ouo_url}: {e}")
+                gc.collect()
+                await asyncio.sleep(1)
 
             if resolved_map:
-                logger.info(f"Manga: Resolved {len(resolved_map)}/{len(ouo_links_to_resolve)} ouo.io links")
+                logger.info(f"Manga: Resolved {len(resolved_map)}/{len(unique_urls)} ouo.io links")
 
         for ch_data in details['chapters']:
             download_url = ch_data.get('download_url') or (

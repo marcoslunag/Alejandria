@@ -9,6 +9,25 @@ import { mangaApi, comicApi, bookApi, uploadApi } from '../services/api';
 
 // ─── Type configuration ───────────────────────────────────────────────────
 const TYPE_CONFIG = {
+  book: {
+    label: 'Libro',
+    icon: FaBookReader,
+    color: 'green',
+    accentClass: 'border-green-500 bg-green-500/10',
+    badgeClass: 'bg-green-500/20 text-green-400 border border-green-500/30',
+    btnClass: 'bg-green-600 hover:bg-green-500',
+    search: (q) => bookApi.searchGoogleBooks(q, 1, 8),
+    getResults: (data) => data.data?.results || [],
+    getId: (item) => item.google_books_id || item.id,
+    getTitle: (item) => item.title,
+    getCover: (item) => item.thumbnail || item.cover_image,
+    getSub: (item) => item.authors?.[0] || item.publisher || '',
+    idLabel: 'Google Books ID',
+    idField: 'google_books_id',
+    detailPath: '/books',
+    accept: '.epub,.pdf',
+    acceptHint: 'EPUB, PDF',
+  },
   manga: {
     label: 'Manga',
     icon: FaBook,
@@ -46,25 +65,6 @@ const TYPE_CONFIG = {
     detailPath: '/comics',
     accept: '.cbz,.cbr,.zip',
     acceptHint: 'CBZ, CBR, ZIP',
-  },
-  book: {
-    label: 'Libro',
-    icon: FaBookReader,
-    color: 'green',
-    accentClass: 'border-green-500 bg-green-500/10',
-    badgeClass: 'bg-green-500/20 text-green-400 border border-green-500/30',
-    btnClass: 'bg-green-600 hover:bg-green-500',
-    search: (q) => bookApi.searchGoogleBooks(q, 1, 8),
-    getResults: (data) => data.data?.results || [],
-    getId: (item) => item.google_books_id || item.id,
-    getTitle: (item) => item.title,
-    getCover: (item) => item.thumbnail || item.cover_image,
-    getSub: (item) => item.authors?.[0] || item.publisher || '',
-    idLabel: 'Google Books ID',
-    idField: 'google_books_id',
-    detailPath: '/books',
-    accept: '.epub,.pdf',
-    acceptHint: 'EPUB, PDF',
   },
 };
 

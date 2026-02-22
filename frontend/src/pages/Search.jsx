@@ -9,7 +9,7 @@ import { FaSearch, FaBook, FaMask, FaBookReader, FaExclamationTriangle } from 'r
 const Search = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('manga'); // manga, comics, books
+  const [activeTab, setActiveTab] = useState('books'); // books, manga, comics
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const initialQuery = searchParams.get('q') || '';
@@ -199,6 +199,17 @@ const Search = () => {
       {/* Tabs */}
       <div className="flex justify-center gap-4 mb-8">
         <button
+          onClick={() => handleTabChange('books')}
+          className={`px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${
+            activeTab === 'books'
+              ? 'bg-green-500 text-white'
+              : 'bg-dark-lighter text-gray-400 hover:text-white'
+          }`}
+        >
+          <FaBookReader />
+          Libros
+        </button>
+        <button
           onClick={() => handleTabChange('manga')}
           className={`px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${
             activeTab === 'manga'
@@ -219,17 +230,6 @@ const Search = () => {
         >
           <FaMask />
           Cómics
-        </button>
-        <button
-          onClick={() => handleTabChange('books')}
-          className={`px-6 py-3 rounded-lg flex items-center gap-2 transition-colors ${
-            activeTab === 'books'
-              ? 'bg-green-500 text-white'
-              : 'bg-dark-lighter text-gray-400 hover:text-white'
-          }`}
-        >
-          <FaBookReader />
-          Libros
         </button>
       </div>
 

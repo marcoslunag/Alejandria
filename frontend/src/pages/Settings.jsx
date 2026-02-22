@@ -871,7 +871,7 @@ const Settings = () => {
             <div className="card p-6 flex flex-wrap gap-4 items-center">
               <div className="flex-1 min-w-[200px]">
                 <p className="text-sm text-gray-400">
-                  Exporta toda tu biblioteca (manga, cómics, libros) como un archivo JSON. Puedes importarlo más adelante para restaurar tu colección.
+                  Exporta toda tu biblioteca (libros, manga, cómics) como un archivo JSON. Puedes importarlo más adelante para restaurar tu colección.
                 </p>
               </div>
               <div className="flex gap-3">

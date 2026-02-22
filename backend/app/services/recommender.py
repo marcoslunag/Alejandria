@@ -114,8 +114,11 @@ class LocalRecommender:
         if candidate_authors & profile['authors']:
             author_match = 1.0
 
-        candidate_score = candidate.get('score', profile['avg_score'])
-        score_similarity = 1.0 - abs(candidate_score - profile['avg_score']) / 100.0
+        avg = profile.get('avg_score') or 0.0
+        candidate_score = candidate.get('score')
+        if candidate_score is None:
+            candidate_score = avg
+        score_similarity = 1.0 - abs(candidate_score - avg) / 100.0
 
         return genre_overlap * 0.5 + author_match * 0.3 + score_similarity * 0.2
 
@@ -156,7 +159,7 @@ class LocalRecommender:
                             'content_type': 'manga',
                             'title': item.get('title', ''),
                             'cover': item.get('cover_image', ''),
-                            'score': item.get('average_score', 0),
+                            'score': item.get('average_score') or 0,
                             'genres': item.get('genres', []),
                             'authors': item.get('authors', []),
                             'external_id': item.get('anilist_id'),
