@@ -42,6 +42,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/manga", tags=["manga"])
 
+# Set de manga IDs cuya resolución de links está en progreso
+_resolving_manga_ids: set = set()
+
 
 # ============================================================================
 # DISCOVERY & SEARCH - Kaizoku Style
@@ -762,6 +765,27 @@ async def refresh_manga(
     return {"status": "refresh_queued", "manga_id": manga_id}
 
 
+@router.get("/{manga_id}/scraper-status")
+def get_scraper_status(
+    manga_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Devuelve si el manga está siendo procesado por el scraper (resolución de links OUO.io, etc.)
+    Usado por el frontend para deshabilitar el botón Actualizar mientras se resuelven los links.
+    """
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == current_user.id).first()
+    if not manga:
+        raise HTTPException(status_code=404, detail="Manga not found")
+
+    chapters_found = db.query(Chapter).filter(Chapter.manga_id == manga_id).count()
+    return {
+        "resolving": manga_id in _resolving_manga_ids,
+        "chapters_found": chapters_found
+    }
+
+
 @router.get("/{manga_id}/stats", response_model=MangaStats)
 def get_manga_stats(manga_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
@@ -1106,6 +1130,7 @@ async def _fetch_chapters_from_source(manga_id: int, source_url: str):
     """Background task to fetch chapters from source"""
     from app.database import SessionLocal
 
+    _resolving_manga_ids.add(manga_id)
     db = SessionLocal()
     try:
         parsed_url = urlparse(source_url)
@@ -1234,6 +1259,7 @@ async def _fetch_chapters_from_source(manga_id: int, source_url: str):
         logger.error(f"Error fetching chapters from {source_url}: {e}")
         db.rollback()
     finally:
+        _resolving_manga_ids.discard(manga_id)
         db.close()
 
 
@@ -1454,6 +1480,45 @@ def _save_manga_metadata(manga: Manga, chapter: Chapter, file_path: str):
 # WEB READER
 # ============================================================================
 
+def _get_chapter_zip(chapter):
+    """
+    Devuelve (zipfile.ZipFile, path_usado) para leer páginas de un capítulo.
+    Intenta en orden:
+    1. chapter.file_path (CBZ original)
+    2. chapter.converted_path (EPUB - también es un ZIP válido con imágenes)
+    Lanza HTTPException 503 si ninguno es accesible.
+    """
+    import zipfile
+    import os
+
+    # Intentar con el archivo original (CBZ/RAR-as-CBZ)
+    if chapter.file_path and os.path.exists(chapter.file_path):
+        try:
+            zf = zipfile.ZipFile(chapter.file_path, 'r')
+            return zf, chapter.file_path
+        except zipfile.BadZipFile:
+            pass  # Puede ser RAR u otro formato; intentar con EPUB
+
+    # Fallback: intentar con el EPUB convertido (también es un ZIP)
+    # converted_path puede ser pipe-separated si hay múltiples partes
+    if chapter.converted_path:
+        epub_paths = chapter.converted_path.split('|')
+        for epub_path in epub_paths:
+            epub_path = epub_path.strip()
+            if epub_path and os.path.exists(epub_path):
+                try:
+                    zf = zipfile.ZipFile(epub_path, 'r')
+                    return zf, epub_path
+                except zipfile.BadZipFile:
+                    continue
+
+    raise HTTPException(
+        status_code=503,
+        detail="El archivo del capítulo no está disponible. "
+               "Puede estar siendo procesado por el convertidor o en formato no compatible."
+    )
+
+
 @router.get("/{manga_id}/chapters/{chapter_id}/pages")
 def get_chapter_pages(
     manga_id: int,
@@ -1462,7 +1527,6 @@ def get_chapter_pages(
     current_user: User = Depends(get_current_user)
 ):
     """List pages available for reading in a downloaded chapter."""
-    import zipfile
     import os
 
     chapter = db.query(Chapter).join(Manga).filter(
@@ -1472,16 +1536,16 @@ def get_chapter_pages(
     ).first()
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
-    if not chapter.file_path or not os.path.exists(chapter.file_path):
-        raise HTTPException(status_code=404, detail="Chapter file not available")
 
     IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif'}
+    zf, _ = _get_chapter_zip(chapter)
     try:
-        with zipfile.ZipFile(chapter.file_path, 'r') as zf:
+        with zf:
             pages = sorted([
                 n for n in zf.namelist()
                 if os.path.splitext(n.lower())[1] in IMAGE_EXTS
                 and not os.path.basename(n).startswith('.')
+                and '__MACOSX' not in n
             ])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not read chapter: {e}")
@@ -1506,7 +1570,6 @@ def get_chapter_page(
     """Serve a single page image from a downloaded chapter.
     Accepts token as query param since <img src> can't send Authorization headers.
     """
-    import zipfile
     import os
     import mimetypes
     from app.core.security import decode_token
@@ -1531,16 +1594,16 @@ def get_chapter_page(
     ).first()
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
-    if not chapter.file_path or not os.path.exists(chapter.file_path):
-        raise HTTPException(status_code=404, detail="Chapter file not available")
 
     IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif'}
     try:
-        with zipfile.ZipFile(chapter.file_path, 'r') as zf:
+        zf, _ = _get_chapter_zip(chapter)
+        with zf:
             pages = sorted([
                 n for n in zf.namelist()
                 if os.path.splitext(n.lower())[1] in IMAGE_EXTS
                 and not os.path.basename(n).startswith('.')
+                and '__MACOSX' not in n
             ])
             if page_index < 0 or page_index >= len(pages):
                 raise HTTPException(status_code=404, detail="Page not found")

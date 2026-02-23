@@ -668,7 +668,7 @@ class ContentScheduler:
             item.status = 'completed'
             item.completed_at = datetime.utcnow()
             item.progress = 100
-            chapter.status = 'downloaded'
+            chapter.status = 'converting'  # Pendiente de conversión por KCC Worker
             chapter.file_path = str(file_path)
             chapter.downloaded_at = datetime.utcnow()
 
@@ -850,6 +850,7 @@ class ContentScheduler:
         db.refresh(issue)
 
         if issue.status == 'downloaded':
+            issue.status = 'converting'  # Pendiente de conversión por KCC Worker
             item.status = 'completed'
             item.completed_at = datetime.utcnow()
             item.progress = 100

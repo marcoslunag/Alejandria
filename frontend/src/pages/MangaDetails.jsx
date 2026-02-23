@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { mangaApi } from '../services/api';
@@ -19,10 +19,40 @@ const MangaDetails = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
+  const resolvingPollRef = useRef(null);
+
+  const stopResolvingPoll = useCallback(() => {
+    if (resolvingPollRef.current) {
+      clearInterval(resolvingPollRef.current);
+      resolvingPollRef.current = null;
+    }
+  }, []);
+
+  const startResolvingPoll = useCallback(() => {
+    stopResolvingPoll();
+    resolvingPollRef.current = setInterval(async () => {
+      try {
+        const res = await mangaApi.getScraperStatus(id);
+        const { resolving, chapters_found } = res.data;
+        setIsResolving(resolving);
+        if (!resolving) {
+          stopResolvingPoll();
+          // Recargar si terminó de resolver
+          loadManga();
+          loadStats();
+        }
+      } catch {
+        stopResolvingPoll();
+        setIsResolving(false);
+      }
+    }, 3000);
+  }, [id, stopResolvingPoll]);
 
   useEffect(() => {
     loadManga();
     loadStats();
+    return () => stopResolvingPoll();
   }, [id]);
 
   const loadManga = async () => {
@@ -48,12 +78,14 @@ const MangaDetails = () => {
 
   const handleRefresh = async () => {
     try {
+      setIsResolving(true);
       await mangaApi.refreshManga(id);
       toast('Actualización en cola. Los nuevos tomos se obtendrán en breve.', { icon: 'ℹ️' });
-      setTimeout(loadManga, 2000);
+      startResolvingPoll();
     } catch (error) {
       console.error('Error actualizando:', error);
       toast.error('Error al actualizar');
+      setIsResolving(false);
     }
   };
 
@@ -134,10 +166,11 @@ const MangaDetails = () => {
       : 'Click para seguir esta serie y descargar nuevos tomos automáticamente',
   });
   actions.push({
-    label: 'Actualizar',
+    label: isResolving ? 'Resolviendo links...' : 'Actualizar',
     onClick: handleRefresh,
     className: 'btn btn-secondary flex items-center gap-2',
-    icon: <FaSync />,
+    icon: <FaSync className={isResolving ? 'animate-spin' : ''} />,
+    disabled: isResolving,
   });
   actions.push({
     label: 'Eliminar',

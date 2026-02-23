@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { mangaApi, comicApi, bookApi } from '../services/api';
 import SearchBar from '../components/SearchBar';
 import ContentCard from '../components/ContentCard';
-import { FaSearch, FaBook, FaMask, FaBookReader, FaExclamationTriangle } from 'react-icons/fa';
+import { FaSearch, FaBook, FaMask, FaBookReader, FaExclamationTriangle, FaCheck } from 'react-icons/fa';
 
 const Search = () => {
   const [searchParams] = useSearchParams();
@@ -16,6 +16,8 @@ const Search = () => {
   const [hasSearched, setHasSearched] = useState(!!initialQuery);
   // Feature 6: Duplicate detection modal
   const [duplicateModal, setDuplicateModal] = useState(null); // { matched_id, matched_title, type, forceAdd }
+  // Tracking leídos en esta sesión (por anilist_id / google_books_id)
+  const [markedAsRead, setMarkedAsRead] = useState(new Set());
 
   useEffect(() => {
     if (initialQuery) {
@@ -150,6 +152,65 @@ const Search = () => {
       } else {
         console.error('Error añadiendo libro:', error);
         toast.error('Error al añadir el libro');
+      }
+    }
+  };
+
+  // Marca un manga como leído: lo añade a biblioteca si es necesario, luego marca como completed
+  const handleMarkMangaAsRead = async (manga) => {
+    try {
+      let libraryId = manga.library_id;
+      if (!libraryId) {
+        const res = await mangaApi.addFromAnilist({ anilist_id: manga.anilist_id, monitored: false, auto_download: false });
+        libraryId = res.data?.id;
+      }
+      if (!libraryId) { toast.error('No se pudo añadir el manga'); return; }
+      await mangaApi.setReadingStatus(libraryId, 'completed');
+      setMarkedAsRead(prev => new Set([...prev, manga.anilist_id]));
+      toast.success(`"${manga.title}" marcado como leído`);
+    } catch (error) {
+      if (error.response?.status === 409) {
+        // Ya existe — obtener ID del error y marcar
+        const detail = error.response.data?.detail || {};
+        const existingId = detail.matched_id;
+        if (existingId) {
+          await mangaApi.setReadingStatus(existingId, 'completed');
+          setMarkedAsRead(prev => new Set([...prev, manga.anilist_id]));
+          toast.success(`"${manga.title}" marcado como leído`);
+        }
+      } else {
+        toast.error('Error al marcar como leído');
+      }
+    }
+  };
+
+  const handleMarkBookAsRead = async (book) => {
+    try {
+      let libraryId = book.library_id;
+      if (!libraryId) {
+        let res;
+        if (book.google_books_id) {
+          res = await bookApi.addFromGoogleBooks({ google_books_id: book.google_books_id, monitored: false, auto_download: false });
+        } else if (book.source_url) {
+          res = await bookApi.addFromUrl({ source_url: book.source_url, monitored: false, auto_download: false });
+        } else { toast.error('Sin información suficiente'); return; }
+        libraryId = res.data?.id;
+      }
+      if (!libraryId) { toast.error('No se pudo añadir el libro'); return; }
+      await bookApi.setReadingStatus(libraryId, 'completed');
+      setMarkedAsRead(prev => new Set([...prev, book.google_books_id || book.source_url]));
+      toast.success(`"${book.title}" marcado como leído`);
+    } catch (error) {
+      if (error.response?.status === 409) {
+        const detail = error.response.data?.detail || {};
+        const existingId = detail.matched_id;
+        if (existingId) {
+          await bookApi.setReadingStatus(existingId, 'completed');
+          setMarkedAsRead(prev => new Set([...prev, book.google_books_id || book.source_url]));
+          toast.success(`"${book.title}" marcado como leído`);
+        }
+      } else {
+        toast.error('Error al marcar como leído');
       }
     }
   };
@@ -313,8 +374,12 @@ const Search = () => {
                         <p>🌐 {manga.scraper_sources.join(', ')}</p>
                       </div>
                     )}
-                    <div className="mt-auto">
-                      {manga.in_library ? (
+                    <div className="mt-auto space-y-1">
+                      {markedAsRead.has(manga.anilist_id) ? (
+                        <div className="text-center text-green-500 text-sm mt-2 flex items-center justify-center gap-1">
+                          <FaCheck /> Leído
+                        </div>
+                      ) : manga.in_library ? (
                         <div className="text-center text-green-500 text-sm mt-2">✓ En biblioteca</div>
                       ) : (
                         <button
@@ -322,6 +387,15 @@ const Search = () => {
                           className="w-full btn btn-primary bg-blue-500 hover:bg-blue-600 text-sm mt-2"
                         >
                           Añadir
+                        </button>
+                      )}
+                      {!markedAsRead.has(manga.anilist_id) && (
+                        <button
+                          onClick={() => handleMarkMangaAsRead(manga)}
+                          className="w-full btn bg-gray-700 hover:bg-green-700 text-gray-300 hover:text-white text-xs mt-1"
+                          title="Añadir a biblioteca y marcar como leído"
+                        >
+                          Ya leído
                         </button>
                       )}
                     </div>
@@ -490,8 +564,12 @@ const Search = () => {
                           {isEpubera && <p>🌐 Epubera</p>}
                         </div>
                       )}
-                      <div className="mt-auto">
-                        {book.in_library ? (
+                      <div className="mt-auto space-y-1">
+                        {markedAsRead.has(book.google_books_id || book.source_url) ? (
+                          <div className="text-center text-green-500 text-sm mt-2 flex items-center justify-center gap-1">
+                            <FaCheck /> Leído
+                          </div>
+                        ) : book.in_library ? (
                           <div className="text-center text-green-500 text-sm mt-2">✓ En biblioteca</div>
                         ) : (
                           <button
@@ -499,6 +577,15 @@ const Search = () => {
                             className="w-full btn btn-primary bg-green-500 hover:bg-green-600 text-sm mt-2"
                           >
                             Añadir
+                          </button>
+                        )}
+                        {!markedAsRead.has(book.google_books_id || book.source_url) && (
+                          <button
+                            onClick={() => handleMarkBookAsRead(book)}
+                            className="w-full btn bg-gray-700 hover:bg-green-700 text-gray-300 hover:text-white text-xs mt-1"
+                            title="Añadir a biblioteca y marcar como leído"
+                          >
+                            Ya leído
                           </button>
                         )}
                       </div>

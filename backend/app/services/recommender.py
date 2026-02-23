@@ -38,9 +38,11 @@ class LocalRecommender:
             'publishers': set(),
             'content_types': set(),
             'avg_score': 0.0,
-            'anilist_ids': set(),
-            'google_books_ids': set(),
-            'comicvine_ids': set(),
+            'anilist_ids': set(),           # todos los manga en biblioteca
+            'google_books_ids': set(),      # todos los libros en biblioteca
+            'comicvine_ids': set(),         # todos los comics en biblioteca
+            'completed_anilist_ids': set(), # manga ya leídos (excluir de recomendaciones)
+            'completed_google_books_ids': set(),
         }
 
         scores = []
@@ -50,9 +52,11 @@ class LocalRecommender:
         if mangas:
             profile['content_types'].add('manga')
             for m in mangas:
+                is_completed = m.reading_status == 'completed'
+                weight = 2 if is_completed else 1  # género más peso si ya lo leyó
                 if m.genres:
                     for g in m.genres:
-                        profile['genres'][g] += 1
+                        profile['genres'][g] += weight
                 if m.authors:
                     for a in m.authors:
                         profile['authors'].add(a.strip())
@@ -60,15 +64,19 @@ class LocalRecommender:
                     scores.append(m.average_score)
                 if m.anilist_id:
                     profile['anilist_ids'].add(m.anilist_id)
+                    if is_completed:
+                        profile['completed_anilist_ids'].add(m.anilist_id)
 
         # Comics
         comics = db.query(Comic).filter(Comic.user_id == user_id).all()
         if comics:
             profile['content_types'].add('comics')
             for c in comics:
+                is_completed = c.reading_status == 'completed'
+                weight = 2 if is_completed else 1
                 if c.genres:
                     for g in c.genres:
-                        profile['genres'][g] += 1
+                        profile['genres'][g] += weight
                 if c.publisher:
                     profile['publishers'].add(c.publisher)
                 if c.comicvine_id:
@@ -79,9 +87,11 @@ class LocalRecommender:
         if books:
             profile['content_types'].add('books')
             for b in books:
+                is_completed = b.reading_status == 'completed'
+                weight = 2 if is_completed else 1
                 if b.categories:
                     for cat in b.categories:
-                        profile['genres'][cat] += 1
+                        profile['genres'][cat] += weight
                 if b.authors:
                     for a in b.authors:
                         profile['authors'].add(a.strip())
@@ -89,6 +99,8 @@ class LocalRecommender:
                     scores.append(b.average_rating * 20)  # 0-5 → 0-100
                 if b.google_books_id:
                     profile['google_books_ids'].add(b.google_books_id)
+                    if is_completed:
+                        profile['completed_google_books_ids'].add(b.google_books_id)
 
         profile['avg_score'] = sum(scores) / len(scores) if scores else 70.0
         return profile
@@ -154,7 +166,9 @@ class LocalRecommender:
             for genre in top_genres[:2]:
                 search_results = await anilist.search_manga(genre, page=1)
                 for item in search_results.get('results', [])[:5]:
-                    if item.get('anilist_id') not in profile['anilist_ids']:
+                    aid = item.get('anilist_id')
+                    # Excluir lo que ya está en biblioteca o ya ha sido leído
+                    if aid not in profile['anilist_ids'] and aid not in profile['completed_anilist_ids']:
                         results.append({
                             'content_type': 'manga',
                             'title': item.get('title', ''),
@@ -193,7 +207,8 @@ class LocalRecommender:
             search_results = await gb.search_books(query_parts[0], per_page=10)
             results = []
             for item in search_results.get('results', []):
-                if item.get('google_books_id') not in profile['google_books_ids']:
+                gbid = item.get('google_books_id')
+                if gbid not in profile['google_books_ids'] and gbid not in profile['completed_google_books_ids']:
                     results.append({
                         'content_type': 'book',
                         'title': item.get('title', ''),

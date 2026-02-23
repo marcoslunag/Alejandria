@@ -51,8 +51,8 @@ def list_queue(
     """
     status_map = {
         'downloading': ['downloading'],
-        'converting': ['converting'],
-        'completed': ['downloaded', 'converted', 'sent'],
+        'converting': ['converting', 'downloaded'],  # 'downloaded' = pendiente de conversión KCC
+        'completed': ['converted', 'sent'],
         'failed': ['error']
     }
 
@@ -93,7 +93,7 @@ def list_queue(
             'downloading': 'downloading',
             'converting': 'converting',
             'pending': 'pending',
-            'downloaded': 'completed',
+            'downloaded': 'converting',   # pendiente de conversión por KCC Worker
             'converted': 'completed',
             'sent': 'completed',
             'error': 'failed'
@@ -104,7 +104,7 @@ def list_queue(
             "chapter_id": chapter.id,
             "content_type": "manga",
             "status": queue_status,
-            "progress": 100 if chapter.status in ['downloaded', 'converted', 'sent'] else 0,
+            "progress": 100 if chapter.status in ['converted', 'sent'] else 0,
             "bytes_downloaded": 0,
             "total_bytes": 0,
             "error_message": chapter.error_message,
@@ -215,7 +215,7 @@ def list_queue(
             'downloading': 'downloading',
             'converting': 'converting',
             'pending': 'pending',
-            'downloaded': 'completed',
+            'downloaded': 'converting',   # pendiente de conversión por KCC Worker
             'converted': 'completed',
             'sent': 'completed',
             'error': 'failed'
@@ -226,7 +226,7 @@ def list_queue(
             "comic_issue_id": issue.id,
             "content_type": "comic",
             "status": queue_status,
-            "progress": 100 if issue.status in ['downloaded', 'converted', 'sent'] else 0,
+            "progress": 100 if issue.status in ['converted', 'sent'] else 0,
             "bytes_downloaded": 0,
             "total_bytes": 0,
             "error_message": issue.error_message,
@@ -917,13 +917,13 @@ def _get_active_items_for_user(user_id: int, db: Session) -> list:
             "error_message": ch.error_message,
         })
 
-    # Comic issues that are downloading or error
+    # Comic issues that are downloading, converting or error
     issues = (
         db.query(ComicIssue, Comic)
         .join(Comic, ComicIssue.comic_id == Comic.id)
         .filter(
             Comic.user_id == user_id,
-            ComicIssue.status.in_(["downloading", "error"]),
+            ComicIssue.status.in_(["downloading", "converting", "error"]),
         )
         .all()
     )

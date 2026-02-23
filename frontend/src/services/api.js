@@ -76,6 +76,9 @@ export const mangaApi = {
   refreshManga: (id) =>
     api.post(`/manga/${id}/refresh`),
 
+  getScraperStatus: (id) =>
+    api.get(`/manga/${id}/scraper-status`),
+
   // Chapters
   getChapters: (mangaId, params = {}) =>
     api.get(`/manga/${mangaId}/chapters`, { params }),

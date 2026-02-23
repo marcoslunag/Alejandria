@@ -82,11 +82,33 @@ def get_notification_count(
 
     total = sum(i["count"] for i in items)
 
+    # Contar errores de descarga recientes (capítulos/issues con status='error')
+    manga_errors = (
+        db.query(func.count(Chapter.id))
+        .join(Manga, Chapter.manga_id == Manga.id)
+        .filter(Manga.user_id == uid, Chapter.status == "error")
+        .scalar() or 0
+    )
+    comic_errors = (
+        db.query(func.count(ComicIssue.id))
+        .join(Comic, ComicIssue.comic_id == Comic.id)
+        .filter(Comic.user_id == uid, ComicIssue.status == "error")
+        .scalar() or 0
+    )
+    book_errors = (
+        db.query(func.count(BookChapter.id))
+        .join(Book, BookChapter.book_id == Book.id)
+        .filter(Book.user_id == uid, BookChapter.status == "error")
+        .scalar() or 0
+    )
+    total_errors = manga_errors + comic_errors + book_errors
+
     return {
         "total": total,
         "manga_new": sum(i["count"] for i in items if i["type"] == "manga"),
         "comic_new": sum(i["count"] for i in items if i["type"] == "comic"),
         "book_new": sum(i["count"] for i in items if i["type"] == "book"),
+        "errors": total_errors,
         "items": items,
     }
 

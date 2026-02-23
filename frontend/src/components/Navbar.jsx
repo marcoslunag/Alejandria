@@ -12,6 +12,7 @@ const Navbar = () => {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [notifCount, setNotifCount] = useState(0);
+  const [notifErrors, setNotifErrors] = useState(0);
   const [notifItems, setNotifItems] = useState([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const notifRef = useRef(null);
@@ -23,6 +24,7 @@ const Navbar = () => {
       try {
         const { data } = await notificationsApi.getCount();
         setNotifCount(data.total || 0);
+        setNotifErrors(data.errors || 0);
         setNotifItems(data.items || []);
       } catch {}
     };
@@ -134,12 +136,17 @@ const Navbar = () => {
                 <button
                   onClick={handleNotifOpen}
                   className="relative text-gray-400 hover:text-white p-2 rounded-lg hover:bg-dark-lighter transition-colors"
-                  title="Notificaciones"
+                  title={notifErrors > 0 ? `${notifErrors} error${notifErrors !== 1 ? 'es' : ''} de descarga` : 'Notificaciones'}
                 >
-                  <FaBell />
+                  <FaBell className={notifErrors > 0 ? 'text-red-400' : ''} />
                   {notifCount > 0 && (
                     <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-0.5">
                       {notifCount > 99 ? '99+' : notifCount}
+                    </span>
+                  )}
+                  {notifCount === 0 && notifErrors > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-0.5">
+                      !
                     </span>
                   )}
                 </button>
@@ -150,11 +157,25 @@ const Navbar = () => {
                     <div className="px-4 py-2 border-b border-gray-700 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                       Novedades
                     </div>
-                    {notifItems.length === 0 ? (
+                    {notifErrors > 0 && (
+                      <button
+                        onClick={() => { navigate('/queue'); setNotifOpen(false); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 bg-red-500/10 hover:bg-red-500/20 transition-colors text-left border-b border-gray-700/50"
+                      >
+                        <span className="text-red-400 text-lg">⚠</span>
+                        <div>
+                          <p className="text-sm font-medium text-red-400">
+                            {notifErrors} descarga{notifErrors !== 1 ? 's' : ''} con error
+                          </p>
+                          <p className="text-xs text-gray-500">Click para ver la cola</p>
+                        </div>
+                      </button>
+                    )}
+                    {notifItems.length === 0 && notifErrors === 0 ? (
                       <div className="px-4 py-6 text-center text-gray-500 text-sm">
                         Todo al día
                       </div>
-                    ) : (
+                    ) : notifItems.length > 0 && (
                       <div className="max-h-72 overflow-y-auto divide-y divide-gray-700/50">
                         {notifItems.map((item, i) => (
                           <button
