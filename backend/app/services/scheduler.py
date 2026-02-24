@@ -166,6 +166,15 @@ class ContentScheduler:
             max_instances=1
         )
 
+        # Salud STK: persistir tokens refrescados cada 8h para evitar expiración
+        self.scheduler.add_job(
+            self._stk_health_check,
+            IntervalTrigger(hours=8),
+            id='stk_health',
+            replace_existing=True,
+            max_instances=1
+        )
+
         self.scheduler.start()
         self.is_running = True
         logger.info(f"Scheduler started (check interval: {self.check_interval_hours}h)")
@@ -1373,6 +1382,32 @@ class ContentScheduler:
 
         except Exception as e:
             logger.error(f"Error in _send_comic_issue_to_kindle: {e}")
+        finally:
+            db.close()
+
+    async def _stk_health_check(self):
+        """Verifica y renueva sesiones STK para usuarios con auto_send activo.
+        Llama get_devices() que persiste tokens auto-refrescados al disco."""
+        logger.debug("Running STK health check...")
+        from app.models.user import User
+        db: Session = SessionLocal()
+        try:
+            users = db.query(User).filter(
+                User.auto_send_to_kindle == True,
+                User.stk_device_serial.isnot(None)
+            ).all()
+
+            for user in users:
+                try:
+                    sender = get_stk_sender(user.id)
+                    if sender.is_authenticated():
+                        ok = sender.ensure_healthy()
+                        if not ok:
+                            logger.warning(f"STK session unhealthy for user {user.id} — needs re-auth")
+                except Exception as e:
+                    logger.error(f"STK health check failed for user {user.id}: {e}")
+        except Exception as e:
+            logger.error(f"Error in _stk_health_check: {e}")
         finally:
             db.close()
 

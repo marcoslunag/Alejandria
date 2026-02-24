@@ -119,7 +119,7 @@ class STKKindleSender:
                 logger.warning(f"Unexpected devices response type: {type(devices_response)}")
                 return []
 
-            return [
+            result = [
                 {
                     'serial': d.device_serial_number,
                     'name': getattr(d, 'device_name', 'Kindle'),
@@ -127,12 +127,25 @@ class STKKindleSender:
                 }
                 for d in devices
             ]
+            # Persist any auto-refreshed tokens back to disk
+            self._save_client()
+            return result
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Failed to get Kindle devices for user {self.user_id}: {error_msg}")
             if self._is_token_expired_error(error_msg):
                 self._handle_expired_token()
             return []
+
+    def ensure_healthy(self) -> bool:
+        """Check session health and persist any refreshed tokens. Returns True if healthy."""
+        if not self.client:
+            return False
+        devices = self.get_devices()
+        if devices is not None and self.client:
+            logger.info(f"STK session healthy for user {self.user_id} ({len(devices)} devices)")
+            return True
+        return False
 
     def send_file(
         self,
@@ -179,6 +192,8 @@ class STKKindleSender:
             )
 
             logger.info(f"Successfully sent {file_path.name} to Kindle for user {self.user_id}")
+            # Persist any auto-refreshed tokens back to disk
+            self._save_client()
             return {'success': True, 'message': f'Sent to {len(device_serials)} device(s)'}
 
         except Exception as e:

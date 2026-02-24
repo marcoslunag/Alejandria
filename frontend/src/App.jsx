@@ -20,6 +20,7 @@ import AdminUsers from './pages/AdminUsers';
 import Discover from './pages/Discover';
 import MangaReader from './pages/MangaReader';
 import Upload from './pages/Upload';
+import DeviceSetup from './pages/DeviceSetup';
 
 function ProtectedLayout() {
   const { mustChangePassword, isAdmin } = useAuth();
@@ -98,6 +99,13 @@ function App() {
             <Route path="/change-password" element={
               <ProtectedRoute>
                 <ChangePassword />
+              </ProtectedRoute>
+            } />
+
+            {/* Device setup wizard (after first password change) */}
+            <Route path="/device-setup" element={
+              <ProtectedRoute>
+                <DeviceSetup />
               </ProtectedRoute>
             } />
 

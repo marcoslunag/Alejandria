@@ -41,6 +41,7 @@ class UserResponse(BaseModel):
     stk_device_serial: Optional[str] = None
     stk_device_name: Optional[str] = None
     auto_send_to_kindle: bool
+    ereader_type: str = "kindle"
     created_at: datetime
 
     class Config:

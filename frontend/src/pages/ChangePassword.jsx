@@ -12,6 +12,8 @@ const ChangePassword = () => {
   const [loading, setLoading] = useState(false);
   const { changePassword, mustChangePassword } = useAuth();
   const navigate = useNavigate();
+  // Guardar si era "primer cambio" antes de que changePassword lo ponga a false
+  const isFirstChange = mustChangePassword;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,7 +34,8 @@ const ChangePassword = () => {
     try {
       await changePassword(currentPassword, newPassword);
       toast.success('Contrasena actualizada correctamente');
-      navigate('/');
+      // Primera vez → configurar dispositivo; admin reset → inicio normal
+      navigate(isFirstChange ? '/device-setup' : '/');
     } catch (err) {
       const detail = err.response?.data?.detail;
       setError(detail || 'Error al cambiar la contrasena');

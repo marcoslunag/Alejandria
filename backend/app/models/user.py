@@ -23,6 +23,10 @@ class User(Base):
     is_admin = Column(Boolean, default=False)
     must_change_password = Column(Boolean, default=False)
 
+    # Tipo de e-reader del usuario
+    # 'kindle' | 'kobo' | 'pocketbook' | 'android' | 'other'
+    ereader_type = Column(String(20), default='kindle', server_default='kindle')
+
     # Per-user Kindle/KCC settings (replaces AppSettings)
     kcc_profile = Column(String(20), default="KPW5")
     stk_device_serial = Column(String(50), nullable=True)

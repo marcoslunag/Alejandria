@@ -37,7 +37,7 @@ const LEVEL_STYLES = {
 };
 
 const Settings = () => {
-  const { isAdmin } = useAuth();
+  const { isAdmin, ereaderType, updateEreaderType } = useAuth();
   const [systemStatus, setSystemStatus] = useState(null);
   const [libraryStats, setLibraryStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -60,6 +60,7 @@ const Settings = () => {
     preferred_format: 'auto',
     max_file_size_mb: 0,
     preferred_hosts: '[]',
+    ereader_type: 'kindle',
   });
 
   // Kindle device profiles for KCC
@@ -127,6 +128,8 @@ const Settings = () => {
     try {
       setSaveStatus('saving');
       await mangaApi.saveSettings(settings);
+      // Sincronizar ereader_type en AuthContext para que el resto de la app lo vea
+      if (settings.ereader_type) updateEreaderType(settings.ereader_type);
       setSaveStatus('success');
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (error) {
@@ -256,8 +259,42 @@ const Settings = () => {
         </div>
       ) : (
         <div className="space-y-8">
-          {/* Configuración de Kindle */}
+          {/* Dispositivo de Lectura */}
           <section>
+            <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+              <FaTabletAlt className="text-blue-400" />
+              Dispositivo de Lectura
+            </h2>
+            <div className="card p-6">
+              <p className="text-sm text-gray-400 mb-4">
+                Selecciona tu dispositivo para ver solo las opciones relevantes.
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+                {[
+                  { id: 'kindle', label: 'Kindle', color: 'orange' },
+                  { id: 'kobo', label: 'Kobo', color: 'blue' },
+                  { id: 'pocketbook', label: 'PocketBook', color: 'green' },
+                  { id: 'android', label: 'Android', color: 'purple' },
+                  { id: 'other', label: 'Otro', color: 'gray' },
+                ].map(d => (
+                  <button
+                    key={d.id}
+                    onClick={() => handleInputChange('ereader_type', d.id)}
+                    className={`px-3 py-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                      settings.ereader_type === d.id
+                        ? `border-${d.color}-500 bg-${d.color}-500/20 text-${d.color}-300`
+                        : 'border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-500'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {/* Configuración de Kindle (solo para usuarios Kindle) */}
+          {settings.ereader_type === 'kindle' && <section>
             <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
               <FaTabletAlt className="text-orange-500" />
               Configuración de Kindle
@@ -298,7 +335,45 @@ const Settings = () => {
                 </label>
               </div>
             </div>
-          </section>
+          </section>}
+
+          {/* OPDS — para dispositivos no-Kindle */}
+          {settings.ereader_type !== 'kindle' && <section>
+            <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+              <FaBook className="text-blue-400" />
+              Catálogo OPDS
+            </h2>
+            <div className="card p-6 space-y-4">
+              <p className="text-sm text-gray-400">
+                Alejandría incluye un servidor OPDS 1.x compatible con KOReader, PocketBook, Moon+ Reader y otros lectores.
+                Añade la siguiente URL en tu aplicación lectora como catálogo OPDS.
+              </p>
+              <div className="bg-gray-800 rounded-lg p-4 font-mono text-sm text-green-300 flex items-center justify-between">
+                <span>{window.location.origin}/api/v1/opds</span>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/api/v1/opds`); toast.success('URL copiada'); }}
+                  className="ml-4 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs"
+                >
+                  Copiar
+                </button>
+              </div>
+              <div className="text-sm text-gray-400 space-y-2">
+                {settings.ereader_type === 'kobo' && (
+                  <p>En <strong className="text-white">Kobo</strong>: instala KOReader → Menú → Buscar → Catálogo OPDS → Añadir catálogo.</p>
+                )}
+                {settings.ereader_type === 'pocketbook' && (
+                  <p>En <strong className="text-white">PocketBook</strong>: Aplicaciones → OPDS Catalogs → Añadir.</p>
+                )}
+                {settings.ereader_type === 'android' && (
+                  <p>En <strong className="text-white">Moon+ Reader</strong> o <strong className="text-white">Librera</strong>: Menú → Red → Catálogo OPDS → Añadir.</p>
+                )}
+                {settings.ereader_type === 'other' && (
+                  <p>Usa cualquier cliente OPDS compatible con la URL de arriba. Credenciales: tu usuario y contraseña de Alejandría.</p>
+                )}
+                <p className="text-gray-500">Credenciales: tu usuario y contraseña de Alejandría (HTTP Basic Auth).</p>
+              </div>
+            </div>
+          </section>}
 
           {/* Preferencias de Descarga */}
           <section>
@@ -413,8 +488,8 @@ const Settings = () => {
             </div>
           </section>
 
-          {/* Amazon Send to Kindle (STK - OAuth2) */}
-          <section>
+          {/* Amazon Send to Kindle (STK - OAuth2) — solo para Kindle */}
+          {settings.ereader_type === 'kindle' && <section>
             <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
               <FaAmazon className="text-orange-400" />
               Amazon Send to Kindle
@@ -591,7 +666,7 @@ const Settings = () => {
                 </div>
               )}
             </div>
-          </section>
+          </section>}
 
           {/* BOTÓN GUARDAR - Al final de todas las configuraciones */}
           <section className="sticky bottom-4 z-10">
@@ -631,8 +706,8 @@ const Settings = () => {
             </div>
           </section>
 
-          {/* Estado de Kindle */}
-          <section>
+          {/* Estado de Kindle — solo Kindle */}
+          {settings.ereader_type === 'kindle' && <section>
             <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
               <FaTabletAlt className="text-orange-500" />
               Estado de Kindle
@@ -694,7 +769,7 @@ const Settings = () => {
                 </div>
               )}
             </div>
-          </section>
+          </section>}
 
           {/* Bandeja de Entrada (/imports) */}
           <section>

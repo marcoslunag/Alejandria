@@ -137,6 +137,9 @@ def _migrate_columns():
             if 'last_notification_check' not in u_cols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN last_notification_check TIMESTAMP NULL"))
                 logger.info("Added last_notification_check column to users table")
+            if 'ereader_type' not in u_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN ereader_type VARCHAR(20) DEFAULT 'kindle'"))
+                logger.info("Added ereader_type column to users table")
 
 
 def init_db():

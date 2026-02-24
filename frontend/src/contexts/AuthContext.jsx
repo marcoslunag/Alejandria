@@ -83,6 +83,10 @@ export const AuthProvider = ({ children }) => {
     setMustChangePassword(false);
   };
 
+  const updateEreaderType = (type) => {
+    setUser(prev => prev ? { ...prev, ereader_type: type } : prev);
+  };
+
   return (
     <AuthContext.Provider value={{
       user,
@@ -92,8 +96,10 @@ export const AuthProvider = ({ children }) => {
       logout,
       changePassword,
       mustChangePassword,
+      updateEreaderType,
       isAuthenticated: !!user,
       isAdmin: user?.is_admin || false,
+      ereaderType: user?.ereader_type || 'kindle',
     }}>
       {children}
     </AuthContext.Provider>
