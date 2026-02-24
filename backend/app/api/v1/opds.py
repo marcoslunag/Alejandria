@@ -232,15 +232,24 @@ async def opds_manga(
 
     entries = ""
     for m in page_items:
-        links = _manga_acquisition_links(m, db)
-        if not links:
-            continue
+        links, avail, total = _manga_acquisition_links(m, db)
+        summary = m.description or ""
+        if total == 0:
+            note = "(Sin capítulos)"
+        elif avail == 0:
+            note = f"(0/{total} cap. descargados — pendiente)"
+        elif avail < total:
+            note = f"({avail}/{total} cap. disponibles)"
+        else:
+            note = ""
+        if note:
+            summary = f"{note}  {summary}".strip()
         entries += _acq_entry(
             id_=f"urn:alejandria:manga:{m.id}",
             title=m.title,
             updated=_now_iso(),
             author=m.author or "",
-            summary=m.synopsis or "",
+            summary=summary,
             cover_url=f"/api/v1/opds/covers/manga/{m.id}" if m.cover_url else "",
             acquisition_links=links,
         )
@@ -250,33 +259,39 @@ async def opds_manga(
     return Response(content=xml, media_type=OPDS_MIME)
 
 
-def _manga_acquisition_links(manga: Manga, db: Session) -> List[str]:
-    """Devuelve acquisition links para un manga (todos sus capítulos disponibles)."""
+def _manga_acquisition_links(manga: Manga, db: Session) -> tuple:
+    """Devuelve (links, capítulos_disponibles, total_capítulos)."""
     chapters = db.query(Chapter).filter(
         Chapter.manga_id == manga.id
     ).order_by(Chapter.number).all()
 
+    total = len(chapters)
+    avail = 0
     links = []
     for ch in chapters:
         label = f"Cap. {ch.number}"
+        ch_links = []
         # EPUB (convertido por KCC)
         if ch.converted_path:
             epub_paths = [p.strip() for p in ch.converted_path.split("|") if p.strip()]
             for idx, ep in enumerate(epub_paths):
                 part = f" Parte {idx+1}" if len(epub_paths) > 1 else ""
-                links.append(_acq_link(
+                ch_links.append(_acq_link(
                     href=f"/api/v1/opds/download/manga/{manga.id}/{ch.id}/epub/{idx}",
                     mime=EPUB_MIME,
                     title=f"{label}{part} (EPUB)",
                 ))
         # CBZ original
         if ch.file_path and Path(ch.file_path).exists():
-            links.append(_acq_link(
+            ch_links.append(_acq_link(
                 href=f"/api/v1/opds/download/manga/{manga.id}/{ch.id}/cbz",
                 mime=CBZ_MIME,
                 title=f"{label} (CBZ)",
             ))
-    return links
+        if ch_links:
+            avail += 1
+            links.extend(ch_links)
+    return links, avail, total
 
 
 # ---------------------------------------------------------------------------
@@ -296,15 +311,24 @@ async def opds_comics(
 
     entries = ""
     for c in page_items:
-        links = _comic_acquisition_links(c, db)
-        if not links:
-            continue
+        links, avail, total = _comic_acquisition_links(c, db)
+        summary = c.description or ""
+        if total == 0:
+            note = "(Sin issues)"
+        elif avail == 0:
+            note = f"(0/{total} issues descargados — pendiente)"
+        elif avail < total:
+            note = f"({avail}/{total} issues disponibles)"
+        else:
+            note = ""
+        if note:
+            summary = f"{note}  {summary}".strip()
         entries += _acq_entry(
             id_=f"urn:alejandria:comics:{c.id}",
             title=c.title,
             updated=_now_iso(),
             author=c.author or "",
-            summary=c.description or "",
+            summary=summary,
             cover_url=f"/api/v1/opds/covers/comics/{c.id}" if c.cover_url else "",
             acquisition_links=links,
         )
@@ -314,30 +338,37 @@ async def opds_comics(
     return Response(content=xml, media_type=OPDS_MIME)
 
 
-def _comic_acquisition_links(comic: Comic, db: Session) -> List[str]:
+def _comic_acquisition_links(comic: Comic, db: Session) -> tuple:
+    """Devuelve (links, issues_disponibles, total_issues)."""
     issues = db.query(ComicIssue).filter(
         ComicIssue.comic_id == comic.id
     ).order_by(ComicIssue.issue_number).all()
 
+    total = len(issues)
+    avail = 0
     links = []
     for issue in issues:
         label = f"#{issue.issue_number}"
+        iss_links = []
         if issue.converted_path:
             epub_paths = [p.strip() for p in issue.converted_path.split("|") if p.strip()]
             for idx, ep in enumerate(epub_paths):
                 part = f" Parte {idx+1}" if len(epub_paths) > 1 else ""
-                links.append(_acq_link(
+                iss_links.append(_acq_link(
                     href=f"/api/v1/opds/download/comics/{comic.id}/{issue.id}/epub/{idx}",
                     mime=EPUB_MIME,
                     title=f"{label}{part} (EPUB)",
                 ))
         if issue.file_path and Path(issue.file_path).exists():
-            links.append(_acq_link(
+            iss_links.append(_acq_link(
                 href=f"/api/v1/opds/download/comics/{comic.id}/{issue.id}/cbz",
                 mime=CBZ_MIME,
                 title=f"{label} (CBZ)",
             ))
-    return links
+        if iss_links:
+            avail += 1
+            links.extend(iss_links)
+    return links, avail, total
 
 
 # ---------------------------------------------------------------------------
@@ -357,15 +388,20 @@ async def opds_books(
 
     entries = ""
     for b in page_items:
-        links = _book_acquisition_links(b, db)
-        if not links:
-            continue
+        links, avail, total = _book_acquisition_links(b, db)
+        summary = b.description or ""
+        if avail == 0:
+            note = "(Pendiente de descarga)"
+        else:
+            note = ""
+        if note:
+            summary = f"{note}  {summary}".strip()
         entries += _acq_entry(
             id_=f"urn:alejandria:books:{b.id}",
             title=b.title,
             updated=_now_iso(),
             author=b.author or "",
-            summary=b.description or "",
+            summary=summary,
             cover_url=f"/api/v1/opds/covers/books/{b.id}" if b.cover_url else "",
             acquisition_links=links,
         )
@@ -375,11 +411,14 @@ async def opds_books(
     return Response(content=xml, media_type=OPDS_MIME)
 
 
-def _book_acquisition_links(book: Book, db: Session) -> List[str]:
+def _book_acquisition_links(book: Book, db: Session) -> tuple:
+    """Devuelve (links, archivos_disponibles, total_archivos)."""
     chapters = db.query(BookChapter).filter(
         BookChapter.book_id == book.id
     ).order_by(BookChapter.number).all()
 
+    total = len(chapters)
+    avail = 0
     links = []
     for ch in chapters:
         if ch.file_path and Path(ch.file_path).exists():
@@ -390,7 +429,8 @@ def _book_acquisition_links(book: Book, db: Session) -> List[str]:
                 mime=mime,
                 title=f"Libro ({ext[1:].upper()})",
             ))
-    return links
+            avail += 1
+    return links, avail, total
 
 
 # ---------------------------------------------------------------------------
@@ -413,15 +453,14 @@ async def opds_search(
             Manga.title.ilike(f"%{q}%"),
         ).limit(PAGE_SIZE).all()
         for m in mangas:
-            links = _manga_acquisition_links(m, db)
-            if not links:
-                continue
+            links, avail, total = _manga_acquisition_links(m, db)
+            note = f"({avail}/{total} cap.)" if avail < total else ""
             entries += _acq_entry(
                 id_=f"urn:alejandria:manga:{m.id}",
                 title=f"[Manga] {m.title}",
                 updated=_now_iso(),
                 author=m.author or "",
-                summary=m.synopsis or "",
+                summary=f"{note}  {m.description or ''}".strip() if note else (m.description or ""),
                 cover_url=f"/api/v1/opds/covers/manga/{m.id}" if m.cover_url else "",
                 acquisition_links=links,
             )
@@ -432,15 +471,14 @@ async def opds_search(
             Comic.title.ilike(f"%{q}%"),
         ).limit(PAGE_SIZE).all()
         for c in comics:
-            links = _comic_acquisition_links(c, db)
-            if not links:
-                continue
+            links, avail, total = _comic_acquisition_links(c, db)
+            note = f"({avail}/{total} issues)" if avail < total else ""
             entries += _acq_entry(
                 id_=f"urn:alejandria:comics:{c.id}",
                 title=f"[Cómic] {c.title}",
                 updated=_now_iso(),
                 author=c.author or "",
-                summary=c.description or "",
+                summary=f"{note}  {c.description or ''}".strip() if note else (c.description or ""),
                 cover_url=f"/api/v1/opds/covers/comics/{c.id}" if c.cover_url else "",
                 acquisition_links=links,
             )
@@ -451,15 +489,14 @@ async def opds_search(
             Book.title.ilike(f"%{q}%"),
         ).limit(PAGE_SIZE).all()
         for b in books:
-            links = _book_acquisition_links(b, db)
-            if not links:
-                continue
+            links, avail, _ = _book_acquisition_links(b, db)
+            note = "(Pendiente)" if avail == 0 else ""
             entries += _acq_entry(
                 id_=f"urn:alejandria:books:{b.id}",
                 title=f"[Libro] {b.title}",
                 updated=_now_iso(),
                 author=b.author or "",
-                summary=b.description or "",
+                summary=f"{note}  {b.description or ''}".strip() if note else (b.description or ""),
                 cover_url=f"/api/v1/opds/covers/books/{b.id}" if b.cover_url else "",
                 acquisition_links=links,
             )
