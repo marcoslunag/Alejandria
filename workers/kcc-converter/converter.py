@@ -35,7 +35,7 @@ KCC_CONFIG_FILE = WATCH_DIR / '.kcc_config.json'
 # Defaults (can be overridden by config file)
 KCC_PROFILE = os.getenv('KCC_PROFILE', 'KPW5')
 KCC_FORMAT = os.getenv('KCC_FORMAT', 'EPUB')  # MOBI para Kindle nativo
-KCC_QUALITY = os.getenv('KCC_QUALITY', '95')
+KCC_QUALITY = os.getenv('KCC_QUALITY', '85')
 
 # Tamaño máximo por archivo para STK (Send to Kindle API)
 MAX_OUTPUT_SIZE_MB = 180  # Dejamos margen para metadatos
