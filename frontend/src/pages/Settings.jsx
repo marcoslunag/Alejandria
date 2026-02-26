@@ -259,8 +259,8 @@ const Settings = () => {
         </div>
       ) : (
         <div className="space-y-8">
-          {/* Dispositivo de Lectura */}
-          <section>
+          {/* Dispositivo de Lectura — solo para usuarios normales, no admin */}
+          {!isAdmin && <section>
             <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
               <FaTabletAlt className="text-blue-400" />
               Dispositivo de Lectura
@@ -291,10 +291,10 @@ const Settings = () => {
                 ))}
               </div>
             </div>
-          </section>
+          </section>}
 
           {/* Configuración de Kindle (solo para usuarios Kindle) */}
-          {settings.ereader_type === 'kindle' && <section>
+          {!isAdmin && settings.ereader_type === 'kindle' && <section>
             <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
               <FaTabletAlt className="text-orange-500" />
               Configuración de Kindle
@@ -337,8 +337,8 @@ const Settings = () => {
             </div>
           </section>}
 
-          {/* OPDS — para dispositivos no-Kindle */}
-          {settings.ereader_type !== 'kindle' && <section>
+          {/* OPDS — para dispositivos no-Kindle y no-admin */}
+          {!isAdmin && settings.ereader_type !== 'kindle' && <section>
             <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
               <FaBook className="text-blue-400" />
               Catálogo OPDS
@@ -488,8 +488,8 @@ const Settings = () => {
             </div>
           </section>
 
-          {/* Amazon Send to Kindle (STK - OAuth2) — solo para Kindle */}
-          {settings.ereader_type === 'kindle' && <section>
+          {/* Amazon Send to Kindle (STK - OAuth2) — solo para Kindle, no admin */}
+          {!isAdmin && settings.ereader_type === 'kindle' && <section>
             <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
               <FaAmazon className="text-orange-400" />
               Amazon Send to Kindle
@@ -706,8 +706,8 @@ const Settings = () => {
             </div>
           </section>
 
-          {/* Estado de Kindle — solo Kindle */}
-          {settings.ereader_type === 'kindle' && <section>
+          {/* Estado de Kindle — solo Kindle, no admin */}
+          {!isAdmin && settings.ereader_type === 'kindle' && <section>
             <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
               <FaTabletAlt className="text-orange-500" />
               Estado de Kindle

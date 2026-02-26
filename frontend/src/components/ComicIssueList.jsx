@@ -23,7 +23,7 @@ import {
   FaLock
 } from 'react-icons/fa';
 
-const ComicIssueList = ({ comicId }) => {
+const ComicIssueList = ({ comicId, refreshKey = 0 }) => {
   const [issues, setIssues] = useState([]);
   const [selectedIssues, setSelectedIssues] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -33,7 +33,7 @@ const ComicIssueList = ({ comicId }) => {
 
   useEffect(() => {
     loadIssues();
-  }, [comicId]);
+  }, [comicId, refreshKey]);
 
   const loadIssues = async () => {
     try {

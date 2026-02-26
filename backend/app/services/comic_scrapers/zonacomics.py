@@ -97,8 +97,9 @@ class ZonaComicsScraper(ComicScraperBase):
             logger.error(f"ZonaComics search error: {e}")
             return []
 
-    async def get_download_links(self, url: str) -> ComicScraperResult:
-        """Get download links from a comic page using Playwright"""
+    async def get_download_links(self, url: str, resolve_ouo: bool = True) -> ComicScraperResult:
+        """Get download links from a comic page using Playwright.
+        resolve_ouo=False skips ouo resolution and returns shorteners immediately."""
         playwright_scraper = None
         page = None
         try:
@@ -199,14 +200,27 @@ class ZonaComicsScraper(ComicScraperBase):
             # Resolve ouo.io links using Playwright
             # Limit to 10 links max to avoid excessive resolution time
             if ouo_links:
-                links_to_resolve = ouo_links[:10]
-                if len(ouo_links) > 10:
-                    logger.info(f"ZonaComics: Limiting resolution to 10 of {len(ouo_links)} ouo.io links")
-                logger.info(f"ZonaComics: Resolving {len(links_to_resolve)} ouo.io links with Playwright...")
-                resolved = await self._resolve_ouo_links_batch(links_to_resolve, playwright_scraper)
-                for resolved_link in resolved:
-                    if not any(existing.url == resolved_link.url for existing in download_links):
-                        download_links.append(resolved_link)
+                if not resolve_ouo:
+                    # Skip resolution — caller will resolve progressively and commit after each
+                    logger.info(f"ZonaComics: Skipping ouo resolution (resolve_ouo=False), returning {len(ouo_links)} as shorteners")
+                    for ouo_info in ouo_links[:10]:
+                        shortener_link = DownloadLink(
+                            url=ouo_info['url'],
+                            host=ouo_info['detected_host'],
+                            quality_score=self.get_quality_score(ouo_info['detected_host']),
+                            link_status='shortener'
+                        )
+                        if not any(existing.url == shortener_link.url for existing in download_links):
+                            download_links.append(shortener_link)
+                else:
+                    links_to_resolve = ouo_links[:10]
+                    if len(ouo_links) > 10:
+                        logger.info(f"ZonaComics: Limiting resolution to 10 of {len(ouo_links)} ouo.io links")
+                    logger.info(f"ZonaComics: Resolving {len(links_to_resolve)} ouo.io links with Playwright...")
+                    resolved = await self._resolve_ouo_links_batch(links_to_resolve, playwright_scraper)
+                    for resolved_link in resolved:
+                        if not any(existing.url == resolved_link.url for existing in download_links):
+                            download_links.append(resolved_link)
 
                 # Add remaining unresolved links as-is (will be resolved at download time)
                 for ouo_info in ouo_links[10:]:

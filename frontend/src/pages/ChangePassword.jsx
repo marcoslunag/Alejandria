@@ -10,10 +10,11 @@ const ChangePassword = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { changePassword, mustChangePassword } = useAuth();
+  const { changePassword, mustChangePassword, isAdmin } = useAuth();
   const navigate = useNavigate();
   // Guardar si era "primer cambio" antes de que changePassword lo ponga a false
-  const isFirstChange = mustChangePassword;
+  // Admin nunca va al wizard de dispositivo (no lo necesita)
+  const isFirstChange = mustChangePassword && !isAdmin;
 
   const handleSubmit = async (e) => {
     e.preventDefault();

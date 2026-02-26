@@ -27,6 +27,7 @@ const ComicDetails = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [searchingSources, setSearchingSources] = useState(false);
+  const [issueRefreshKey, setIssueRefreshKey] = useState(0);
   const [translatedDescription, setTranslatedDescription] = useState(null);
   const [translating, setTranslating] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -87,12 +88,22 @@ const ComicDetails = () => {
     try {
       setSearchingSources(true);
       await comicApi.searchSources(id);
-      toast('Buscando fuentes de descarga en segundo plano...', { icon: 'ℹ️' });
-      setTimeout(() => loadComic(), 3000);
+      toast('Buscando fuentes… los links aparecerán según se resuelvan', { icon: 'ℹ️' });
+
+      // Poll every 5s for up to 90s so resolved links appear progressively
+      let polls = 0;
+      const maxPolls = 18;
+      const interval = setInterval(() => {
+        polls++;
+        setIssueRefreshKey(k => k + 1);
+        if (polls >= maxPolls) {
+          clearInterval(interval);
+          setSearchingSources(false);
+        }
+      }, 5000);
     } catch (error) {
       console.error('Error searching sources:', error);
       toast.error('Error al buscar fuentes');
-    } finally {
       setSearchingSources(false);
     }
   };
@@ -211,7 +222,7 @@ const ComicDetails = () => {
       notFoundMessage="Comic no encontrado"
       backLink={{ to: '/comics', label: 'Volver a Comics' }}
     >
-      <ComicIssueList comicId={id} />
+      <ComicIssueList comicId={id} refreshKey={issueRefreshKey} />
       <ConfirmModal
         isOpen={showDeleteConfirm}
         title="Eliminar cómic"

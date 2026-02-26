@@ -127,9 +127,10 @@ class MegaComicsScraper(ComicScraperBase):
             logger.error(f"MegaComics search error: {e}")
             return []
 
-    async def get_download_links(self, url: str) -> ComicScraperResult:
+    async def get_download_links(self, url: str, resolve_ouo: bool = True) -> ComicScraperResult:
         """
         Extract download links from a comic page.
+        resolve_ouo=False skips ouo resolution and returns shorteners immediately.
         MegaComicsTV3 uses ouo.io (→ MEGA) and uii.io (→ MediaFire) shorteners.
         Resolves ouo.io links via Playwright, keeps uii.io as-is.
         """
@@ -197,19 +198,9 @@ class MegaComicsScraper(ComicScraperBase):
                 # Resolve ouo.io links via Playwright (up to 10)
                 if ouo_links_with_issues:
                     links_to_resolve = ouo_links_with_issues[:10]
-                    try:
-                        playwright_scraper = await self._get_playwright_scraper()
-                        resolved = await self._resolve_ouo_links_batch(
-                            links_to_resolve, playwright_scraper
-                        )
-                        # Transfer issue_range from the original ouo link info
-                        for i, resolved_link in enumerate(resolved):
-                            if i < len(links_to_resolve):
-                                resolved_link.issue_range = links_to_resolve[i].get('issue_label')
-                        download_links.extend(resolved)
-                        logger.info(f"MegaComics: Resolved {len(resolved)}/{len(links_to_resolve)} ouo.io links")
-                    except Exception as e:
-                        logger.error(f"MegaComics: Playwright resolution failed: {e}")
+                    if not resolve_ouo:
+                        # Skip resolution — caller will resolve progressively
+                        logger.info(f"MegaComics: Skipping ouo resolution (resolve_ouo=False), returning {len(links_to_resolve)} as shorteners")
                         for ouo_info in links_to_resolve:
                             host = ouo_info.get('detected_host', HostType.MEGA)
                             download_links.append(DownloadLink(
@@ -220,6 +211,30 @@ class MegaComicsScraper(ComicScraperBase):
                                 link_status='shortener',
                                 issue_range=ouo_info.get('issue_label')
                             ))
+                    else:
+                        try:
+                            playwright_scraper = await self._get_playwright_scraper()
+                            resolved = await self._resolve_ouo_links_batch(
+                                links_to_resolve, playwright_scraper
+                            )
+                            # Transfer issue_range from the original ouo link info
+                            for i, resolved_link in enumerate(resolved):
+                                if i < len(links_to_resolve):
+                                    resolved_link.issue_range = links_to_resolve[i].get('issue_label')
+                            download_links.extend(resolved)
+                            logger.info(f"MegaComics: Resolved {len(resolved)}/{len(links_to_resolve)} ouo.io links")
+                        except Exception as e:
+                            logger.error(f"MegaComics: Playwright resolution failed: {e}")
+                            for ouo_info in links_to_resolve:
+                                host = ouo_info.get('detected_host', HostType.MEGA)
+                                download_links.append(DownloadLink(
+                                    url=ouo_info['url'],
+                                    host=host,
+                                    quality_score=self.get_quality_score(host),
+                                    file_size=file_size,
+                                    link_status='shortener',
+                                    issue_range=ouo_info.get('issue_label')
+                                ))
 
                 # Save uii.io links as-is (need captcha)
                 for uii_info in uii_links_with_issues:

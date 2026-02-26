@@ -284,9 +284,11 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
 
         db.commit()
 
-        # Get download links from scraper
+        # Get download links from scraper — skip ouo resolution so direct links appear immediately
         logger.info(f"Fetching download links for volume from {source}: {volume_url}")
-        scrape_result = await scraper.get_download_links(volume_url)
+        use_progressive = source in ('zonacomics', 'megacomics')
+        scrape_result = await scraper.get_download_links(volume_url, resolve_ouo=not use_progressive) \
+            if use_progressive else await scraper.get_download_links(volume_url)
 
         if scrape_result.success and scrape_result.download_links:
             issues = db.query(ComicIssue).filter(
@@ -303,22 +305,26 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
                 if num > 0:
                     issue_map[num] = issue
 
-            # Filter to only resolved/real host links (not shorteners)
+            # Include shorteners in assignment strategy (Phase 1 — show immediately)
+            # Prefer resolved links; fall back to shorteners so something appears right away
             resolved_links = [
                 dl for dl in scrape_result.download_links
                 if dl.link_status == 'resolved'
             ]
-            # Sort by quality (best first)
-            resolved_links.sort(key=lambda x: x.quality_score, reverse=True)
+            assignable_links = resolved_links or [
+                dl for dl in scrape_result.download_links
+                if dl.link_status == 'shortener'
+            ]
+            assignable_links.sort(key=lambda x: x.quality_score, reverse=True)
 
-            # Check if links have issue_range metadata (from table parsing)
-            has_issue_mapping = any(dl.issue_range for dl in resolved_links)
+            # Check if links have issue_range metadata (from table parsing — MegaComics)
+            has_issue_mapping = any(dl.issue_range for dl in assignable_links)
 
             if has_issue_mapping:
                 # SMART ASSIGNMENT: Use issue_range from scraper to map links to issues
-                logger.info(f"Using issue_range metadata to assign {len(resolved_links)} links")
+                logger.info(f"Using issue_range metadata to assign {len(assignable_links)} links")
                 assigned = 0
-                for dl in resolved_links:
+                for dl in assignable_links:
                     if not dl.issue_range:
                         continue
                     # Parse issue_range: "#1 - #2", "#3", "#1-#5", etc.
@@ -352,28 +358,27 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
                             assigned += 1
 
                 db.commit()
-                logger.info(f"Smart assignment: {assigned}/{len(issues)} issues got links from {source}")
+                logger.info(f"Smart assignment (Phase 1): {assigned}/{len(issues)} issues got links from {source}")
 
-            elif len(resolved_links) >= max(2, len(issues) * 0.5):
-                # Multiple resolved links, no issue_range: assign sequentially per issue
-                logger.info(f"Assigning {len(resolved_links)} links sequentially to {len(issues)} issues")
+            elif len(assignable_links) >= max(2, len(issues) * 0.5):
+                # Multiple links, no issue_range: assign sequentially per issue
+                logger.info(f"Assigning {len(assignable_links)} links sequentially to {len(issues)} issues")
                 link_idx = 0
                 for issue in issues:
                     if issue.downloaded_at:
-                        logger.info(f"  Issue #{issue.issue_number}: already downloaded, skipping link assignment")
                         continue
-                    if link_idx < len(resolved_links):
-                        issue.download_url = resolved_links[link_idx].url
+                    if link_idx < len(assignable_links):
+                        issue.download_url = assignable_links[link_idx].url
                         issue.source = source
-                        issue.link_status = resolved_links[link_idx].link_status
-                        logger.info(f"  Issue #{issue.issue_number}: {resolved_links[link_idx].host.value} link assigned")
+                        issue.link_status = assignable_links[link_idx].link_status
+                        logger.info(f"  Issue #{issue.issue_number}: {assignable_links[link_idx].host.value} link assigned")
                         link_idx += 1
 
                 db.commit()
-                logger.info(f"Assigned individual links to {min(len(resolved_links), len(issues))} issues from {source}")
+                logger.info(f"Sequential assignment (Phase 1): {min(len(assignable_links), len(issues))} issues from {source}")
 
-            elif len(resolved_links) >= 1:
-                # Few resolved links: bundle all issues with best link
+            elif len(assignable_links) >= 1:
+                # Few links: bundle all issues with best link
                 bundle_id = hashlib.md5(volume_url.encode()).hexdigest()[:16]
                 bundle_title = scrape_result.title
                 bundle_range = f"#1-{issue_count}"
@@ -384,36 +389,49 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
                     issue.bundle_title = bundle_title
                     issue.bundle_range = bundle_range
                     issue.is_bundle_master = (idx == 0)
-                    issue.download_url = resolved_links[0].url
+                    issue.download_url = assignable_links[0].url
                     issue.source = f"{source} (bundle)"
+                    issue.link_status = assignable_links[0].link_status
 
-                    if issue.is_bundle_master and len(resolved_links) > 1:
-                        issue.backup_url = resolved_links[1].url
+                    if issue.is_bundle_master and len(assignable_links) > 1:
+                        issue.backup_url = assignable_links[1].url
 
                 skipped = len(issues) - len(undownloaded)
                 db.commit()
-                logger.info(f"Volume bundle created: {bundle_title} with {len(undownloaded)} issues ({skipped} already downloaded)")
+                logger.info(f"Bundle assignment (Phase 1): {bundle_title} with {len(undownloaded)} issues ({skipped} already downloaded)")
 
             else:
-                # No resolved links, use best available (including shorteners)
-                best = scrape_result.best_link
-                if best:
-                    bundle_id = hashlib.md5(volume_url.encode()).hexdigest()[:16]
-                    bundle_title = scrape_result.title
-                    bundle_range = f"#1-{issue_count}"
+                logger.warning(f"No assignable links found for volume: {volume_url}")
 
-                    undownloaded = [iss for iss in issues if not iss.downloaded_at]
-                    for idx, issue in enumerate(undownloaded):
-                        issue.bundle_id = bundle_id
-                        issue.bundle_title = bundle_title
-                        issue.bundle_range = bundle_range
-                        issue.is_bundle_master = (idx == 0)
-                        issue.download_url = best.url
-                        issue.source = f"{source} (bundle)"
-                        issue.link_status = best.link_status
+            # ── Phase 2: Resolve ouo shorteners progressively, commit after each ──
+            if use_progressive:
+                from app.services.ouo_resolver import resolve_ouo_link
+                from app.services.comic_scrapers.base import HostType as HT
 
-                    db.commit()
-                    logger.info(f"Volume bundle (shortener) created: {bundle_title} with {len(undownloaded)} issues")
+                # Group issues by their ouo shortener URL (dedup for bundle cases)
+                ouo_groups: dict = {}
+                for issue in db.query(ComicIssue).filter(
+                    ComicIssue.comic_id == comic_id,
+                    ComicIssue.link_status == 'shortener',
+                ).all():
+                    if issue.download_url and ('ouo.io' in issue.download_url or 'ouo.press' in issue.download_url):
+                        ouo_groups.setdefault(issue.download_url, []).append(issue)
+
+                if ouo_groups:
+                    logger.info(f"Phase 2: resolving {len(ouo_groups)} unique ouo links for {comic_id}")
+                    for ouo_url, bundle_issues in ouo_groups.items():
+                        try:
+                            resolved_url = await resolve_ouo_link(ouo_url)
+                            if resolved_url:
+                                for bi in bundle_issues:
+                                    bi.download_url = resolved_url
+                                    bi.link_status = 'resolved'
+                                db.commit()  # ← frontend sees this via polling
+                                logger.info(f"Resolved ouo → {resolved_url[:60]} ({len(bundle_issues)} issues)")
+                            else:
+                                logger.warning(f"Could not resolve ouo: {ouo_url[:60]}")
+                        except Exception as e:
+                            logger.error(f"Phase 2 ouo resolution failed for {ouo_url[:60]}: {e}")
         else:
             logger.warning(f"No download links found for volume: {volume_url}")
 
