@@ -836,8 +836,10 @@ class ArchiveHandler(FileSystemEventHandler):
             if not image_files:
                 continue
 
-            images_per_part = max(10, len(image_files) // parts_per_volume)
-            actual_parts = (len(image_files) + images_per_part - 1) // images_per_part
+            # Use ceiling division so 189 images / 2 parts = 95+94 (not 94+94+1)
+            import math
+            images_per_part = max(10, math.ceil(len(image_files) / parts_per_volume))
+            actual_parts = math.ceil(len(image_files) / images_per_part)
 
             for part_idx in range(actual_parts):
                 start = part_idx * images_per_part

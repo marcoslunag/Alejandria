@@ -972,16 +972,18 @@ class ContentScheduler:
                         # Tomar el último match (el número de tomo real)
                         last_match = all_tomo_matches[-1]
                         file_tomo_num = int(last_match.group(1))
-                        
                         if file_tomo_num == chapter_num:
                             converted_files.append(conv_file)
-                            continue
-                    
-                    # Fallback: buscar patrones alternativos
+                        # Si el archivo tiene tomo pero no coincide → no usar fallback
+                        # "Tomo 002 - Parte 1" no debe asignarse al capítulo 1
+                        continue
+
+                    # Fallback solo para archivos SIN número de tomo en el nombre
+                    # (e.g. "manga - Chapter 5.epub" o "manga - Parte 5.epub")
                     alt_patterns = [
                         rf'chapter\s*0*{chapter_num}(?:\D|$)',
                         rf'ch\s*0*{chapter_num}(?:\D|$)',
-                        rf'parte\s*0*{chapter_num}(?:\D|$)',  # Para archivos divididos por partes
+                        rf'parte\s*0*{chapter_num}(?:\D|$)',
                     ]
 
                     for pattern in alt_patterns:
