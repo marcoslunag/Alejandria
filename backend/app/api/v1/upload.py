@@ -27,8 +27,26 @@ import logging
 
 settings = get_settings()
 from slugify import slugify
+from collections import defaultdict
+from time import time as _time
 
 logger = logging.getLogger(__name__)
+
+# Simple in-memory rate limiter: max 20 uploads per user per hour
+_upload_attempts: dict = defaultdict(list)
+_UPLOAD_RATE_LIMIT_MAX = 20
+_UPLOAD_RATE_LIMIT_WINDOW = 3600  # 1 hour
+
+
+def _check_upload_rate_limit(user_id: int):
+    now = _time()
+    _upload_attempts[user_id] = [t for t in _upload_attempts[user_id] if now - t < _UPLOAD_RATE_LIMIT_WINDOW]
+    if len(_upload_attempts[user_id]) >= _UPLOAD_RATE_LIMIT_MAX:
+        raise HTTPException(
+            status_code=429,
+            detail="Upload rate limit exceeded. Maximum 20 uploads per hour."
+        )
+    _upload_attempts[user_id].append(now)
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
@@ -97,6 +115,9 @@ async def upload_file(
     - If the item doesn't exist in the library, it will be created from the external source.
     - The file is saved and queued for KCC conversion automatically.
     """
+    # Check upload rate limit
+    _check_upload_rate_limit(current_user.id)
+
     # Validate content_type
     if content_type not in ("manga", "comic", "book"):
         raise HTTPException(status_code=400, detail="content_type must be 'manga', 'comic', or 'book'")

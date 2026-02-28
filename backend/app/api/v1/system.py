@@ -34,29 +34,45 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
 
 
 @router.get("/status", response_model=SystemStatusResponse)
-def get_system_status(db: Session = Depends(get_db)):
+def get_system_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
-    Get system status and statistics
-
-    Args:
-        db: Database session
-
-    Returns:
-        System status information
+    Get system status and statistics (filtered to current user's data)
     """
-    # Count statistics
-    total_manga = db.query(func.count(Manga.id)).scalar()
-    monitored_manga = db.query(func.count(Manga.id)).filter(Manga.monitored == True).scalar()
-    total_chapters = db.query(func.count(Chapter.id)).scalar()
-    downloaded_chapters = db.query(func.count(Chapter.id)).filter(
-        Chapter.status.in_(['downloaded', 'converted', 'sent'])
-    ).scalar()
-    queue_size = db.query(func.count(DownloadQueue.id)).filter(
-        DownloadQueue.status.in_(['queued', 'downloading'])
-    ).scalar()
-    active_downloads = db.query(func.count(DownloadQueue.id)).filter(
-        DownloadQueue.status == 'downloading'
-    ).scalar()
+    uid = current_user.id
+    total_manga = db.query(func.count(Manga.id)).filter(Manga.user_id == uid).scalar()
+    monitored_manga = db.query(func.count(Manga.id)).filter(Manga.user_id == uid, Manga.monitored == True).scalar()
+    total_chapters = (
+        db.query(func.count(Chapter.id))
+        .join(Manga, Chapter.manga_id == Manga.id)
+        .filter(Manga.user_id == uid)
+        .scalar()
+    )
+    downloaded_chapters = (
+        db.query(func.count(Chapter.id))
+        .join(Manga, Chapter.manga_id == Manga.id)
+        .filter(Manga.user_id == uid, Chapter.status.in_(['downloaded', 'converted', 'sent']))
+        .scalar()
+    )
+    queue_size = (
+        db.query(func.count(DownloadQueue.id))
+        .outerjoin(Chapter, DownloadQueue.chapter_id == Chapter.id)
+        .outerjoin(Manga, Chapter.manga_id == Manga.id)
+        .filter(
+            DownloadQueue.status.in_(['queued', 'downloading']),
+            Manga.user_id == uid
+        )
+        .scalar()
+    )
+    active_downloads = (
+        db.query(func.count(DownloadQueue.id))
+        .outerjoin(Chapter, DownloadQueue.chapter_id == Chapter.id)
+        .outerjoin(Manga, Chapter.manga_id == Manga.id)
+        .filter(
+            DownloadQueue.status == 'downloading',
+            Manga.user_id == uid
+        )
+        .scalar()
+    )
 
     return SystemStatusResponse(
         status="running",
@@ -82,12 +98,9 @@ def health_check():
 
 
 @router.get("/config")
-def get_config():
+def get_config(current_user: User = Depends(get_current_user)):
     """
     Get system configuration (non-sensitive)
-
-    Returns:
-        System configuration
     """
     return {
         "app_name": settings.APP_NAME,
@@ -176,7 +189,7 @@ def test_stk(current_user: User = Depends(require_admin)):
         return {
             "service": "stk",
             "status": "error",
-            "message": str(e)
+            "message": "STK connection error"
         }
 
 
@@ -397,7 +410,7 @@ async def trigger_process_queue(db: Session = Depends(get_db), current_user: Use
         logger.error(f"Error triggering queue processing: {e}")
         return {
             "ok": False,
-            "message": str(e)
+            "message": "Queue processing failed"
         }
 
 
@@ -428,7 +441,7 @@ async def trigger_process_conversions(db: Session = Depends(get_db), current_use
         logger.error(f"Error triggering conversion processing: {e}")
         return {
             "ok": False,
-            "message": str(e)
+            "message": "Conversion processing failed"
         }
 
 
@@ -484,7 +497,7 @@ async def trigger_cleanup(db: Session = Depends(get_db), current_user: User = De
         logger.error(f"Cleanup error: {e}")
         return {
             "status": "error",
-            "message": str(e)
+            "message": "Cleanup failed"
         }
 
 
@@ -542,5 +555,5 @@ def translate_text(text: str, source: str = "en", target: str = "es", current_us
         return {
             "translated": text,
             "original": text,
-            "error": str(e)
+            "error": "Translation failed"
         }

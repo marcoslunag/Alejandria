@@ -128,7 +128,7 @@ async def get_popular_manga(
 
 @router.get("/search", response_model=SearchResponse)
 async def search_manga(
-    q: str = Query(..., min_length=2, description="Search query"),
+    q: str = Query(..., min_length=2, max_length=200, description="Search query"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
     db: Session = Depends(get_db),

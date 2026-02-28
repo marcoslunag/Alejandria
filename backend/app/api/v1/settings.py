@@ -182,5 +182,5 @@ async def get_terabox_status(current_user: User = Depends(get_current_user)):
         return {
             "ok": False,
             "is_configured": False,
-            "error": str(e)
+            "error": "Configuration check failed"
         }

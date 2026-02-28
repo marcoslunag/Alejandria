@@ -14,6 +14,9 @@ import sys
 from app.config import get_settings
 from app.database import init_db
 from app.api.v1 import api_router
+from app.core.deps import get_current_user
+from app.models.user import User
+from fastapi import Depends
 from app.services.scheduler import ContentScheduler
 
 # Configure logging
@@ -91,10 +94,15 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
-# Configure CORS
+# Configure CORS — use CORS_ORIGINS_STR env var in production (comma-separated)
+cors_origins = (
+    [o.strip() for o in settings.CORS_ORIGINS_STR.split(",") if o.strip()]
+    if settings.CORS_ORIGINS_STR
+    else settings.CORS_ORIGINS
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -120,13 +128,15 @@ app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 @app.get("/")
 def root():
     """Root endpoint"""
-    return {
+    response = {
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "status": "running",
-        "docs": "/docs",
         "api": settings.API_V1_PREFIX
     }
+    if settings.DEBUG:
+        response["docs"] = "/docs"
+    return response
 
 
 # Health check
@@ -138,8 +148,8 @@ def health_check():
 
 # Scheduler status endpoint
 @app.get("/scheduler/status")
-def scheduler_status():
-    """Get scheduler status"""
+def scheduler_status(current_user: User = Depends(get_current_user)):
+    """Get scheduler status (requires authentication)"""
     if scheduler:
         return scheduler.get_status()
     else:

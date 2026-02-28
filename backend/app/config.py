@@ -45,7 +45,10 @@ class Settings(BaseSettings):
 
     # API Settings
     API_V1_PREFIX: str = "/api/v1"
+    # CORS: comma-separated origins in env var CORS_ORIGINS overrides defaults
+    # Production: set CORS_ORIGINS=https://alejandria.example.com
     CORS_ORIGINS: list = ["http://localhost:3000", "http://localhost:7878"]
+    CORS_ORIGINS_STR: str = ""  # Optional: comma-separated list to override CORS_ORIGINS
 
     class Config:
         env_file = ".env"

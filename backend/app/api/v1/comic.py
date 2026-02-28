@@ -57,7 +57,7 @@ router = APIRouter(prefix="/comics", tags=["comics"])
 
 @router.get("/search", response_model=ComicSearchResponse)
 async def search_comics(
-    q: str = Query(..., min_length=2, description="Search query"),
+    q: str = Query(..., min_length=2, max_length=200, description="Search query"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
     check_availability: bool = Query(True, description="Check if sources are available (slower but filters results)"),
