@@ -50,22 +50,35 @@ const DEVICES = [
 export default function DeviceSetup() {
   const [selected, setSelected] = useState(null);
   const [saving, setSaving] = useState(false);
-  const { updateEreaderType } = useAuth();
+  const { updateEreaderType, markDeviceSetupCompleted } = useAuth();
   const navigate = useNavigate();
 
   const handleContinue = async () => {
     if (!selected) return;
     setSaving(true);
     try {
-      await api.post('/settings', { ereader_type: selected });
+      await api.post('/settings', { ereader_type: selected, device_setup_completed: true });
       updateEreaderType(selected);
+      markDeviceSetupCompleted();
       navigate('/');
     } catch (err) {
       console.error('Error saving device type:', err);
+      // Still mark as done locally so we don't loop
+      markDeviceSetupCompleted();
       navigate('/');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSkip = async () => {
+    try {
+      await api.post('/settings', { device_setup_completed: true });
+    } catch (err) {
+      console.error('Error marking device setup complete:', err);
+    }
+    markDeviceSetupCompleted();
+    navigate('/');
   };
 
   return (
@@ -124,7 +137,7 @@ export default function DeviceSetup() {
         {/* Skip link */}
         <div className="text-center mt-4">
           <button
-            onClick={() => navigate('/')}
+            onClick={handleSkip}
             className="text-sm text-gray-500 hover:text-gray-400 underline"
           >
             Omitir por ahora

@@ -22,6 +22,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
     must_change_password = Column(Boolean, default=False)
+    device_setup_completed = Column(Boolean, default=False)
 
     # Tipo de e-reader del usuario
     # 'kindle' | 'kobo' | 'pocketbook' | 'android' | 'other'

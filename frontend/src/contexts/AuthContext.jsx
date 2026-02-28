@@ -87,6 +87,10 @@ export const AuthProvider = ({ children }) => {
     setUser(prev => prev ? { ...prev, ereader_type: type } : prev);
   };
 
+  const markDeviceSetupCompleted = () => {
+    setUser(prev => prev ? { ...prev, device_setup_completed: true } : prev);
+  };
+
   return (
     <AuthContext.Provider value={{
       user,
@@ -97,9 +101,11 @@ export const AuthProvider = ({ children }) => {
       changePassword,
       mustChangePassword,
       updateEreaderType,
+      markDeviceSetupCompleted,
       isAuthenticated: !!user,
       isAdmin: user?.is_admin || false,
       ereaderType: user?.ereader_type || 'kindle',
+      deviceSetupCompleted: user?.device_setup_completed ?? false,
     }}>
       {children}
     </AuthContext.Provider>

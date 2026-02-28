@@ -23,7 +23,7 @@ import Upload from './pages/Upload';
 import DeviceSetup from './pages/DeviceSetup';
 
 function ProtectedLayout() {
-  const { mustChangePassword, isAdmin } = useAuth();
+  const { mustChangePassword, isAdmin, deviceSetupCompleted } = useAuth();
 
   // Admin users go straight to user management
   if (isAdmin) {
@@ -33,6 +33,11 @@ function ProtectedLayout() {
   // Force redirect to change-password if needed
   if (mustChangePassword) {
     return <Navigate to="/change-password" replace />;
+  }
+
+  // Force device setup for non-admin users who haven't configured their device yet
+  if (!deviceSetupCompleted) {
+    return <Navigate to="/device-setup" replace />;
   }
 
   return (

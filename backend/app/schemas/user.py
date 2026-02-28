@@ -37,6 +37,7 @@ class UserResponse(BaseModel):
     is_active: bool
     is_admin: bool = False
     must_change_password: bool = False
+    device_setup_completed: bool = False
     kcc_profile: str
     stk_device_serial: Optional[str] = None
     stk_device_name: Optional[str] = None

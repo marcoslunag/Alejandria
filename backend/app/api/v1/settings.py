@@ -54,6 +54,7 @@ class SettingsResponse(BaseModel):
     preferred_hosts: str = "[]"
     # Tipo de dispositivo de lectura
     ereader_type: str = "kindle"
+    device_setup_completed: bool = False
 
     class Config:
         from_attributes = True
@@ -71,6 +72,7 @@ class SettingsUpdate(BaseModel):
     preferred_hosts: Optional[str] = None
     # Tipo de dispositivo de lectura
     ereader_type: Optional[str] = None
+    device_setup_completed: Optional[bool] = None
 
 
 @router.get("", response_model=SettingsResponse)
@@ -87,6 +89,7 @@ async def get_settings(current_user: User = Depends(get_current_user)):
         max_file_size_mb=current_user.max_file_size_mb or 0,
         preferred_hosts=current_user.preferred_hosts or "[]",
         ereader_type=current_user.ereader_type or "kindle",
+        device_setup_completed=current_user.device_setup_completed or False,
     )
 
 
@@ -127,6 +130,9 @@ async def save_settings(
         if data.ereader_type in valid_types:
             current_user.ereader_type = data.ereader_type
 
+    if data.device_setup_completed is not None:
+        current_user.device_setup_completed = data.device_setup_completed
+
     db.commit()
     db.refresh(current_user)
 
@@ -143,6 +149,7 @@ async def save_settings(
         max_file_size_mb=current_user.max_file_size_mb or 0,
         preferred_hosts=current_user.preferred_hosts or "[]",
         ereader_type=current_user.ereader_type or "kindle",
+        device_setup_completed=current_user.device_setup_completed or False,
     )
 
 

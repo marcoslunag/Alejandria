@@ -140,6 +140,9 @@ def _migrate_columns():
             if 'ereader_type' not in u_cols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN ereader_type VARCHAR(20) DEFAULT 'kindle'"))
                 logger.info("Added ereader_type column to users table")
+            if 'device_setup_completed' not in u_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN device_setup_completed BOOLEAN DEFAULT FALSE"))
+                logger.info("Added device_setup_completed column to users table")
 
 
 def init_db():
