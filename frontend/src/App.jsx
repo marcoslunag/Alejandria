@@ -22,8 +22,19 @@ import MangaReader from './pages/MangaReader';
 import Upload from './pages/Upload';
 import DeviceSetup from './pages/DeviceSetup';
 
+const LoadingSpinner = () => (
+  <div className="min-h-screen flex items-center justify-center">
+    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+  </div>
+);
+
 function ProtectedLayout() {
-  const { mustChangePassword, isAdmin, deviceSetupCompleted } = useAuth();
+  const { mustChangePassword, isAdmin, deviceSetupCompleted, loading } = useAuth();
+
+  // Wait for /auth/me to resolve before making redirect decisions.
+  // Without this guard, user=null during loading → deviceSetupCompleted=false
+  // → redirect to /device-setup on every page reload.
+  if (loading) return <LoadingSpinner />;
 
   // Admin users go straight to user management
   if (isAdmin) {
@@ -53,7 +64,9 @@ function ProtectedLayout() {
 }
 
 function AdminLayout() {
-  const { isAdmin, mustChangePassword } = useAuth();
+  const { isAdmin, mustChangePassword, loading } = useAuth();
+
+  if (loading) return <LoadingSpinner />;
 
   if (mustChangePassword) {
     return <Navigate to="/change-password" replace />;
