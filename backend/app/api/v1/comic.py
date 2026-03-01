@@ -735,6 +735,11 @@ async def get_issues(
     """
     Get all issues for a comic
     """
+    # Verify ownership
+    comic = db.query(Comic).filter(Comic.id == comic_id, Comic.user_id == current_user.id).first()
+    if not comic:
+        raise HTTPException(status_code=404, detail="Comic not found")
+
     query = db.query(ComicIssue).filter(ComicIssue.comic_id == comic_id)
     
     if status:

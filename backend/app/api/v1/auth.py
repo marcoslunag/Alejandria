@@ -62,8 +62,7 @@ async def login(data: UserLogin, request: Request, db: Session = Depends(get_db)
         )
 
     token = create_access_token({"sub": str(user.id)})
-    safe_username = user.username.replace("
-", "").replace("", "")
+    safe_username = user.username.replace("\n", "").replace("\r", "")
     logger.info(f"User logged in: {safe_username}")
 
     return Token(
@@ -102,8 +101,7 @@ async def change_password(
     current_user.must_change_password = False
     db.commit()
 
-    safe_username = current_user.username.replace("
-", "").replace("", "")
+    safe_username = current_user.username.replace("\n", "").replace("\r", "")
     logger.info(f"User changed password: {safe_username}")
     return {"message": "Contrasena actualizada correctamente"}
 

@@ -65,8 +65,8 @@ def get_opds_user(
     if not credentials:
         raise HTTPException(
             status_code=401,
-            detail="Autenticación requerida",
-            headers={"WWW-Authenticate": "Basic realm=\"Alejandría OPDS\""},
+            detail="Autenticacion requerida",
+            headers={"WWW-Authenticate": "Basic realm=\"Alejandria OPDS\""},
         )
     user = db.query(User).filter(
         User.username == credentials.username,
@@ -75,8 +75,8 @@ def get_opds_user(
     if not user or not verify_password(credentials.password, user.password_hash):
         raise HTTPException(
             status_code=401,
-            detail="Usuario o contraseña incorrectos",
-            headers={"WWW-Authenticate": "Basic realm=\"Alejandría OPDS\""},
+            detail="Usuario o contrasena incorrectos",
+            headers={"WWW-Authenticate": "Basic realm=\"Alejandria OPDS\""},
         )
     return user
 

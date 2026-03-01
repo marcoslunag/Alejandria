@@ -1,183 +1,232 @@
 """
-Test fixtures for Alejandría backend
-Uses SQLite DB to avoid PostgreSQL dependency in tests.
-Compatible with httpx >= 0.28 (uses ASGITransport).
+Test fixtures and configuration for Alejandría backend tests.
+Uses SQLite in-memory DB to avoid needing a real PostgreSQL instance.
 """
 import os
-import pytest
-import httpx
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
-
-# Configure test environment BEFORE importing the app
-os.environ["DATABASE_URL"] = "sqlite:///./test.db"
-os.environ["SECRET_KEY"] = "test-secret-key-only-for-tests-not-real"
-os.environ["DISABLE_SCHEDULER"] = "true"
+# Override env vars BEFORE any app imports (lru_cache reads them on first import)
+os.environ["DATABASE_URL"] = "sqlite://"
+os.environ["SECRET_KEY"] = "test-secret-key-for-tests-only-32chars"
 os.environ["DEBUG"] = "true"
+
+import pytest
+import asyncio
+from typing import Generator
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.core.security import hash_password
+from app.models.user import User
+from app.models.manga import Manga
+from app.models.chapter import Chapter
+from app.models.comic import Comic, ComicIssue
+from app.models.book import Book
+from app.models.book_chapter import BookChapter
+from app.models.download import DownloadQueue
+from app.core.security import hash_password, create_access_token
 
-SQLALCHEMY_TEST_URL = "sqlite:///./test.db"
+# ── SQLite in-memory database ──────────────────────────────────────────────────
+SQLALCHEMY_DATABASE_URL = "sqlite://"
 
 engine = create_engine(
-    SQLALCHEMY_TEST_URL,
+    SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def override_get_db():
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-app.dependency_overrides[get_db] = override_get_db
-
-
-@pytest.fixture(scope="session", autouse=True)
-def setup_database():
-    """Create tables once for the whole test session."""
-    from app.models import log_entry  # noqa: ensure all models loaded
-    import app.models.user  # noqa
-    import app.models.manga  # noqa
-    import app.models.chapter  # noqa
-    import app.models.comic  # noqa
-    import app.models.book  # noqa
-    import app.models.book_chapter  # noqa
-    import app.models.download  # noqa
+@pytest.fixture(scope="function")
+def db():
+    """Create fresh tables for each test, then tear down."""
     Base.metadata.create_all(bind=engine)
-    yield
-    Base.metadata.drop_all(bind=engine)
-    import pathlib
-    p = pathlib.Path("./test.db")
-    if p.exists():
-        p.unlink()
+    session = TestingSessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+        Base.metadata.drop_all(bind=engine)
 
 
 @pytest.fixture(autouse=True)
-def reset_rate_limiter():
-    """Clear the login rate limiter between tests to prevent 429 errors."""
-    from app.api.v1.auth import _login_attempts
-    _login_attempts.clear()
+def clear_rate_limiters():
+    """Clear in-memory rate limiters between tests to prevent state leakage."""
+    from app.api.v1 import auth as auth_module
+    from app.api.v1 import upload as upload_module
+    auth_module._login_attempts.clear()
+    upload_module._upload_attempts.clear()
     yield
-    _login_attempts.clear()
+    auth_module._login_attempts.clear()
+    upload_module._upload_attempts.clear()
 
 
-@pytest.fixture
-def db():
-    """
-    Per-test DB session. Commits are visible to the app (important for login tests).
-    Cleans up created records after each test.
-    """
-    session = TestingSessionLocal()
-    yield session
-    # Rollback any uncommitted changes and clean up test data
-    session.rollback()
-    # Delete test users by username pattern to keep DB clean
-    try:
-        session.execute(text("DELETE FROM users WHERE username LIKE 'test%'"))
-        session.execute(text("DELETE FROM manga WHERE slug LIKE 'test-%' OR slug LIKE '%test%'"))
-        session.execute(text("DELETE FROM comics WHERE slug LIKE 'test-%' OR slug LIKE '%test%'"))
-        session.execute(text("DELETE FROM books WHERE slug LIKE 'test-%' OR slug LIKE '%test%'"))
-        session.commit()
-    except Exception:
-        session.rollback()
-    finally:
-        session.close()
+@pytest.fixture(scope="function")
+def client(db) -> Generator:
+    """Test client with DB override."""
+    def override_get_db():
+        try:
+            yield db
+        finally:
+            pass
 
-
-@pytest.fixture
-async def client():
-    """
-    Async HTTP test client using httpx.AsyncClient + ASGITransport.
-    All tests using this fixture must be 'async def'.
-    """
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://testserver"
-    ) as c:
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:
         yield c
+    app.dependency_overrides.clear()
 
 
-@pytest.fixture
-def admin_user(db):
-    """Create an admin user in the test DB (committed, visible to app)."""
-    from app.models.user import User
-    # Remove if exists from prior failed test
-    existing = db.query(User).filter(User.username == "testadmin").first()
-    if existing:
-        db.delete(existing)
-        db.commit()
+# ── Helper: create users ───────────────────────────────────────────────────────
+
+def _make_user(db, username="testuser", email="test@test.com",
+               password="password123", is_admin=False, must_change_password=False,
+               device_setup_completed=True):
     user = User(
-        username="testadmin",
-        email="testadmin@test.local",
-        password_hash=hash_password("testpass123"),
+        username=username,
+        email=email,
+        password_hash=hash_password(password),
         is_active=True,
-        is_admin=True,
-        must_change_password=False,
+        is_admin=is_admin,
+        must_change_password=must_change_password,
+        device_setup_completed=device_setup_completed,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
     return user
+
+
+def _token(user: User) -> str:
+    return create_access_token({"sub": str(user.id)})
+
+
+def _auth(user: User) -> dict:
+    return {"Authorization": f"Bearer {_token(user)}"}
 
 
 @pytest.fixture
 def regular_user(db):
-    """Create a regular user in the test DB (committed, visible to app)."""
-    from app.models.user import User
-    existing = db.query(User).filter(User.username == "testuser").first()
-    if existing:
-        db.delete(existing)
-        db.commit()
-    user = User(
-        username="testuser",
-        email="testuser@test.local",
-        password_hash=hash_password("testpass123"),
-        is_active=True,
-        is_admin=False,
-        must_change_password=False,
+    return _make_user(db)
+
+
+@pytest.fixture
+def admin_user(db):
+    return _make_user(db, username="admin", email="admin@test.com",
+                      password="adminpass", is_admin=True, device_setup_completed=True)
+
+
+@pytest.fixture
+def second_user(db):
+    return _make_user(db, username="other", email="other@test.com",
+                      password="otherpass")
+
+
+@pytest.fixture
+def regular_token(regular_user):
+    return _token(regular_user)
+
+
+@pytest.fixture
+def admin_token(admin_user):
+    return _token(admin_user)
+
+
+@pytest.fixture
+def auth_headers(regular_user):
+    return _auth(regular_user)
+
+
+@pytest.fixture
+def admin_headers(admin_user):
+    return _auth(admin_user)
+
+
+# ── Helper: create manga ───────────────────────────────────────────────────────
+
+def _make_manga(db, user, title="Test Manga", anilist_id=12345):
+    m = Manga(
+        title=title,
+        slug=title.lower().replace(" ", "-"),
+        user_id=user.id,
+        anilist_id=anilist_id,
+        monitored=True,
+        auto_download=False,
+        genres=[],
+        tags=[],
+        authors=[],
+        artists=[],
     )
-    db.add(user)
+    db.add(m)
     db.commit()
-    db.refresh(user)
-    return user
+    db.refresh(m)
+    return m
 
 
-@pytest.fixture
-async def admin_token(client, admin_user):
-    """Get auth token for admin user."""
-    resp = await client.post("/api/v1/auth/login", json={
-        "username": "testadmin",
-        "password": "testpass123"
-    })
-    assert resp.status_code == 200, f"Admin login failed: {resp.text}"
-    return resp.json()["access_token"]
+def _make_chapter(db, manga, number=1.0, status="pending"):
+    ch = Chapter(
+        manga_id=manga.id,
+        number=number,
+        url=f"https://example.com/ch{number}",
+        status=status,
+    )
+    db.add(ch)
+    db.commit()
+    db.refresh(ch)
+    return ch
 
 
-@pytest.fixture
-async def user_token(client, regular_user):
-    """Get auth token for regular user."""
-    resp = await client.post("/api/v1/auth/login", json={
-        "username": "testuser",
-        "password": "testpass123"
-    })
-    assert resp.status_code == 200, f"User login failed: {resp.text}"
-    return resp.json()["access_token"]
+def _make_comic(db, user, title="Test Comic", comicvine_id=67890):
+    c = Comic(
+        title=title,
+        slug=title.lower().replace(" ", "-"),
+        user_id=user.id,
+        comicvine_id=comicvine_id,
+        monitored=True,
+        auto_download=False,
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return c
 
 
-@pytest.fixture
-async def auth_headers(user_token):
-    """Authorization headers for regular user."""
-    return {"Authorization": f"Bearer {user_token}"}
+def _make_issue(db, comic, issue_number="1", status="pending"):
+    issue = ComicIssue(
+        comic_id=comic.id,
+        issue_number=issue_number,
+        status=status,
+    )
+    db.add(issue)
+    db.commit()
+    db.refresh(issue)
+    return issue
 
 
-@pytest.fixture
-async def admin_headers(admin_token):
-    """Authorization headers for admin user."""
-    return {"Authorization": f"Bearer {admin_token}"}
+def _make_book(db, user, title="Test Book", google_books_id="abc123"):
+    b = Book(
+        title=title,
+        slug=title.lower().replace(" ", "-"),
+        user_id=user.id,
+        google_books_id=google_books_id,
+        monitored=True,
+        auto_download=False,
+        authors=[],
+        categories=[],
+    )
+    db.add(b)
+    db.commit()
+    db.refresh(b)
+    return b
+
+
+def _make_book_chapter(db, book, number=1, status="pending"):
+    bc = BookChapter(
+        book_id=book.id,
+        number=number,
+        status=status,
+    )
+    db.add(bc)
+    db.commit()
+    db.refresh(bc)
+    return bc

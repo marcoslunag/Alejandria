@@ -288,6 +288,52 @@ def reset_stuck_downloads(db: Session = Depends(get_db), current_user: User = De
     return {"reset_queue_items": count, "reset_chapters": len(stuck_chapters)}
 
 
+@router.post("/clear")
+def clear_queue(
+    status: Optional[str] = Query(None, description="Clear only items with this status"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Clear download queue (reset chapter statuses)
+
+    Args:
+        status: Only clear items with this status
+        db: Database session
+
+    Returns:
+        Number of items cleared
+    """
+    # Map frontend status to chapter status
+    status_map = {
+        'completed': ['downloaded', 'converted', 'sent'],
+        'failed': ['error'],
+        'pending': ['pending']
+    }
+
+    # Build subquery of user's manga IDs to avoid join+update limitation
+    user_manga_ids = db.query(Manga.id).filter(Manga.user_id == current_user.id).scalar_subquery()
+
+    if status:
+        chapter_statuses = status_map.get(status, [status])
+    else:
+        chapter_statuses = ['downloaded', 'converted', 'sent', 'error']
+
+    chapters = db.query(Chapter).filter(
+        Chapter.manga_id.in_(user_manga_ids),
+        Chapter.status.in_(chapter_statuses)
+    ).all()
+
+    count = len(chapters)
+    for chapter in chapters:
+        chapter.status = 'pending'
+        chapter.error_message = None
+    db.commit()
+
+    logger.info(f"Reset {count} chapters in queue")
+    return {"cleared": count}
+
+
 @router.post("/{chapter_id}", status_code=201)
 def add_to_queue(
     chapter_id: int,
@@ -550,46 +596,6 @@ def retry_download(chapter_id: int, db: Session = Depends(get_db), current_user:
 
     logger.info(f"Queued manual retry for chapter {chapter_id}")
     return {"id": chapter.id, "status": "pending", "retry_count": chapter.retry_count}
-
-
-@router.post("/clear")
-def clear_queue(
-    status: Optional[str] = Query(None, description="Clear only items with this status"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Clear download queue (reset chapter statuses)
-
-    Args:
-        status: Only clear items with this status
-        db: Database session
-
-    Returns:
-        Number of items cleared
-    """
-    # Map frontend status to chapter status
-    status_map = {
-        'completed': ['downloaded', 'converted', 'sent'],
-        'failed': ['error'],
-        'pending': ['pending']
-    }
-
-    query = db.query(Chapter).join(Manga).filter(Manga.user_id == current_user.id)
-
-    if status:
-        chapter_statuses = status_map.get(status, [status])
-        query = query.filter(Chapter.status.in_(chapter_statuses))
-    else:
-        # Clear completed and failed, not downloading
-        query = query.filter(Chapter.status.in_(['downloaded', 'converted', 'sent', 'error']))
-
-    # Reset status to pending
-    count = query.update({Chapter.status: 'pending', Chapter.error_message: None}, synchronize_session=False)
-    db.commit()
-
-    logger.info(f"Reset {count} chapters in queue")
-    return {"cleared": count}
 
 
 @router.delete("/{chapter_id}/file")
