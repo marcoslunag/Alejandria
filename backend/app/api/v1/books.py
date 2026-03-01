@@ -650,7 +650,7 @@ async def send_book_to_kindle(
     """
     from app.services.stk_kindle_sender import get_stk_sender
 
-    sender = get_stk_sender()
+    sender = get_stk_sender(current_user.id)
 
     if not sender.is_authenticated():
         raise HTTPException(

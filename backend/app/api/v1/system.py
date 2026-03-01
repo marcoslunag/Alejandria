@@ -167,7 +167,7 @@ def test_stk(current_user: User = Depends(require_admin)):
     from app.services.stk_kindle_sender import get_stk_sender
 
     try:
-        sender = get_stk_sender()
+        sender = get_stk_sender(current_user.id)
         is_auth = sender.is_authenticated()
 
         if is_auth:
