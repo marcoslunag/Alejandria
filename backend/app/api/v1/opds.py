@@ -45,6 +45,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/opds", tags=["opds"])
 security = HTTPBasic(auto_error=False)
 
+
+def _join_list(lst) -> str:
+    """Join a JSON list field into a comma-separated string, or return ''."""
+    if not lst:
+        return ""
+    if isinstance(lst, str):
+        return lst
+    return ", ".join(str(x) for x in lst if x)
+
 OPDS_MIME = "application/atom+xml;profile=opds-catalog"
 OPDS_NAV_MIME = "application/atom+xml;profile=opds-catalog;kind=navigation"
 OPDS_ACQ_MIME = "application/atom+xml;profile=opds-catalog;kind=acquisition"
@@ -173,6 +182,13 @@ def _acq_link(href: str, mime: str, title: str = "") -> str:
 # Root catalog
 # ---------------------------------------------------------------------------
 
+@router.head("")
+@router.head("/")
+async def opds_root_head(user: User = Depends(get_opds_user)):
+    """HEAD /opds — required by Kobo and some OPDS clients to verify availability."""
+    return Response(status_code=200, headers={"Content-Type": OPDS_NAV_MIME})
+
+
 @router.get("", response_class=Response)
 @router.get("/", response_class=Response)
 async def opds_root(user: User = Depends(get_opds_user), db: Session = Depends(get_db)):
@@ -219,6 +235,11 @@ async def opds_opensearch():
 # Manga feed
 # ---------------------------------------------------------------------------
 
+@router.head("/manga")
+async def opds_manga_head(user: User = Depends(get_opds_user)):
+    return Response(status_code=200, headers={"Content-Type": OPDS_ACQ_MIME})
+
+
 @router.get("/manga", response_class=Response)
 async def opds_manga(
     page: int = Query(1, ge=1),
@@ -248,7 +269,7 @@ async def opds_manga(
             id_=f"urn:alejandria:manga:{m.id}",
             title=m.title,
             updated=_now_iso(),
-            author=m.author or "",
+            author=_join_list(m.authors),
             summary=summary,
             cover_url=f"/api/v1/opds/covers/manga/{m.id}" if m.cover_url else "",
             acquisition_links=links,
@@ -298,6 +319,11 @@ def _manga_acquisition_links(manga: Manga, db: Session) -> tuple:
 # Comics feed
 # ---------------------------------------------------------------------------
 
+@router.head("/comics")
+async def opds_comics_head(user: User = Depends(get_opds_user)):
+    return Response(status_code=200, headers={"Content-Type": OPDS_ACQ_MIME})
+
+
 @router.get("/comics", response_class=Response)
 async def opds_comics(
     page: int = Query(1, ge=1),
@@ -327,7 +353,7 @@ async def opds_comics(
             id_=f"urn:alejandria:comics:{c.id}",
             title=c.title,
             updated=_now_iso(),
-            author=c.author or "",
+            author=_join_list(c.writers),
             summary=summary,
             cover_url=f"/api/v1/opds/covers/comics/{c.id}" if c.cover_url else "",
             acquisition_links=links,
@@ -375,6 +401,11 @@ def _comic_acquisition_links(comic: Comic, db: Session) -> tuple:
 # Books feed
 # ---------------------------------------------------------------------------
 
+@router.head("/books")
+async def opds_books_head(user: User = Depends(get_opds_user)):
+    return Response(status_code=200, headers={"Content-Type": OPDS_ACQ_MIME})
+
+
 @router.get("/books", response_class=Response)
 async def opds_books(
     page: int = Query(1, ge=1),
@@ -400,7 +431,7 @@ async def opds_books(
             id_=f"urn:alejandria:books:{b.id}",
             title=b.title,
             updated=_now_iso(),
-            author=b.author or "",
+            author=_join_list(b.authors),
             summary=summary,
             cover_url=f"/api/v1/opds/covers/books/{b.id}" if b.cover_url else "",
             acquisition_links=links,
