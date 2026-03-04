@@ -4,6 +4,7 @@ Login, user management (admin-only), and password change
 """
 
 from typing import List
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from collections import defaultdict
@@ -12,11 +13,27 @@ import logging
 
 from app.database import get_db
 from app.models.user import User
+from app.models.manga import Manga
+from app.models.chapter import Chapter
+from app.models.comic import Comic, ComicIssue
+from app.models.book import Book
+from app.models.book_chapter import BookChapter
 from app.schemas.user import (
     AdminCreateUser, UserLogin, UserResponse, Token, ChangePassword
 )
 from app.core.security import hash_password, verify_password, create_access_token
 from app.core.deps import get_current_user, get_admin_user
+
+
+def _safe_file_size(path_str: str) -> int:
+    """Return file size in bytes, 0 if file doesn't exist."""
+    if not path_str:
+        return 0
+    try:
+        p = Path(path_str)
+        return p.stat().st_size if p.exists() else 0
+    except Exception:
+        return 0
 
 logger = logging.getLogger(__name__)
 
@@ -238,3 +255,145 @@ async def reset_user_password(
 
     logger.info(f"Admin reset password for user: {user.username}")
     return {"message": f"Nueva contrasena para {user.username}", "new_password": new_password}
+
+
+# ── Admin library management ──────────────────────────────────────────────────
+
+
+@router.get("/admin/overview")
+async def admin_overview(
+    admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """All users with library counts and ereader info (admin only)."""
+    users = db.query(User).order_by(User.id).all()
+    result = []
+    for u in users:
+        manga_count = db.query(Manga).filter(Manga.user_id == u.id).count()
+        comic_count = db.query(Comic).filter(Comic.user_id == u.id).count()
+        book_count = db.query(Book).filter(Book.user_id == u.id).count()
+        result.append({
+            "id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "is_active": u.is_active,
+            "is_admin": u.is_admin,
+            "must_change_password": u.must_change_password,
+            "ereader_type": u.ereader_type,
+            "created_at": u.created_at,
+            "manga_count": manga_count,
+            "comic_count": comic_count,
+            "book_count": book_count,
+        })
+    return result
+
+
+@router.get("/users/{user_id}/library")
+async def get_user_library(
+    user_id: int,
+    type: str = "manga",
+    admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Browse a user's library (admin only). type = manga | comic | book."""
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    if type == "manga":
+        items = db.query(Manga).filter(Manga.user_id == user_id).order_by(Manga.title).all()
+        result = []
+        for m in items:
+            chapters = db.query(Chapter).filter(Chapter.manga_id == m.id).all()
+            storage = sum(
+                _safe_file_size(c.file_path) + _safe_file_size(c.converted_path)
+                for c in chapters
+            )
+            downloaded = sum(1 for c in chapters if c.file_path or c.converted_path)
+            errors = sum(1 for c in chapters if c.status == "error")
+            result.append({
+                "id": m.id,
+                "title": m.title,
+                "cover_url": m.cover_url,
+                "reading_status": m.reading_status,
+                "monitored": m.monitored,
+                "chapter_count": len(chapters),
+                "downloaded_count": downloaded,
+                "error_count": errors,
+                "storage_bytes": storage,
+            })
+        return result
+
+    if type == "comic":
+        items = db.query(Comic).filter(Comic.user_id == user_id).order_by(Comic.title).all()
+        result = []
+        for c in items:
+            issues = db.query(ComicIssue).filter(ComicIssue.comic_id == c.id).all()
+            storage = sum(
+                _safe_file_size(i.file_path) + _safe_file_size(i.converted_path)
+                for i in issues
+            )
+            downloaded = sum(1 for i in issues if i.file_path or i.converted_path)
+            errors = sum(1 for i in issues if i.status == "error")
+            result.append({
+                "id": c.id,
+                "title": c.title,
+                "cover_url": c.cover_image,
+                "reading_status": getattr(c, "reading_status", None),
+                "monitored": c.monitored,
+                "issue_count": len(issues),
+                "downloaded_count": downloaded,
+                "error_count": errors,
+                "storage_bytes": storage,
+            })
+        return result
+
+    if type == "book":
+        items = db.query(Book).filter(Book.user_id == user_id).order_by(Book.title).all()
+        result = []
+        for b in items:
+            chapters = db.query(BookChapter).filter(BookChapter.book_id == b.id).all()
+            storage = sum(_safe_file_size(c.file_path) for c in chapters)
+            downloaded = sum(1 for c in chapters if c.file_path)
+            result.append({
+                "id": b.id,
+                "title": b.title,
+                "cover_url": b.cover_url,
+                "reading_status": b.reading_status,
+                "monitored": b.monitored,
+                "chapter_count": len(chapters),
+                "downloaded_count": downloaded,
+                "error_count": 0,
+                "storage_bytes": storage,
+            })
+        return result
+
+    raise HTTPException(status_code=400, detail="type debe ser manga, comic o book")
+
+
+@router.delete("/users/{user_id}/library/{item_type}/{item_id}", status_code=204)
+async def delete_user_library_item(
+    user_id: int,
+    item_type: str,
+    item_id: int,
+    admin: User = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a library item for any user (admin only)."""
+    model_map = {"manga": Manga, "comic": Comic, "book": Book}
+    model = model_map.get(item_type)
+    if not model:
+        raise HTTPException(status_code=400, detail="item_type debe ser manga, comic o book")
+
+    item = db.query(model).filter(
+        model.id == item_id,
+        model.user_id == user_id,
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item no encontrado")
+
+    title = item.title
+    db.delete(item)
+    db.commit()
+    logger.info(f"Admin deleted {item_type} '{title}' (id={item_id}) for user_id={user_id}")
+    return
