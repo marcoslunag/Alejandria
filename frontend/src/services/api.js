@@ -335,4 +335,10 @@ export const notificationsApi = {
   markSeen: () => api.post('/notifications/mark-seen'),
 };
 
+// Activity feed API
+export const activityApi = {
+  getRecent: (hours = 48, limit = 100) =>
+    api.get('/activity/recent', { params: { hours, limit } }),
+};
+
 export default api;

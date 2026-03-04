@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { mangaApi, bookApi, comicApi } from '../services/api';
+import { mangaApi, bookApi, comicApi, activityApi } from '../services/api';
 import SendToKindleButton from '../components/SendToKindleButton';
 import BookSendToKindleButton from '../components/BookSendToKindleButton';
 import ConfirmModal from '../components/ConfirmModal';
@@ -14,11 +14,29 @@ import {
   FaSpinner,
   FaStop,
   FaBook,
-    FaBookReader,
-    FaMask,
-    FaCircle,
-    FaCog,
+  FaBookReader,
+  FaMask,
+  FaCircle,
+  FaCog,
+  FaHistory,
+  FaChevronDown,
+  FaChevronUp,
 } from 'react-icons/fa';
+
+const ACTIVITY_ICONS = {
+  queued:      { icon: '🕐', color: 'text-gray-400' },
+  downloading: { icon: '⬇️', color: 'text-blue-400' },
+  completed:   { icon: '✅', color: 'text-green-400' },
+  failed:      { icon: '❌', color: 'text-red-400' },
+  converting:  { icon: '⚙️', color: 'text-purple-400' },
+  sent_kindle: { icon: '📤', color: 'text-orange-400' },
+};
+
+const ITEM_TYPE_COLORS = {
+  manga: 'text-blue-400',
+  comic: 'text-red-400',
+  book:  'text-emerald-400',
+};
 
 const Queue = () => {
   const [queue, setQueue] = useState([]);
@@ -29,6 +47,27 @@ const Queue = () => {
   const [confirmAction, setConfirmAction] = useState(null);
   const [sseConnected, setSseConnected] = useState(false);
   const esRef = useRef(null);
+
+  // Activity log state
+  const [activity, setActivity] = useState([]);
+  const [activityOpen, setActivityOpen] = useState(true);
+  const [activityHours, setActivityHours] = useState(48);
+
+  const loadActivity = useCallback(async () => {
+    try {
+      const res = await activityApi.getRecent(activityHours, 100);
+      setActivity(res.data);
+    } catch (e) {
+      // silently ignore — activity is non-critical
+    }
+  }, [activityHours]);
+
+  // Poll activity every 15 s (lightweight, read-only)
+  useEffect(() => {
+    loadActivity();
+    const interval = setInterval(loadActivity, 15000);
+    return () => clearInterval(interval);
+  }, [loadActivity]);
 
   const loadQueue = useCallback(async () => {
     try {
@@ -595,6 +634,101 @@ const Queue = () => {
         onConfirm={confirmAction?.onConfirm || (() => {})}
         onCancel={() => setConfirmAction(null)}
       />
+
+      {/* ── Activity Log ─────────────────────────────────────── */}
+      <div className="mt-8">
+        <button
+          onClick={() => setActivityOpen(o => !o)}
+          className="w-full flex items-center justify-between p-4 card hover:bg-gray-700/50 transition-colors"
+        >
+          <div className="flex items-center gap-2 font-semibold text-gray-200">
+            <FaHistory className="text-primary" />
+            Registro de Actividad
+            {activity.length > 0 && (
+              <span className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">
+                {activity.length}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            {/* Time window selector */}
+            <select
+              value={activityHours}
+              onChange={e => { e.stopPropagation(); setActivityHours(Number(e.target.value)); }}
+              onClick={e => e.stopPropagation()}
+              className="text-xs bg-gray-800 border border-gray-600 rounded px-2 py-1 text-gray-300"
+            >
+              <option value={12}>Últimas 12h</option>
+              <option value={48}>Últimas 48h</option>
+              <option value={168}>Última semana</option>
+            </select>
+            <button
+              onClick={e => { e.stopPropagation(); loadActivity(); }}
+              className="text-gray-400 hover:text-white"
+              title="Actualizar"
+            >
+              <FaSync className="text-sm" />
+            </button>
+            {activityOpen ? <FaChevronUp className="text-gray-400" /> : <FaChevronDown className="text-gray-400" />}
+          </div>
+        </button>
+
+        {activityOpen && (
+          <div className="card mt-1 divide-y divide-gray-700/50 max-h-96 overflow-y-auto">
+            {activity.length === 0 ? (
+              <div className="py-8 text-center text-gray-500 text-sm">
+                <FaHistory className="mx-auto mb-2 text-2xl opacity-30" />
+                Sin actividad en las últimas {activityHours}h
+              </div>
+            ) : (
+              activity.map((evt, idx) => {
+                const icon = ACTIVITY_ICONS[evt.event_type] || ACTIVITY_ICONS.queued;
+                const typeColor = ITEM_TYPE_COLORS[evt.item_type] || 'text-gray-400';
+                const detailPath = evt.item_type === 'manga' ? `/manga/${evt.item_id}`
+                  : evt.item_type === 'comic' ? `/comics/${evt.item_id}`
+                  : `/books/${evt.item_id}`;
+                const ts = new Date(evt.timestamp);
+                const timeStr = ts.toLocaleString('es-ES', {
+                  day: '2-digit', month: '2-digit',
+                  hour: '2-digit', minute: '2-digit',
+                });
+
+                return (
+                  <div key={idx} className="flex items-start gap-3 px-4 py-2.5 hover:bg-gray-700/30 transition-colors">
+                    <span className="text-base mt-0.5 flex-shrink-0">{icon.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline gap-1.5 flex-wrap">
+                        <Link
+                          to={detailPath}
+                          className={`font-medium text-sm hover:underline truncate max-w-xs ${typeColor}`}
+                        >
+                          {evt.item_title}
+                        </Link>
+                        <span className="text-gray-500 text-xs">—</span>
+                        <span className="text-gray-400 text-xs">{evt.detail}</span>
+                        <span className={`text-xs capitalize ${icon.color}`}>
+                          · {evt.event_type === 'sent_kindle' ? 'enviado a Kindle'
+                            : evt.event_type === 'downloading' ? 'descargando'
+                            : evt.event_type === 'completed' ? 'completado'
+                            : evt.event_type === 'failed' ? 'error'
+                            : evt.event_type === 'converting' ? 'convirtiendo'
+                            : 'en cola'}
+                        </span>
+                      </div>
+                      {evt.error && (
+                        <p className="text-red-400 text-xs mt-0.5 truncate" title={evt.error}>
+                          {evt.error}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-600 flex-shrink-0 mt-0.5">{timeStr}</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
