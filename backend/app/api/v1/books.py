@@ -974,208 +974,55 @@ async def _download_book_chapter(chapter_id: int):
 
         # If the URL needs resolving with Playwright, use Playwright to download directly
         if needs_resolving:
-            logger.info(f"Downloading with Playwright (intermediate host)...")
-            from app.services.book_scrapers.playwright_scraper import get_playwright_scraper
             from pathlib import Path
+            download_dir = Path("/downloads/books")
+            download_dir.mkdir(parents=True, exist_ok=True)
+            download_path = download_dir / filename
 
-            playwright_scraper = await get_playwright_scraper()
-            page = await playwright_scraper._create_page()
+            # KrakenFiles: usa Cloudflare Turnstile — requiere 2captcha para resolver
+            if 'krakenfiles.com' in chapter.download_url.lower():
+                logger.info("KrakenFiles: usando downloader dedicado (Turnstile + 2captcha)...")
+                from app.services.krakenfiles_downloader import download_from_krakenfiles
+                ok = await download_from_krakenfiles(chapter.download_url, download_path)
+                if not ok:
+                    raise Exception("KrakenFiles download failed — ver logs para detalles")
+                result_path = download_path
 
-            try:
-                # Navigate to the intermediate host page
-                logger.info(f"Navigating to {chapter.download_url}")
-                await page.goto(chapter.download_url, wait_until='domcontentloaded', timeout=30000)
-                await asyncio.sleep(3)
+            else:
+                # Otros hosts (antupload, fireload, etc.) — Playwright + expect_download
+                logger.info(f"Downloading with Playwright (intermediate host)...")
+                from app.services.book_scrapers.playwright_scraper import get_playwright_scraper
 
-                # Find the download button - different selectors for different hosts
-                download_btn = None
+                playwright_scraper = await get_playwright_scraper()
+                page = await playwright_scraper._create_page()
 
-                # Krakenfiles selectors
-                if 'krakenfiles.com' in chapter.download_url.lower():
-                    logger.info("Looking for krakenfiles download button...")
-                    # Try multiple selectors for krakenfiles
-                    selectors = [
-                        'button.btn-primary:has-text("Download")',
-                        'button:has-text("Download now")',
-                        'a:has-text("Download now")',
-                        'button.btn-primary',
-                        'a.download-url',
-                        'a[href*="krakenfiles.com/file/"]',
-                        'button:has-text("Free Download")',
-                        'a:has-text("Free Download")',
-                        'a.btn-primary',
-                        '.download-button',
-                        'a[href*="/file/"]'
-                    ]
-                    for selector in selectors:
-                        try:
-                            btn = await page.query_selector(selector)
-                            if btn and await btn.is_visible():
-                                download_btn = btn
-                                logger.info(f"Found download button with selector: {selector}")
-                                break
-                        except:
-                            continue
-
-                # Antupload selectors (already working)
-                elif 'antupload.com' in chapter.download_url.lower():
-                    logger.info("Looking for antupload download button...")
-                    download_btn = await page.query_selector('#downloadB')
-
-                # Generic selectors for other hosts
-                else:
-                    logger.info("Looking for generic download button...")
-                    download_btn = await page.query_selector('a.btn-download, a[href*="download"], button:has-text("Download")')
-
-                if not download_btn:
-                    # Take a screenshot and dump HTML for debugging
-                    logger.error("Download button not found. Taking screenshot and logging HTML...")
-                    await page.screenshot(path='/downloads/books/debug_screenshot.png')
-
-                    # Get page HTML for debugging
-                    html_content = await page.content()
-                    logger.error(f"Page HTML length: {len(html_content)}")
-
-                    # Log all links and buttons on the page
-                    all_links = await page.query_selector_all('a')
-                    all_buttons = await page.query_selector_all('button')
-                    logger.error(f"Found {len(all_links)} links and {len(all_buttons)} buttons on page")
-
-                    # Check for links with "download" or "free" in href or text
-                    for i, link in enumerate(all_links):
-                        try:
-                            href = await link.get_attribute('href')
-                            text = await link.inner_text()
-                            classes = await link.get_attribute('class')
-
-                            if href and ('download' in href.lower() or 'file' in href.lower() or 'free' in (text or '').lower()):
-                                logger.error(f"Potential download link {i+1}: href={href}, text={text[:50] if text else 'N/A'}, class={classes}")
-                        except:
-                            pass
-
-                    # Check buttons
-                    for i, btn in enumerate(all_buttons[:5]):
-                        try:
-                            text = await btn.inner_text()
-                            classes = await btn.get_attribute('class')
-                            logger.error(f"Button {i+1}: text={text[:50] if text else 'N/A'}, class={classes}")
-                        except:
-                            pass
-
-                    raise Exception("Download button not found on page")
-
-                logger.info("Found download button, attempting to click...")
-
-                # Set up download path
-                download_dir = Path("/downloads/books")
-                download_dir.mkdir(parents=True, exist_ok=True)
-                download_path = download_dir / filename
-
-                # Try to trigger the download
                 try:
-                    logger.info("Waiting for download event...")
-                    async with page.expect_download(timeout=30000) as download_info:
+                    logger.info(f"Navigating to {chapter.download_url}")
+                    await page.goto(chapter.download_url, wait_until='domcontentloaded', timeout=30000)
+                    await asyncio.sleep(3)
+
+                    download_btn = None
+                    if 'antupload.com' in chapter.download_url.lower():
+                        download_btn = await page.query_selector('#downloadB')
+                    else:
+                        download_btn = await page.query_selector('a.btn-download, a[href*="download"], button:has-text("Download")')
+
+                    if not download_btn:
+                        raise Exception("Download button not found on page")
+
+                    async with page.expect_download(timeout=60000) as download_info:
                         await download_btn.click()
-                        logger.info("Button clicked, waiting for download to start...")
-
                     download = await download_info.value
-                    logger.info(f"✅ Download started: {download.suggested_filename}")
-
-                    # Save the file
                     await download.save_as(str(download_path))
                     logger.info(f"✅ Downloaded with Playwright: {filename}")
-
                     result_path = download_path
 
-                except (asyncio.TimeoutError, Exception) as timeout_err:
-                    if 'Timeout' not in str(timeout_err):
-                        raise  # Re-raise if it's not a timeout error
+                except Exception as e:
+                    logger.error(f"Playwright download failed: {e}")
+                    raise
 
-                    # Download didn't start - maybe there's a redirect or intermediate page
-                    logger.warning("Download event timeout - checking if page changed...")
-                    await asyncio.sleep(5)  # Wait more for any JS to execute
-
-                    current_url = page.url
-                    logger.info(f"Current URL after click: {current_url}")
-
-                    # Look for download links that might have appeared after the click
-                    logger.info("Looking for download links on the page...")
-                    all_links = await page.query_selector_all('a')
-
-                    direct_link = None
-                    for link in all_links:
-                        try:
-                            href = await link.get_attribute('href')
-                            text = await link.inner_text() if await link.is_visible() else None
-
-                            if href and (
-                                'cdn' in href.lower() or
-                                'files' in href.lower() or
-                                'file/' in href.lower() or
-                                href.endswith('.epub') or
-                                (text and 'download' in text.lower() and 'Download now' not in text)
-                            ):
-                                logger.info(f"Found potential direct link: text='{text}', href={href[:80]}")
-                                direct_link = href
-                                break
-                        except:
-                            continue
-
-                    if direct_link:
-                        logger.info(f"Trying to download from: {direct_link}")
-
-                        # Navigate to the download link and wait for actual download
-                        try:
-                            logger.info("Navigating to download link with Playwright...")
-                            await page.goto(direct_link, wait_until='domcontentloaded', timeout=30000)
-                            await asyncio.sleep(2)
-
-                            # Try to trigger download from this page
-                            logger.info("Waiting for download to start from new page...")
-                            async with page.expect_download(timeout=45000) as dl_info:
-                                # Sometimes download starts automatically, sometimes need to click
-                                # Try to find and click a download button if present
-                                try:
-                                    final_download_btn = await page.query_selector('button:has-text("Download"), a:has-text("Download"), button.download, a.download')
-                                    if final_download_btn and await final_download_btn.is_visible():
-                                        logger.info("Found final download button, clicking...")
-                                        await final_download_btn.click()
-                                    else:
-                                        logger.info("No button found, waiting for automatic download...")
-                                except:
-                                    logger.info("Waiting for automatic download...")
-                                    pass
-
-                            download = await dl_info.value
-                            logger.info(f"✅ Download started: {download.suggested_filename}")
-
-                            # Save the file
-                            await download.save_as(str(download_path))
-                            logger.info(f"✅ Downloaded with Playwright: {filename}")
-                            result_path = download_path
-
-                        except Exception as download_err:
-                            logger.error(f"Failed to download from intermediate link: {download_err}")
-                            raise
-                    else:
-                        # No direct link found - log all links for debugging
-                        logger.error("No direct download link found. Logging all links:")
-                        for i, link in enumerate(all_links[:15]):
-                            try:
-                                href = await link.get_attribute('href')
-                                text = await link.inner_text() if await link.is_visible() else None
-                                logger.error(f"Link {i+1}: text='{text[:30] if text else 'hidden'}', href={href[:60] if href else 'no href'}")
-                            except:
-                                pass
-                        raise Exception("Download button clicked but no download link found on page")
-
-            except Exception as e:
-                logger.error(f"Playwright download failed: {e}")
-                await page.close()
-                raise
-
-            finally:
-                await page.close()
+                finally:
+                    await page.close()
 
         else:
             # For direct links, use the normal downloader
