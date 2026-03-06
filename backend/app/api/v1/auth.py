@@ -358,7 +358,7 @@ async def get_user_library(
             result.append({
                 "id": b.id,
                 "title": b.title,
-                "cover_url": b.cover_url,
+                "cover_url": b.cover_image,
                 "reading_status": b.reading_status,
                 "monitored": b.monitored,
                 "chapter_count": len(chapters),
