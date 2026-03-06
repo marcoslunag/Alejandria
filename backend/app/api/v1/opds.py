@@ -253,66 +253,143 @@ async def opds_manga(
 
     entries = ""
     for m in page_items:
-        links, avail, total = _manga_acquisition_links(m, db)
-        summary = m.description or ""
-        if total == 0:
-            note = "(Sin capítulos)"
-        elif avail == 0:
-            note = f"(0/{total} cap. descargados — pendiente)"
-        elif avail < total:
-            note = f"({avail}/{total} cap. disponibles)"
-        else:
-            note = ""
-        if note:
-            summary = f"{note}  {summary}".strip()
-        entries += _acq_entry(
-            id_=f"urn:alejandria:manga:{m.id}",
-            title=m.title,
-            updated=_now_iso(),
-            author=_join_list(m.authors),
-            summary=summary,
-            cover_url=f"/api/v1/opds/covers/manga/{m.id}" if m.cover_url else "",
-            acquisition_links=links,
-        )
+        entries += _manga_entry(m, db)
 
     pagination = _pagination_links("/api/v1/opds/manga", page, total)
     xml = _atom_feed("urn:alejandria:manga", "Manga", _now_iso(), pagination, entries, kind="acquisition")
     return Response(content=xml, media_type=OPDS_MIME)
 
 
-def _manga_acquisition_links(manga: Manga, db: Session) -> tuple:
-    """Devuelve (links, capítulos_disponibles, total_capítulos)."""
+def _manga_available_chapters(manga: Manga, db: Session):
+    """Devuelve capítulos con archivo disponible (CBZ o EPUB), ordenados por número."""
     chapters = db.query(Chapter).filter(
         Chapter.manga_id == manga.id
     ).order_by(Chapter.number).all()
+    return [ch for ch in chapters if (ch.converted_path or (ch.file_path and Path(ch.file_path).exists()))]
 
-    total = len(chapters)
-    avail = 0
+
+def _chapter_links(manga_id: int, ch: "Chapter") -> list:
+    """Links de adquisición para un capítulo de manga."""
+    label = f"Cap. {ch.number}"
     links = []
-    for ch in chapters:
-        label = f"Cap. {ch.number}"
-        ch_links = []
-        # EPUB (convertido por KCC)
-        if ch.converted_path:
-            epub_paths = [p.strip() for p in ch.converted_path.split("|") if p.strip()]
-            for idx, ep in enumerate(epub_paths):
-                part = f" Parte {idx+1}" if len(epub_paths) > 1 else ""
-                ch_links.append(_acq_link(
-                    href=f"/api/v1/opds/download/manga/{manga.id}/{ch.id}/epub/{idx}",
-                    mime=EPUB_MIME,
-                    title=f"{label}{part} (EPUB)",
-                ))
-        # CBZ original
-        if ch.file_path and Path(ch.file_path).exists():
-            ch_links.append(_acq_link(
-                href=f"/api/v1/opds/download/manga/{manga.id}/{ch.id}/cbz",
-                mime=CBZ_MIME,
-                title=f"{label} (CBZ)",
+    if ch.converted_path:
+        epub_paths = [p.strip() for p in ch.converted_path.split("|") if p.strip()]
+        for idx, _ in enumerate(epub_paths):
+            part = f" Parte {idx+1}" if len(epub_paths) > 1 else ""
+            links.append(_acq_link(
+                href=f"/api/v1/opds/download/manga/{manga_id}/{ch.id}/epub/{idx}",
+                mime=EPUB_MIME,
+                title=f"{label}{part} (EPUB)",
             ))
-        if ch_links:
-            avail += 1
-            links.extend(ch_links)
-    return links, avail, total
+    if ch.file_path and Path(ch.file_path).exists():
+        links.append(_acq_link(
+            href=f"/api/v1/opds/download/manga/{manga_id}/{ch.id}/cbz",
+            mime=CBZ_MIME,
+            title=f"{label} (CBZ)",
+        ))
+    return links
+
+
+def _manga_entry(manga: Manga, db: Session, title_prefix: str = "") -> str:
+    """Genera XML de entrada OPDS para un manga.
+
+    - Sin capítulos → entrada sin links (pendiente).
+    - 1 capítulo → acquisition entry directa.
+    - 2+ capítulos → navigation entry → /opds/manga/{id}.
+    """
+    avail = _manga_available_chapters(manga, db)
+    cover_url = f"/api/v1/opds/covers/manga/{manga.id}" if manga.cover_url else ""
+    cover_xml = (
+        f'    <link rel="http://opds-spec.org/image" href="{cover_url}" type="image/jpeg"/>\n'
+        if cover_url else ""
+    )
+    author_esc = _escape(_join_list(manga.authors))
+    display_title = f"{title_prefix}{manga.title}"
+
+    if not avail:
+        total = db.query(Chapter).filter(Chapter.manga_id == manga.id).count()
+        note = "(Sin capítulos)" if total == 0 else f"(0/{total} cap. descargados — pendiente)"
+        summary_esc = _escape(f"{note}  {manga.description or ''}".strip())
+        return (
+            f'  <entry>\n'
+            f'    <id>urn:alejandria:manga:{manga.id}</id>\n'
+            f'    <title>{_escape(display_title)}</title>\n'
+            f'    <updated>{_now_iso()}</updated>\n'
+            f'    <author><name>{author_esc}</name></author>\n'
+            f'    <summary>{summary_esc}</summary>\n'
+            f'{cover_xml}'
+            f'  </entry>\n'
+        )
+
+    if len(avail) == 1:
+        ch = avail[0]
+        links = _chapter_links(manga.id, ch)
+        return _acq_entry(
+            id_=f"urn:alejandria:manga:{manga.id}",
+            title=display_title,
+            updated=_now_iso(),
+            author=_join_list(manga.authors),
+            summary=manga.description or "",
+            cover_url=cover_url,
+            acquisition_links=links,
+        )
+
+    # Multi-capítulo: navigation entry → /opds/manga/{id}
+    summary_esc = _escape(f"({len(avail)} cap. disponibles)  {manga.description or ''}".strip())
+    return (
+        f'  <entry>\n'
+        f'    <id>urn:alejandria:manga:{manga.id}</id>\n'
+        f'    <title>{_escape(display_title)}</title>\n'
+        f'    <updated>{_now_iso()}</updated>\n'
+        f'    <author><name>{author_esc}</name></author>\n'
+        f'    <summary>{summary_esc}</summary>\n'
+        f'{cover_xml}'
+        f'    <link rel="subsection" href="/api/v1/opds/manga/{manga.id}" type="{OPDS_ACQ_MIME}"/>\n'
+        f'  </entry>\n'
+    )
+
+
+@router.head("/manga/{manga_id}")
+async def opds_manga_chapters_head(manga_id: int, user: User = Depends(get_opds_user)):
+    return Response(status_code=200, headers={"Content-Type": OPDS_ACQ_MIME})
+
+
+@router.get("/manga/{manga_id}", response_class=Response)
+async def opds_manga_chapters(
+    manga_id: int,
+    user: User = Depends(get_opds_user),
+    db: Session = Depends(get_db),
+):
+    """Feed de capítulos de un manga — navegación desde /opds/manga."""
+    manga = db.query(Manga).filter(Manga.id == manga_id, Manga.user_id == user.id).first()
+    if not manga:
+        raise HTTPException(status_code=404, detail="Manga no encontrado")
+
+    avail = _manga_available_chapters(manga, db)
+    cover_url = f"/api/v1/opds/covers/manga/{manga.id}" if manga.cover_url else ""
+    entries = ""
+    for ch in avail:
+        links = _chapter_links(manga.id, ch)
+        label = f"Cap. {ch.number}"
+        entries += _acq_entry(
+            id_=f"urn:alejandria:manga:{manga.id}:ch:{ch.id}",
+            title=f"{manga.title} — {label}",
+            updated=_now_iso(),
+            author=_join_list(manga.authors),
+            summary=manga.description or "",
+            cover_url=cover_url,
+            acquisition_links=links,
+        )
+
+    xml = _atom_feed(
+        id_=f"urn:alejandria:manga:{manga.id}",
+        title=manga.title,
+        updated=_now_iso(),
+        links=f'  <link rel="up" href="/api/v1/opds/manga" type="{OPDS_ACQ_MIME}"/>\n',
+        entries=entries,
+        kind="acquisition",
+    )
+    return Response(content=xml, media_type=OPDS_MIME)
 
 
 # ---------------------------------------------------------------------------
@@ -419,49 +496,132 @@ async def opds_books(
 
     entries = ""
     for b in page_items:
-        links, avail, total = _book_acquisition_links(b, db)
-        summary = b.description or ""
-        if avail == 0:
-            note = "(Pendiente de descarga)"
-        else:
-            note = ""
-        if note:
-            summary = f"{note}  {summary}".strip()
-        entries += _acq_entry(
-            id_=f"urn:alejandria:books:{b.id}",
-            title=b.title,
-            updated=_now_iso(),
-            author=_join_list(b.authors),
-            summary=summary,
-            cover_url=f"/api/v1/opds/covers/books/{b.id}" if b.cover_url else "",
-            acquisition_links=links,
-        )
+        entries += _book_entry(b, db)
 
     pagination = _pagination_links("/api/v1/opds/books", page, total)
     xml = _atom_feed("urn:alejandria:books", "Libros", _now_iso(), pagination, entries, kind="acquisition")
     return Response(content=xml, media_type=OPDS_MIME)
 
 
-def _book_acquisition_links(book: Book, db: Session) -> tuple:
-    """Devuelve (links, archivos_disponibles, total_archivos)."""
+def _book_available_chapters(book: Book, db: Session):
+    """Devuelve lista de BookChapter con archivo disponible, ordenados por número."""
     chapters = db.query(BookChapter).filter(
         BookChapter.book_id == book.id
     ).order_by(BookChapter.number).all()
+    return [ch for ch in chapters if ch.file_path and Path(ch.file_path).exists()]
 
-    total = len(chapters)
-    avail = 0
-    links = []
-    for ch in chapters:
-        if ch.file_path and Path(ch.file_path).exists():
-            ext = Path(ch.file_path).suffix.lower()
-            mime = EPUB_MIME if ext == ".epub" else "application/pdf"
-            links.append(_acq_link(
-                href=f"/api/v1/opds/download/books/{book.id}/{ch.id}/epub",
-                mime=mime,
-                title=f"Libro ({ext[1:].upper()})",
-            ))
-            avail += 1
-    return links, avail, total
+
+def _book_entry(book: Book, db: Session) -> str:
+    """Genera XML de entrada OPDS para un libro.
+
+    - Sin capítulos disponibles → entrada sin links (pendiente).
+    - 1 capítulo → acquisition entry con descarga directa.
+    - 2+ capítulos → navigation entry → /opds/books/{id} (feed de capítulos).
+    """
+    avail = _book_available_chapters(book, db)
+    cover_url = f"/api/v1/opds/covers/books/{book.id}" if book.cover_image else ""
+    cover_xml = (
+        f'    <link rel="http://opds-spec.org/image" href="{cover_url}" type="image/jpeg"/>\n'
+        if cover_url else ""
+    )
+    author_esc = _escape(_join_list(book.authors))
+    summary_esc = _escape(book.description or "")
+
+    if not avail:
+        summary_esc = _escape(f"(Pendiente de descarga)  {book.description or ''}".strip())
+        return (
+            f'  <entry>\n'
+            f'    <id>urn:alejandria:books:{book.id}</id>\n'
+            f'    <title>{_escape(book.title)}</title>\n'
+            f'    <updated>{_now_iso()}</updated>\n'
+            f'    <author><name>{author_esc}</name></author>\n'
+            f'    <summary>{summary_esc}</summary>\n'
+            f'{cover_xml}'
+            f'  </entry>\n'
+        )
+
+    if len(avail) == 1:
+        ch = avail[0]
+        ext = Path(ch.file_path).suffix.lower()
+        mime = EPUB_MIME if ext == ".epub" else "application/pdf"
+        link = _acq_link(
+            href=f"/api/v1/opds/download/books/{book.id}/{ch.id}/epub",
+            mime=mime,
+            title=book.title,
+        )
+        return _acq_entry(
+            id_=f"urn:alejandria:books:{book.id}",
+            title=book.title,
+            updated=_now_iso(),
+            author=_join_list(book.authors),
+            summary=book.description or "",
+            cover_url=cover_url,
+            acquisition_links=[link],
+        )
+
+    # Multi-capítulo: entrada de navegación → /opds/books/{id}
+    summary_esc = _escape(f"({len(avail)} volúmenes disponibles)  {book.description or ''}".strip())
+    return (
+        f'  <entry>\n'
+        f'    <id>urn:alejandria:books:{book.id}</id>\n'
+        f'    <title>{_escape(book.title)}</title>\n'
+        f'    <updated>{_now_iso()}</updated>\n'
+        f'    <author><name>{author_esc}</name></author>\n'
+        f'    <summary>{summary_esc}</summary>\n'
+        f'{cover_xml}'
+        f'    <link rel="subsection" href="/api/v1/opds/books/{book.id}" type="{OPDS_ACQ_MIME}"/>\n'
+        f'  </entry>\n'
+    )
+
+
+@router.head("/books/{book_id}")
+async def opds_book_chapters_head(book_id: int, user: User = Depends(get_opds_user)):
+    return Response(status_code=200, headers={"Content-Type": OPDS_ACQ_MIME})
+
+
+@router.get("/books/{book_id}", response_class=Response)
+async def opds_book_chapters(
+    book_id: int,
+    user: User = Depends(get_opds_user),
+    db: Session = Depends(get_db),
+):
+    """Feed de capítulos/volúmenes de un libro — para clientes OPDS que navegaron desde el feed principal."""
+    book = db.query(Book).filter(Book.id == book_id, Book.user_id == user.id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="Libro no encontrado")
+
+    avail = _book_available_chapters(book, db)
+    cover_url = f"/api/v1/opds/covers/books/{book.id}" if book.cover_image else ""
+    entries = ""
+    for ch in avail:
+        ext = Path(ch.file_path).suffix.lower()
+        mime = EPUB_MIME if ext == ".epub" else "application/pdf"
+        label = ch.title or f"Vol. {ch.number}"
+        title = f"{book.title} — {label}" if len(avail) > 1 else book.title
+        link = _acq_link(
+            href=f"/api/v1/opds/download/books/{book.id}/{ch.id}/epub",
+            mime=mime,
+            title=title,
+        )
+        entries += _acq_entry(
+            id_=f"urn:alejandria:books:{book.id}:ch:{ch.id}",
+            title=title,
+            updated=_now_iso(),
+            author=_join_list(book.authors),
+            summary=book.description or "",
+            cover_url=cover_url,
+            acquisition_links=[link],
+        )
+
+    xml = _atom_feed(
+        id_=f"urn:alejandria:books:{book.id}",
+        title=book.title,
+        updated=_now_iso(),
+        links=f'  <link rel="up" href="/api/v1/opds/books" type="{OPDS_ACQ_MIME}"/>\n',
+        entries=entries,
+        kind="acquisition",
+    )
+    return Response(content=xml, media_type=OPDS_MIME)
 
 
 # ---------------------------------------------------------------------------
@@ -484,17 +644,7 @@ async def opds_search(
             Manga.title.ilike(f"%{q}%"),
         ).limit(PAGE_SIZE).all()
         for m in mangas:
-            links, avail, total = _manga_acquisition_links(m, db)
-            note = f"({avail}/{total} cap.)" if avail < total else ""
-            entries += _acq_entry(
-                id_=f"urn:alejandria:manga:{m.id}",
-                title=f"[Manga] {m.title}",
-                updated=_now_iso(),
-                author=m.author or "",
-                summary=f"{note}  {m.description or ''}".strip() if note else (m.description or ""),
-                cover_url=f"/api/v1/opds/covers/manga/{m.id}" if m.cover_url else "",
-                acquisition_links=links,
-            )
+            entries += _manga_entry(m, db, title_prefix="[Manga] ")
 
         # Comics
         comics = db.query(Comic).filter(
@@ -508,9 +658,9 @@ async def opds_search(
                 id_=f"urn:alejandria:comics:{c.id}",
                 title=f"[Cómic] {c.title}",
                 updated=_now_iso(),
-                author=c.author or "",
+                author=_join_list(c.writers),
                 summary=f"{note}  {c.description or ''}".strip() if note else (c.description or ""),
-                cover_url=f"/api/v1/opds/covers/comics/{c.id}" if c.cover_url else "",
+                cover_url=f"/api/v1/opds/covers/comics/{c.id}" if c.cover_image else "",
                 acquisition_links=links,
             )
 
@@ -520,17 +670,7 @@ async def opds_search(
             Book.title.ilike(f"%{q}%"),
         ).limit(PAGE_SIZE).all()
         for b in books:
-            links, avail, _ = _book_acquisition_links(b, db)
-            note = "(Pendiente)" if avail == 0 else ""
-            entries += _acq_entry(
-                id_=f"urn:alejandria:books:{b.id}",
-                title=f"[Libro] {b.title}",
-                updated=_now_iso(),
-                author=b.author or "",
-                summary=f"{note}  {b.description or ''}".strip() if note else (b.description or ""),
-                cover_url=f"/api/v1/opds/covers/books/{b.id}" if b.cover_url else "",
-                acquisition_links=links,
-            )
+            entries += _book_entry(b, db)
 
     xml = _atom_feed(
         id_="urn:alejandria:search",
@@ -563,11 +703,11 @@ async def opds_cover(
     elif content_type == "comics":
         item = db.query(Comic).filter(Comic.id == item_id, Comic.user_id == user.id).first()
         if item:
-            cover_url = item.cover_url
+            cover_url = item.cover_image
     elif content_type == "books":
         item = db.query(Book).filter(Book.id == item_id, Book.user_id == user.id).first()
         if item:
-            cover_url = item.cover_url
+            cover_url = item.cover_image
 
     if not cover_url:
         raise HTTPException(status_code=404, detail="Cover not found")
@@ -630,7 +770,8 @@ async def opds_download(
             raise HTTPException(404)
         if ch.file_path and Path(ch.file_path).exists():
             file_path = Path(ch.file_path)
-            filename = f"{book.title}"
+            ch_label = ch.title or f"Vol. {ch.number}"
+            filename = f"{book.title} - {ch_label}"
     else:
         raise HTTPException(400, "Tipo de contenido no válido")
 
