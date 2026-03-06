@@ -966,7 +966,7 @@ async def _download_book_chapter(chapter_id: int):
 
         # Check if URL is from an intermediate host that needs resolving
         needs_resolving = any(host in chapter.download_url.lower()
-                            for host in ['antupload.com', 'beeupload', 'fireload', 'krakenfiles.com/view'])
+                            for host in ['antupload.com', 'beeupload', 'fireload', 'krakenfiles.com/view', 'send.now'])
 
         # Sanitize filename
         safe_title = "".join(c for c in book.title if c.isalnum() or c in (' ', '-', '_')).strip()
@@ -979,8 +979,17 @@ async def _download_book_chapter(chapter_id: int):
             download_dir.mkdir(parents=True, exist_ok=True)
             download_path = download_dir / filename
 
+            # Send.now: simple click sin captcha — downloader dedicado
+            if 'send.now' in chapter.download_url.lower():
+                logger.info("SendNow: usando downloader dedicado...")
+                from app.services.sendnow_downloader import download_from_sendnow
+                ok = await download_from_sendnow(chapter.download_url, download_path)
+                if not ok:
+                    raise Exception("SendNow download failed — ver logs para detalles")
+                result_path = download_path
+
             # KrakenFiles: usa Cloudflare Turnstile — requiere 2captcha para resolver
-            if 'krakenfiles.com' in chapter.download_url.lower():
+            elif 'krakenfiles.com' in chapter.download_url.lower():
                 logger.info("KrakenFiles: usando downloader dedicado (Turnstile + 2captcha)...")
                 from app.services.krakenfiles_downloader import download_from_krakenfiles
                 ok = await download_from_krakenfiles(chapter.download_url, download_path)

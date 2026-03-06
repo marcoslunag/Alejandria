@@ -102,13 +102,13 @@ class BookScraperBase(ABC):
         HostType.MEGA: 70,  # Lowered from 95 - rate limit issues (~6h/5GB)
         HostType.GOOGLE_DRIVE: 95,  # Raised from 90 - best option, no severe limits
         HostType.MEDIAFIRE: 90,  # Raised from 85 - good option
+        HostType.SENDNOW: 80,      # Simple click, sin captcha — preferido sobre krakenfiles
         HostType.FIRELOAD: 75,
-        HostType.KRAKENFILES: 70,
         HostType.DIRECT: 70,
         HostType.MEGAUP: 65,
+        HostType.KRAKENFILES: 45,  # Requiere 2captcha (CAPTCHA_API_KEY) — evitar si hay alternativas
         HostType.TERABOX: 60,
         HostType.UPLOADEE: 55,
-        HostType.SENDNOW: 50,
         HostType.UNKNOWN: 30,
     }
 
