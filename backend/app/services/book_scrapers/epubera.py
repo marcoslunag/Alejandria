@@ -1,7 +1,12 @@
 """
 Epubera.com EPUB Scraper
 Scrapes books from epubera.com
-Password-protected links use the fixed password "epubera.com"
+
+Mecanismo de desbloqueo:
+- La página tiene un formulario POST (action=misma URL) con <input id="epubera_pass">
+- Al enviar el formulario con la contraseña "epubera.com", la página se recarga
+  mostrando los enlaces de descarga directamente en el DOM.
+- NO es AJAX — es un POST HTML clásico que recarga la página.
 """
 
 import aiohttp
@@ -15,6 +20,12 @@ from .base import BookScraperBase, BookScraperResult, DownloadLink
 logger = logging.getLogger(__name__)
 
 EPUBERA_PASSWORD = "epubera.com"
+
+KNOWN_HOSTS = [
+    "mega.nz", "mega.io", "mediafire.com", "drive.google.com",
+    "terabox.com", "1024tera", "1fichier.com", "krakenfiles.com",
+    "upload.ee", "megaup.net", "fireload.com", "send.now",
+]
 
 
 class EpuberaScraper(BookScraperBase):
@@ -104,7 +115,9 @@ class EpuberaScraper(BookScraperBase):
     async def get_download_links(self, url: str) -> BookScraperResult:
         """
         Get download links from an epubera.com book page.
-        Uses Playwright to unlock password-protected links.
+
+        Epubera usa un formulario POST clásico protegido con contraseña.
+        Al enviar el formulario la página se recarga mostrando los links directamente.
         """
         page = None
         try:
@@ -115,7 +128,7 @@ class EpuberaScraper(BookScraperBase):
 
             logger.info(f"Epubera: Accessing {url}")
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
 
             title_elem = await page.query_selector("h1, .entry-title")
             title = (await title_elem.inner_text()).strip() if title_elem else "Unknown"
@@ -123,61 +136,69 @@ class EpuberaScraper(BookScraperBase):
             cover_elem = await page.query_selector("article img, .entry-content img")
             cover = await cover_elem.get_attribute("src") if cover_elem else None
 
-            # Unlock password-protected links
-            password_input = await page.query_selector('input[type="password"]')
+            # Desbloquear enlaces: formulario con id="epubera_pass"
+            password_input = await page.query_selector("#epubera_pass")
+            if not password_input:
+                # Fallback: cualquier input de contraseña que no sea de comentarios
+                password_input = await page.query_selector(
+                    'form:not([action*="wp-comments"]) input[type="password"]'
+                )
+
             if password_input:
                 logger.info("Epubera: Found password field, unlocking links...")
                 await password_input.fill(EPUBERA_PASSWORD)
 
-                submit_btn = await page.query_selector(
-                    'input[type="submit"], button[type="submit"], '
-                    'button:has-text("Desbloquear"), button:has-text("OK"), '
-                    'input[value*="Desbloquear"], input[value*="desbloquear"]'
+                # Obtener el botón submit del formulario correcto (no del de comentarios)
+                submit_btn = await page.evaluate_handle(
+                    'document.querySelector("#epubera_pass").closest("form").querySelector("button[type=submit], input[type=submit]")'
                 )
+
                 if submit_btn:
-                    await submit_btn.click()
-                    await asyncio.sleep(2)
+                    try:
+                        # El form POST recarga la página — esperar navegación
+                        async with page.expect_navigation(wait_until="domcontentloaded", timeout=20000):
+                            await submit_btn.click()
+                        logger.info("Epubera: Page reloaded after unlock")
+                        await asyncio.sleep(1)
+                    except Exception as nav_err:
+                        logger.warning(f"Epubera: Navigation wait failed ({nav_err}), sleeping...")
+                        await asyncio.sleep(3)
                 else:
                     await password_input.press("Enter")
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(3)
+            else:
+                logger.info("Epubera: No password field found, scanning page directly")
 
-            # Collect download links
+            # Recoger links de descarga del DOM
             download_links = []
-            all_links = await page.query_selector_all("a[href]")
+            all_a = await page.query_selector_all("a[href]")
 
-            known_hosts = [
-                "mega.nz", "mega.io", "mediafire.com", "drive.google.com",
-                "terabox.com", "1024tera", "1fichier.com", "krakenfiles.com",
-                "upload.ee", "megaup.net", "fireload.com",
-            ]
-
-            for link in all_links:
+            for link in all_a:
                 try:
                     href = await link.get_attribute("href")
                     if not href or href == "#":
                         continue
-                    href_lower = href.lower()
-                    if any(host in href_lower for host in known_hosts):
-                        dl_link = self.create_download_link(href)
+                    if any(host in href.lower() for host in KNOWN_HOSTS):
                         if not any(existing.url == href for existing in download_links):
+                            dl_link = self.create_download_link(href)
                             download_links.append(dl_link)
                             logger.info(f"Epubera: Found link -> {dl_link.host.value}: {href[:80]}")
                 except Exception:
                     continue
 
-            # Also scan raw HTML for links that JS might have injected
+            # Fallback: regex en HTML por si algún link está en texto/JS
             if not download_links:
                 html_content = await page.content()
-                for host in known_hosts:
+                for host in KNOWN_HOSTS:
                     pattern = rf'https?://(?:www\.)?{re.escape(host)}[^\s"\'<>]+'
-                    matches = re.findall(pattern, html_content, re.IGNORECASE)
-                    for match in matches:
+                    for match in re.findall(pattern, html_content, re.IGNORECASE):
                         clean = match.rstrip("\"'")
                         if not any(existing.url == clean for existing in download_links):
                             dl_link = self.create_download_link(clean)
                             download_links.append(dl_link)
-                            logger.info(f"Epubera: Found link in HTML -> {dl_link.host.value}")
+                            logger.info(f"Epubera: Found link in HTML -> {dl_link.host.value}: {clean[:80]}")
 
+            logger.info(f"Epubera: Total links found: {len(download_links)}")
             return BookScraperResult(
                 title=title,
                 source=self.name,
