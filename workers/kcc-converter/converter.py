@@ -5,6 +5,7 @@ FINAL VERSION: Output filenames preserve original names (no .clean suffix)
 """
 
 import os
+import re
 import time
 import subprocess
 import logging
@@ -15,6 +16,108 @@ import json
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+
+
+def _natural_sort_key(path: Path) -> list:
+    """
+    Clave de ordenación natural — trata números embebidos como enteros,
+    usando la ruta completa para respetar carpetas de capítulos.
+    """
+    result = []
+    for component in path.parts:
+        for segment in re.split(r'(\d+)', component.lower()):
+            result.append(int(segment) if segment.isdigit() else segment)
+    return result
+
+
+def _detect_and_sort_images(image_files: list, label: str = "") -> list:
+    """
+    Detecta el patrón de nombres de las imágenes, aplica natural sort,
+    y logea una advertencia si el orden léxico habría sido incorrecto.
+
+    Patrones manejados correctamente:
+    - "1.jpg" ... "99.jpg" ... "100.jpg"   (sin zero-padding) ✓
+    - "001.jpg" ... "099.jpg" ... "100.jpg" (con zero-padding) ✓
+    - "Page_1.jpg" ... "Page_100.jpg"       (prefijo + número) ✓
+    - "Chapter 1/001.jpg" ... "Chapter 10/" (carpetas de capítulos) ✓
+    - Mezcla de cualquiera de los anteriores ✓
+    """
+    if not image_files:
+        return image_files
+
+    paths = [x[0] for x in image_files]
+    names = [p.name for p in paths]
+
+    # Detectar si hay carpetas de capítulos (rutas distintas)
+    unique_parents = set(p.parent for p in paths)
+    has_chapter_dirs = len(unique_parents) > 1
+
+    # Extraer el último grupo numérico de cada nombre de archivo
+    last_num_re = re.compile(r'(\d+)(?=\D*$)')
+    page_nums = []
+    zero_padded_count = 0
+    for name in names:
+        stem = Path(name).stem
+        m = last_num_re.search(stem)
+        if m:
+            num_str = m.group(1)
+            page_nums.append(int(num_str))
+            if len(num_str) > 1 and num_str[0] == '0':
+                zero_padded_count += 1
+
+    # Describir el patrón detectado
+    if has_chapter_dirs:
+        chapter_names = sorted(set(p.parent.name for p in paths))[:5]
+        pattern = (
+            f"subcarpetas de capítulos ({len(unique_parents)} dirs: "
+            f"{', '.join(chapter_names)}{'...' if len(unique_parents) > 5 else ''})"
+        )
+    elif not page_nums:
+        pattern = "sin numeración de páginas"
+    else:
+        total = len(page_nums)
+        zp_pct = zero_padded_count / total
+        lo, hi = min(page_nums), max(page_nums)
+        if zp_pct >= 0.9:
+            pattern = f"zero-padded ({lo}–{hi}, {total} páginas)"
+        elif zp_pct <= 0.1:
+            pattern = (
+                f"SIN zero-padding ({lo}–{hi}, {total} páginas) "
+                f"← riesgo de salto de páginas sin natural sort"
+            )
+        else:
+            pattern = (
+                f"padding MIXTO ({lo}–{hi}, {total} págs, "
+                f"{zp_pct:.0%} zero-padded)"
+            )
+
+    # Aplicar natural sort (ruta completa)
+    nat_sorted = sorted(image_files, key=lambda x: _natural_sort_key(x[0]))
+
+    # Comparar con orden léxico para detectar discrepancias
+    lex_sorted = sorted(image_files, key=lambda x: x[0].name.lower())
+
+    nat_names = [x[0].name for x in nat_sorted]
+    lex_names = [x[0].name for x in lex_sorted]
+
+    if nat_names != lex_names:
+        first = next(
+            i for i, (n, l) in enumerate(zip(nat_names, lex_names)) if n != l
+        )
+        logger.warning(
+            f"⚠️  SORT [{label}] — {pattern}: "
+            f"el orden léxico INCORRECTO habría causado salto de páginas "
+            f"en posición {first + 1} "
+            f"(léxico='{lex_names[first]}' → correcto='{nat_names[first]}'). "
+            f"Natural sort aplicado — páginas en orden correcto."
+        )
+    else:
+        logger.info(
+            f"✅ SORT [{label}] — {pattern}: "
+            f"orden léxico = natural, sin riesgo de saltos."
+        )
+
+    return nat_sorted
 
 try:
     from PIL import Image
@@ -552,8 +655,10 @@ class ArchiveHandler(FileSystemEventHandler):
                             size_bytes = img_path.stat().st_size
                             vol_data['images'].append((img_path, size_bytes))
 
-                # Ordenar imágenes por nombre (case-insensitive para consistencia)
-                vol_data['images'].sort(key=lambda x: x[0].name.lower())
+                # Ordenar con detección de patrón + natural sort
+                vol_data['images'] = _detect_and_sort_images(
+                    vol_data['images'], label=f"Tomo {vol_num}"
+                )
                 logger.info(f"Volume {vol_num}: {len(vol_data['images'])} images found")
 
             # Filtrar volúmenes sin imágenes
@@ -670,8 +775,8 @@ class ArchiveHandler(FileSystemEventHandler):
             if not image_files:
                 raise RuntimeError("No valid images found")
 
-            # Ordenar por nombre (case-insensitive para consistencia)
-            image_files.sort(key=lambda x: x[0].name.lower())
+            # Ordenar con detección de patrón + natural sort
+            image_files = _detect_and_sort_images(image_files, label=file_path.stem)
 
             # Calcular tamaño total
             total_size_mb = sum(size for _, size in image_files) / (1024 * 1024)
@@ -711,25 +816,7 @@ class ArchiveHandler(FileSystemEventHandler):
         if clean_cbz_path.exists():
             clean_cbz_path.unlink()
 
-        seen_names = set()
-        final_images = []
-
-        for img_path, _ in image_files:
-            name = img_path.name
-            counter = 1
-            original_name = name
-
-            while name in seen_names:
-                s = Path(original_name).stem
-                suffix = Path(original_name).suffix
-                name = f"{s}_{counter:03d}{suffix}"
-                counter += 1
-
-            seen_names.add(name)
-            final_images.append((img_path, name))
-
         with zipfile.ZipFile(clean_cbz_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-            # Insertar ComicInfo.xml si hay metadatos
             if metadata:
                 try:
                     comicinfo_xml = generate_comicinfo_xml(metadata)
@@ -738,10 +825,17 @@ class ArchiveHandler(FileSystemEventHandler):
                 except Exception as e:
                     logger.warning(f"Could not generate ComicInfo.xml: {e}")
 
-            for src_path, arc_name in final_images:
-                zf.write(src_path, arc_name)
+            # Renombrar a secuencial zero-padded (0001.jpg, 0002.jpg, ...)
+            # CRÍTICO: KCC ordena el CBZ alfabéticamente al leerlo.
+            # Si conservamos nombres originales (ej: 1.jpg, 10.jpg, 18.jpg)
+            # KCC los leería en orden léxico incorrecto aunque nosotros los
+            # hayamos ordenado bien. El renombrado garantiza el orden correcto.
+            for i, (img_path, _) in enumerate(image_files):
+                ext = img_path.suffix.lower()
+                arc_name = f"{i + 1:04d}{ext}"
+                zf.write(img_path, arc_name)
 
-        logger.info(f"Created: {clean_cbz_path.name} ({len(final_images)} images)")
+        logger.info(f"Created: {clean_cbz_path.name} ({len(image_files)} images)")
         return [clean_cbz_path]
 
     def _create_volume_cbzs(self, stem: str, volume_folders: dict, metadata: dict = None) -> list[Path]:
@@ -777,25 +871,7 @@ class ArchiveHandler(FileSystemEventHandler):
             if clean_cbz_path.exists():
                 clean_cbz_path.unlink()
 
-            seen_names = set()
-            final_images = []
-
-            for img_path, _ in image_files:
-                name = img_path.name
-                counter = 1
-                original_name = name
-
-                while name in seen_names:
-                    s = Path(original_name).stem
-                    suffix = Path(original_name).suffix
-                    name = f"{s}_{counter:03d}{suffix}"
-                    counter += 1
-
-                seen_names.add(name)
-                final_images.append((img_path, name))
-
             with zipfile.ZipFile(clean_cbz_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-                # Insertar ComicInfo.xml con el número de volumen correcto
                 if metadata:
                     try:
                         vol_metadata = metadata.copy()
@@ -807,11 +883,14 @@ class ArchiveHandler(FileSystemEventHandler):
                     except Exception as e:
                         logger.warning(f"Could not generate ComicInfo.xml: {e}")
 
-                for src_path, arc_name in final_images:
-                    zf.write(src_path, arc_name)
+                # Renombrar a secuencial para garantizar orden correcto en KCC
+                for i, (img_path, _) in enumerate(image_files):
+                    ext = img_path.suffix.lower()
+                    arc_name = f"{i + 1:04d}{ext}"
+                    zf.write(img_path, arc_name)
 
             vol_size = sum(p.stat().st_size for p, _ in image_files) / (1024 * 1024)
-            logger.info(f"📖 Created volume {vol_num}: {clean_cbz_path.name} ({len(final_images)} images, ~{vol_size:.1f}MB)")
+            logger.info(f"📖 Created volume {vol_num}: {clean_cbz_path.name} ({len(image_files)} images, ~{vol_size:.1f}MB)")
             result_paths.append(clean_cbz_path)
 
         return result_paths
@@ -851,20 +930,6 @@ class ArchiveHandler(FileSystemEventHandler):
                 if clean_cbz_path.exists():
                     clean_cbz_path.unlink()
 
-                seen_names = set()
-                final_images = []
-                for img_path, _ in part_images:
-                    name = img_path.name
-                    counter = 1
-                    original_name = name
-                    while name in seen_names:
-                        s = Path(original_name).stem
-                        suffix = Path(original_name).suffix
-                        name = f"{s}_{counter:03d}{suffix}"
-                        counter += 1
-                    seen_names.add(name)
-                    final_images.append((img_path, name))
-
                 with zipfile.ZipFile(clean_cbz_path, 'w', zipfile.ZIP_DEFLATED) as zf:
                     if metadata:
                         try:
@@ -875,11 +940,15 @@ class ArchiveHandler(FileSystemEventHandler):
                             zf.writestr("ComicInfo.xml", comicinfo_xml)
                         except Exception as e:
                             logger.warning(f"Could not generate ComicInfo.xml: {e}")
-                    for src_path, arc_name in final_images:
-                        zf.write(src_path, arc_name)
+
+                    # Renombrar a secuencial para garantizar orden correcto en KCC
+                    for i, (img_path, _) in enumerate(part_images):
+                        ext = img_path.suffix.lower()
+                        arc_name = f"{i + 1:04d}{ext}"
+                        zf.write(img_path, arc_name)
 
                 part_size = sum(p.stat().st_size for p, _ in part_images) / (1024 * 1024)
-                logger.info(f"📖 Created volume {vol_num} part {part_idx + 1}/{actual_parts}: {clean_cbz_path.name} ({len(final_images)} images, ~{part_size:.1f}MB)")
+                logger.info(f"📖 Created volume {vol_num} part {part_idx + 1}/{actual_parts}: {clean_cbz_path.name} ({len(part_images)} images, ~{part_size:.1f}MB)")
                 result_paths.append(clean_cbz_path)
 
         return result_paths
@@ -909,25 +978,7 @@ class ArchiveHandler(FileSystemEventHandler):
             if clean_cbz_path.exists():
                 clean_cbz_path.unlink()
 
-            seen_names = set()
-            final_images = []
-
-            for img_path, _ in part_images:
-                name = img_path.name
-                counter = 1
-                original_name = name
-
-                while name in seen_names:
-                    s = Path(original_name).stem
-                    suffix = Path(original_name).suffix
-                    name = f"{s}_{counter:03d}{suffix}"
-                    counter += 1
-
-                seen_names.add(name)
-                final_images.append((img_path, name))
-
             with zipfile.ZipFile(clean_cbz_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-                # Insertar ComicInfo.xml con numero de parte
                 if metadata:
                     try:
                         comicinfo_xml = generate_comicinfo_xml(metadata, part_number=part_num + 1)
@@ -936,11 +987,14 @@ class ArchiveHandler(FileSystemEventHandler):
                     except Exception as e:
                         logger.warning(f"Could not generate ComicInfo.xml: {e}")
 
-                for src_path, arc_name in final_images:
-                    zf.write(src_path, arc_name)
+                # Renombrar a secuencial para garantizar orden correcto en KCC
+                for i, (img_path, _) in enumerate(part_images):
+                    ext = img_path.suffix.lower()
+                    arc_name = f"{i + 1:04d}{ext}"
+                    zf.write(img_path, arc_name)
 
             part_size = sum(p.stat().st_size for p, _ in part_images) / (1024 * 1024)
-            logger.info(f"Created part {part_num + 1}/{num_parts}: {clean_cbz_path.name} ({len(final_images)} images, ~{part_size:.1f}MB)")
+            logger.info(f"Created part {part_num + 1}/{num_parts}: {clean_cbz_path.name} ({len(part_images)} images, ~{part_size:.1f}MB)")
             result_paths.append(clean_cbz_path)
 
         return result_paths
