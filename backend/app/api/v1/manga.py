@@ -736,6 +736,13 @@ def delete_manga(manga_id: int, db: Session = Depends(get_db), current_user: Use
     if not manga:
         raise HTTPException(status_code=404, detail="Manga not found")
 
+    # Eliminar entradas de download_queue que referencian los capítulos del manga
+    # antes de borrar los capítulos (la FK no tiene ON DELETE CASCADE en la BD actual)
+    from app.models.download import DownloadQueue
+    chapter_ids = [ch.id for ch in manga.chapters]
+    if chapter_ids:
+        db.query(DownloadQueue).filter(DownloadQueue.chapter_id.in_(chapter_ids)).delete(synchronize_session=False)
+
     title = manga.title
     db.delete(manga)
     db.commit()

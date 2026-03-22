@@ -16,8 +16,8 @@ class DownloadQueue(Base):
     id = Column(Integer, primary_key=True, index=True)
 
     # Support manga chapters, book chapters, and comic issues
-    chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=True, index=True)  # Manga chapters
-    book_chapter_id = Column(Integer, ForeignKey("book_chapters.id"), nullable=True, index=True)  # Book chapters
+    chapter_id = Column(Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True, index=True)  # Manga chapters
+    book_chapter_id = Column(Integer, ForeignKey("book_chapters.id", ondelete="CASCADE"), nullable=True, index=True)  # Book chapters
     comic_issue_id = Column(Integer, ForeignKey("comic_issues.id", ondelete="CASCADE"), nullable=True, index=True)  # Comic issues
 
     # Content type: 'manga', 'book', or 'comic'

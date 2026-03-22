@@ -533,6 +533,13 @@ async def delete_book(book_id: int, db: Session = Depends(get_db), current_user:
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
+    # Eliminar entradas de download_queue que referencian los capítulos del libro
+    # antes de borrar los capítulos (la FK no tiene ON DELETE CASCADE en la BD actual)
+    from app.models.download import DownloadQueue
+    chapter_ids = [ch.id for ch in book.chapters]
+    if chapter_ids:
+        db.query(DownloadQueue).filter(DownloadQueue.book_chapter_id.in_(chapter_ids)).delete(synchronize_session=False)
+
     db.delete(book)
     db.commit()
 
