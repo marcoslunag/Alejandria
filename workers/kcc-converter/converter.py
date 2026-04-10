@@ -30,6 +30,71 @@ def _natural_sort_key(path: Path) -> list:
     return result
 
 
+# Sufijos que indican variantes de la misma página (no páginas distintas)
+# Ejemplos: "36 copia.jpg", "36 copia (1).jpg", "p010-min-min.jpg"
+_VARIANT_SUFFIX_RE = re.compile(
+    r'(\s+copia(\s*\(\d+\))?)+$'  # " copia", " copia (1)", " copia copia"
+    r'|(\s*-\s*min)+$',            # "-min", "-min-min"
+    re.IGNORECASE
+)
+
+
+def _normalize_page_key(path: Path) -> tuple:
+    """
+    Clave para detectar páginas duplicadas: (directorio_padre, stem_normalizado).
+    Strips variant suffixes: ' copia', ' copia (1)', '-min', '-min-min'.
+    """
+    stem = path.stem
+    normalized = _VARIANT_SUFFIX_RE.sub('', stem).strip().lower()
+    return (path.parent, normalized)
+
+
+def _deduplicate_variant_pages(image_files: list, label: str = "") -> list:
+    """
+    Elimina páginas duplicadas producidas por variantes de archivo del mismo release:
+    - '36 copia.jpg' y '36.jpg'     → misma página (ej: capítulo 132 de AoT t33)
+    - 'p010-min-min.jpg' y 'p010.jpg' → misma página (versión comprimida vs original)
+
+    Conserva el archivo de mayor tamaño (asumiendo mejor calidad).
+    Preserva el orden del input.
+    """
+    if not image_files:
+        return image_files
+
+    # Agrupar por (directorio, stem normalizado)
+    key_to_files: dict = {}
+    for item in image_files:
+        img_path, size = item
+        key = _normalize_page_key(img_path)
+        key_to_files.setdefault(key, []).append(item)
+
+    # Determinar qué paths conservar (el más grande de cada grupo)
+    keep_paths: set = set()
+    removed_count = 0
+    for key, group in key_to_files.items():
+        if len(group) == 1:
+            keep_paths.add(group[0][0])
+        else:
+            best = max(group, key=lambda x: x[1])  # mayor tamaño = mejor calidad
+            keep_paths.add(best[0])
+            removed_count += len(group) - 1
+            others = [p.name for p, _ in group if p != best[0]]
+            logger.info(
+                f"🗑️  Dedup{f' [{label}]' if label else ''}: "
+                f"'{best[0].name}' reemplaza a {others}"
+            )
+
+    if removed_count:
+        logger.warning(
+            f"⚠️  Eliminadas {removed_count} página(s) duplicada(s) con sufijos "
+            f"'copia'/'-min'{f' en {label}' if label else ''} — "
+            f"se conserva la versión de mayor tamaño"
+        )
+
+    # Filtrar preservando el orden original
+    return [(p, s) for p, s in image_files if p in keep_paths]
+
+
 def _detect_and_sort_images(image_files: list, label: str = "") -> list:
     """
     Detecta el patrón de nombres de las imágenes, aplica natural sort,
@@ -94,8 +159,10 @@ def _detect_and_sort_images(image_files: list, label: str = "") -> list:
     # Aplicar natural sort (ruta completa)
     nat_sorted = sorted(image_files, key=lambda x: _natural_sort_key(x[0]))
 
-    # Comparar con orden léxico para detectar discrepancias
-    lex_sorted = sorted(image_files, key=lambda x: x[0].name.lower())
+    # Comparar con orden léxico de RUTA COMPLETA para detectar discrepancias.
+    # Usar ruta completa (no solo nombre) permite detectar casos como
+    # SNK_131_9.jpg vs SNK_131_10.jpg donde el orden léxico invertiría páginas.
+    lex_sorted = sorted(image_files, key=lambda x: str(x[0]).lower())
 
     nat_names = [x[0].name for x in nat_sorted]
     lex_names = [x[0].name for x in lex_sorted]
@@ -659,6 +726,10 @@ class ArchiveHandler(FileSystemEventHandler):
                 vol_data['images'] = _detect_and_sort_images(
                     vol_data['images'], label=f"Tomo {vol_num}"
                 )
+                # Eliminar duplicados con sufijos 'copia'/'-min'
+                vol_data['images'] = _deduplicate_variant_pages(
+                    vol_data['images'], label=f"Tomo {vol_num}"
+                )
                 logger.info(f"Volume {vol_num}: {len(vol_data['images'])} images found")
 
             # Filtrar volúmenes sin imágenes
@@ -777,6 +848,8 @@ class ArchiveHandler(FileSystemEventHandler):
 
             # Ordenar con detección de patrón + natural sort
             image_files = _detect_and_sort_images(image_files, label=file_path.stem)
+            # Eliminar duplicados con sufijos 'copia'/'-min' (ej: AoT t33 cap 132)
+            image_files = _deduplicate_variant_pages(image_files, label=file_path.stem)
 
             # Calcular tamaño total
             total_size_mb = sum(size for _, size in image_files) / (1024 * 1024)
