@@ -3,10 +3,21 @@ STKClient Kindle Sender Service
 Uses stkclient library for Amazon's Send to Kindle API
 Supports OAuth2 authentication and large files (>10MB)
 
-Each user has their own isolated STK session stored at /app/data/stk_{user_id}.json
+Each user has their own isolated STK session stored at /stk-data/stk_{user_id}.json
+(STK_DATA_DIR env var, mounted como volumen Docker para persistir entre reinicios)
+
+DISEÑO DE SESIÓN PERSISTENTE:
+- El token ADP + RSA key son credenciales de dispositivo de larga duración (no expiran
+  como un access token OAuth2 estándar de 1h). Amazon los mantiene válidos mientras el
+  "dispositivo" siga activo.
+- Bug anterior: _is_token_expired_error usaba '403' genérico → cualquier error temporal
+  de Amazon (rate limit, corte momentáneo) borraba la sesión permanentemente.
+- Fix: solo errores específicos y confirmados de Amazon indican token revocado.
+  Los errores temporales se logean pero NO borran la sesión.
+- Protección adicional: MAX_CONSECUTIVE_FAILURES=3 — la sesión solo se elimina tras
+  3 fallos confirmados consecutivos, no al primero.
 """
 
-import json
 import logging
 import os
 from pathlib import Path
@@ -14,6 +25,20 @@ from typing import Optional, List, Dict, Any
 import stkclient
 
 logger = logging.getLogger(__name__)
+
+# Número de fallos consecutivos antes de considerar el token definitivamente muerto
+MAX_CONSECUTIVE_FAILURES = 3
+
+# Palabras clave que Amazon devuelve cuando el ADP token está DEFINITIVAMENTE revocado.
+# '403' y 'forbidden' NO están aquí porque son demasiado genéricos (rate limit, etc.)
+_DEFINITIVE_EXPIRY_SIGNALS = [
+    'deviceinfotoken',       # Amazon: ADP token inválido/revocado
+    'device not registered', # Dispositivo eliminado de la cuenta
+    'invalid adp token',
+    'adp_token is invalid',
+    'device_registration',
+    'customer not found',
+]
 
 def _init_data_dir() -> Path:
     primary = Path(os.environ.get("STK_DATA_DIR", "/app/data"))
@@ -47,6 +72,7 @@ class STKKindleSender:
         self.user_id = user_id
         self.client: Optional[stkclient.Client] = None
         self.oauth: Optional[stkclient.OAuth2] = None
+        self._consecutive_failures: int = 0  # fallos confirmados; sesión se borra solo al llegar a MAX
         self._load_client()
 
     def _load_client(self) -> bool:
@@ -93,16 +119,59 @@ class STKKindleSender:
             return False
 
         self._save_client()
+        self._consecutive_failures = 0
         logger.info(f"STK authorization completed for user {self.user_id}")
         return True
 
-    def _is_token_expired_error(self, error_message: str) -> bool:
+    def _is_definitive_expiry(self, error_message: str) -> bool:
+        """
+        Retorna True SOLO cuando Amazon confirma definitivamente que el token
+        está revocado/inválido. Los errores 403 genéricos (rate limit, caída
+        temporal) NO cuentan — son transitorios y NO deben borrar la sesión.
+        """
         error_str = str(error_message).lower()
-        return 'deviceinfotoken' in error_str or '403' in error_str or 'forbidden' in error_str
+        return any(signal in error_str for signal in _DEFINITIVE_EXPIRY_SIGNALS)
 
-    def _handle_expired_token(self) -> None:
-        logger.warning(f"STK token expired for user {self.user_id} - clearing session")
-        self.logout()
+    def _is_temporary_error(self, error_message: str) -> bool:
+        """Errores transitorios que no indican token expirado."""
+        error_str = str(error_message).lower()
+        return any(s in error_str for s in [
+            'timeout', 'connection', 'network', 'temporarily',
+            'retry', 'service unavailable', '503', '502', '429',
+        ])
+
+    def _record_failure(self, error_message: str) -> bool:
+        """
+        Registra un fallo y decide si la sesión debe borrarse.
+        Retorna True si la sesión debe eliminarse (fallo definitivo confirmado).
+        """
+        if self._is_definitive_expiry(error_message):
+            self._consecutive_failures += 1
+            logger.warning(
+                f"STK fallo definitivo #{self._consecutive_failures}/{MAX_CONSECUTIVE_FAILURES} "
+                f"para user {self.user_id}: {error_message}"
+            )
+            if self._consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                logger.error(
+                    f"STK sesión usuario {self.user_id} revocada tras "
+                    f"{MAX_CONSECUTIVE_FAILURES} fallos consecutivos — requiere re-auth"
+                )
+                return True
+        elif self._is_temporary_error(error_message):
+            logger.warning(f"STK error temporal (no borra sesión) user {self.user_id}: {error_message}")
+        else:
+            # 403 genérico, forbidden, u otro error desconocido: loguear, NO borrar
+            logger.warning(
+                f"STK error no clasificado (no borra sesión) user {self.user_id}: {error_message}. "
+                f"Si persiste, revisar manualmente."
+            )
+        return False
+
+    def _reset_failure_count(self):
+        """Resetea el contador de fallos tras una operación exitosa."""
+        if self._consecutive_failures > 0:
+            logger.info(f"STK user {self.user_id}: operación exitosa, reseteando contador de fallos.")
+        self._consecutive_failures = 0
 
     def get_devices(self) -> List[Dict[str, Any]]:
         if not self.client:
@@ -127,24 +196,33 @@ class STKKindleSender:
                 }
                 for d in devices
             ]
-            # Persist any auto-refreshed tokens back to disk
+            # Éxito: persistir cualquier token auto-refrescado y resetear contador
             self._save_client()
+            self._reset_failure_count()
             return result
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Failed to get Kindle devices for user {self.user_id}: {error_msg}")
-            if self._is_token_expired_error(error_msg):
-                self._handle_expired_token()
+            # Solo borra la sesión si es un fallo definitivo confirmado múltiples veces
+            if self._record_failure(error_msg):
+                self.logout()
             return []
 
     def ensure_healthy(self) -> bool:
-        """Check session health and persist any refreshed tokens. Returns True if healthy."""
+        """
+        Verifica salud de la sesión y persiste tokens auto-refrescados al disco.
+        Retorna True si la sesión está activa.
+
+        NOTA: Los errores temporales (403 de rate-limit, caída de red) NO borran
+        la sesión — solo los fallos definitivos confirmados tras MAX_CONSECUTIVE_FAILURES.
+        """
         if not self.client:
             return False
         devices = self.get_devices()
-        if devices is not None and self.client:
+        if self.client:  # client puede haberse borrado si _record_failure() decidió logout
             logger.info(f"STK session healthy for user {self.user_id} ({len(devices)} devices)")
             return True
+        logger.warning(f"STK session unhealthy for user {self.user_id} — needs re-auth")
         return False
 
     def send_file(
@@ -200,10 +278,11 @@ class STKKindleSender:
             error_msg = str(e)
             logger.error(f"Failed to send to Kindle for user {self.user_id}: {error_msg}")
 
-            if self._is_token_expired_error(error_msg):
-                self._handle_expired_token()
-                return {'success': False, 'message': 'STK session expired. Please re-authenticate in Settings.'}
+            if self._record_failure(error_msg):
+                self.logout()
+                return {'success': False, 'message': 'STK session definitivamente revocada. Re-autentícate en Ajustes.'}
 
+            # Error temporal o no clasificado: informar sin borrar sesión
             return {'success': False, 'message': str(e)}
 
     def logout(self):
