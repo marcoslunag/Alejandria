@@ -47,6 +47,14 @@ const ComicIssueList = ({ comicId, refreshKey = 0 }) => {
     }
   };
 
+  // Polling inteligente: refresca cada 5s mientras haya descargas activas
+  useEffect(() => {
+    const hasActive = issues.some(i => ['downloading', 'converting'].includes(i.status));
+    if (!hasActive) return;
+    const interval = setInterval(loadIssues, 5000);
+    return () => clearInterval(interval);
+  }, [issues]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSelectAll = () => {
     const filteredItems = getFilteredIssues();
     // Only select issues that have download_url and are pending/error

@@ -47,6 +47,14 @@ const ChapterList = ({ mangaId }) => {
     }
   };
 
+  // Polling inteligente: refresca cada 5s mientras haya descargas activas
+  useEffect(() => {
+    const hasActive = tomos.some(t => ['downloading', 'converting'].includes(t.status));
+    if (!hasActive) return;
+    const interval = setInterval(loadTomos, 5000);
+    return () => clearInterval(interval);
+  }, [tomos]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSelectAll = () => {
     const filteredItems = getFilteredTomos();
     const pendingItems = filteredItems.filter(t => t.status === 'pending' || t.status === 'error');

@@ -47,6 +47,7 @@ const Queue = () => {
   const [confirmAction, setConfirmAction] = useState(null);
   const [sseConnected, setSseConnected] = useState(false);
   const esRef = useRef(null);
+  const prevActiveCountRef = useRef(0); // para detectar la transición activo → completado
 
   // Activity log state
   const [activity, setActivity] = useState([]);
@@ -99,7 +100,12 @@ const Queue = () => {
     es.onmessage = (evt) => {
       try {
         const active = JSON.parse(evt.data);
-        if (active.length > 0) loadQueue();
+        // Recargar si hay items activos O si acabamos de pasar de activo→vacío
+        // (esa transición es cuando un download pasa a "completado" y desaparece del stream)
+        if (active.length > 0 || prevActiveCountRef.current > 0) {
+          loadQueue();
+        }
+        prevActiveCountRef.current = active.length;
       } catch {}
     };
 

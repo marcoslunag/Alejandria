@@ -44,6 +44,15 @@ const BookChapterList = ({ bookId }) => {
     }
   };
 
+  // Polling inteligente: refresca cada 5s mientras haya descargas activas
+  // Libros solo pasan por 'downloading' (no hay conversión KCC)
+  useEffect(() => {
+    const hasActive = chapters.some(c => c.status === 'downloading');
+    if (!hasActive) return;
+    const interval = setInterval(loadChapters, 5000);
+    return () => clearInterval(interval);
+  }, [chapters]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSelectAll = () => {
     const filteredItems = getFilteredChapters();
     const pendingItems = filteredItems.filter(c => c.status === 'pending' || c.status === 'error');
