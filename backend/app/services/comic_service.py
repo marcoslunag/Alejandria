@@ -1350,7 +1350,7 @@ async def search_scrapers_directly(query: str) -> List[dict]:
 
     for scraper_name, task in search_tasks:
         try:
-            results = await asyncio.wait_for(task, timeout=10.0)
+            results = await asyncio.wait_for(task, timeout=30.0)
 
             for result in results[:5]:  # First 5 results per scraper
                 url = result.get("url")
@@ -1453,7 +1453,7 @@ async def quick_check_availability(title: str, publisher: str = "", count_of_iss
 
     for scraper_name, task, search_query in search_tasks:
         try:
-            results = await asyncio.wait_for(task, timeout=10.0)
+            results = await asyncio.wait_for(task, timeout=30.0)
             if results and len(results) > 0:
                 title_lower = title.lower()
 

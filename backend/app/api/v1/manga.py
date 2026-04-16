@@ -169,8 +169,8 @@ async def search_manga(
     # asyncio.wait_for usa _cancel_and_wait internamente que bloquea esperando
     # a que el thread termine; asyncio.wait devuelve inmediatamente al timeout
     # y deja los tasks pendientes en background sin bloquear la respuesta.
-    CHECK_LIMIT = 8
-    SCRAPER_TIMEOUT = 8.0
+    CHECK_LIMIT = 20
+    SCRAPER_TIMEOUT = 150.0
     if results:
         loop = asyncio.get_running_loop()
         stop_words = {'the', 'a', 'an', 'of', 'and', 'or', 'el', 'la', 'de', 'los', 'las', 'en', 'y'}
