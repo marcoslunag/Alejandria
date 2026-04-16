@@ -43,7 +43,7 @@ class TomosMangaSearch:
             # requests.get(params=...) aplica urllib.parse.urlencode correctamente.
             logger.info(f"Searching TomosManga: {self.base_url}/?s={query!r}")
 
-            response = self.session.get(self.base_url + "/", params={"s": query}, timeout=10)
+            response = self.session.get(self.base_url + "/", params={"s": query}, timeout=5)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -204,7 +204,7 @@ class MangayComicsSearch:
 
             logger.info(f"Searching MangayComics: {search_url}")
 
-            response = self.session.get(search_url, timeout=10)
+            response = self.session.get(search_url, timeout=5)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, 'html.parser')
