@@ -165,10 +165,12 @@ async def search_manga(
     except Exception as e:
         logger.error(f"AniList search error: {e}")
 
-    # Check scraper availability in parallel — only first 8 results to avoid
-    # thread-pool saturation (20 results × 2 scrapers = 40 blocking HTTP calls
-    # that exceed the 30s axios timeout with a small default executor).
+    # Scraper availability checks — hard 8s cap via asyncio.wait (no wait_for).
+    # asyncio.wait_for usa _cancel_and_wait internamente que bloquea esperando
+    # a que el thread termine; asyncio.wait devuelve inmediatamente al timeout
+    # y deja los tasks pendientes en background sin bloquear la respuesta.
     CHECK_LIMIT = 8
+    SCRAPER_TIMEOUT = 8.0
     if results:
         loop = asyncio.get_running_loop()
         stop_words = {'the', 'a', 'an', 'of', 'and', 'or', 'el', 'la', 'de', 'los', 'las', 'en', 'y'}
@@ -177,8 +179,8 @@ async def search_manga(
         from app.services.tomosmanga_search import TomosMangaSearch
         tomos_scraper = TomosMangaSearch()
 
-        def _keyword_match(title_lower, title_kw, results, source_name):
-            for r in results[:8]:
+        def _keyword_match(title_lower, title_kw, scraper_results, source_name):
+            for r in scraper_results[:8]:
                 r_lower = r.get('title', '').lower()
                 r_kw = {w.strip('":,.-!?[]') for w in r_lower.split()
                         if len(w.strip('":,.-!?[]')) > 2}
@@ -187,7 +189,7 @@ async def search_manga(
                 if exact or keyword:
                     return {
                         "sources": [source_name],
-                        "tomo_count": len(results),
+                        "tomo_count": len(scraper_results),
                         "url": r.get("url")
                     }
             return None
@@ -198,30 +200,18 @@ async def search_manga(
                 title_kw = {w.strip('":,.-!?[]') for w in title_lower.split()
                             if w not in stop_words and len(w.strip('":,.-!?[]')) > 2}
 
-                # Lanzar TomosManga y MangayComics en PARALELO.
-                # IMPORTANTE: crear instancia nueva de MangayComicsScraper por cada
-                # check para que last_request=0 — sin delays del _rate_limit_wait
-                # compartido (8 threads × 1s acumulados = 36s+ de bloqueo).
-                # timeout=6s > requests timeout=5s para que la petición HTTP
-                # falle antes de que asyncio abandone el futuro del executor
+                # Instancia nueva por check — evita rate_limit_wait compartido
                 local_scraper = MangayComicsScraper()
-                tomos_task = asyncio.wait_for(
-                    loop.run_in_executor(None, tomos_scraper.search, title),
-                    timeout=6.0
-                )
-                mac_task = asyncio.wait_for(
-                    loop.run_in_executor(None, local_scraper.search_manga, title),
-                    timeout=6.0
-                )
+                tomos_fut = loop.run_in_executor(None, tomos_scraper.search, title)
+                mac_fut = loop.run_in_executor(None, local_scraper.search_manga, title)
                 tomos_results, mac_results = await asyncio.gather(
-                    tomos_task, mac_task, return_exceptions=True
+                    tomos_fut, mac_fut, return_exceptions=True
                 )
 
                 sources = []
                 url = None
                 tomo_count = 0
 
-                # TomosManga es la fuente principal
                 if tomos_results and not isinstance(tomos_results, Exception):
                     for r in tomos_results[:8]:
                         r_lower = r.get('title', '').lower()
@@ -232,14 +222,12 @@ async def search_manga(
                         if exact or keyword:
                             sources.append("TomosManga")
                             url = r.get("url")
-                            # Extraer count de volumes_text "[01-21]" → 21
                             vt = r.get("volumes_text", "")
                             vm = _re.search(r'\[(\d+)\s*-\s*(\d+)\]', vt)
                             if vm:
                                 tomo_count = int(vm.group(2)) - int(vm.group(1)) + 1
                             break
 
-                # MangayComics como fuente adicional
                 if mac_results and not isinstance(mac_results, Exception):
                     match = _keyword_match(title_lower, title_kw, mac_results, "MangayComics")
                     if match:
@@ -255,8 +243,21 @@ async def search_manga(
             except Exception:
                 return {"sources": [], "tomo_count": 0, "url": None}
 
-        checks = await asyncio.gather(*[check_manga_in_scraper(r.title) for r in results[:CHECK_LIMIT]])
-        for manga_result, check in zip(results[:CHECK_LIMIT], checks):
+        # asyncio.wait con timeout: devuelve inmediatamente al expirar sin bloquear
+        tasks = [asyncio.create_task(check_manga_in_scraper(r.title))
+                 for r in results[:CHECK_LIMIT]]
+        done, pending = await asyncio.wait(tasks, timeout=SCRAPER_TIMEOUT)
+        for t in pending:
+            t.cancel()
+
+        empty_check = {"sources": [], "tomo_count": 0, "url": None}
+        for manga_result, task in zip(results[:CHECK_LIMIT], tasks):
+            check = empty_check
+            if task in done and not task.cancelled():
+                try:
+                    check = task.result()
+                except Exception:
+                    pass
             manga_result.scraper_sources = check["sources"]
             manga_result.scraper_tomo_count = check["tomo_count"]
             manga_result.scraper_url = check["url"]
