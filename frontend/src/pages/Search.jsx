@@ -35,7 +35,7 @@ const Search = () => {
       let response;
       if (activeTab === 'manga') {
         response = await mangaApi.search(query);
-        setResults(response.data.results);
+        setResults(response.data.results || []);
       } else if (activeTab === 'comics') {
         response = await comicApi.search(query);
         setResults(response.data.results || []);

@@ -165,10 +165,13 @@ async def search_manga(
     except Exception as e:
         logger.error(f"AniList search error: {e}")
 
-    # Check scraper availability in parallel for all results
+    # Check scraper availability in parallel — only first 8 results to avoid
+    # thread-pool saturation (20 results × 2 scrapers = 40 blocking HTTP calls
+    # that exceed the 30s axios timeout with a small default executor).
+    CHECK_LIMIT = 8
     if results:
         scraper = MangayComicsScraper()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         stop_words = {'the', 'a', 'an', 'of', 'and', 'or', 'el', 'la', 'de', 'los', 'las', 'en', 'y'}
 
         import re as _re
@@ -197,13 +200,15 @@ async def search_manga(
                             if w not in stop_words and len(w.strip('":,.-!?[]')) > 2}
 
                 # Lanzar TomosManga y MangayComics en PARALELO
+                # timeout=6s > requests timeout=5s para que la petición HTTP
+                # falle antes de que asyncio abandone el futuro del executor
                 tomos_task = asyncio.wait_for(
                     loop.run_in_executor(None, tomos_scraper.search, title),
-                    timeout=10.0
+                    timeout=6.0
                 )
                 mac_task = asyncio.wait_for(
                     loop.run_in_executor(None, scraper.search_manga, title),
-                    timeout=15.0
+                    timeout=6.0
                 )
                 tomos_results, mac_results = await asyncio.gather(
                     tomos_task, mac_task, return_exceptions=True
@@ -247,8 +252,8 @@ async def search_manga(
             except Exception:
                 return {"sources": [], "tomo_count": 0, "url": None}
 
-        checks = await asyncio.gather(*[check_manga_in_scraper(r.title) for r in results])
-        for manga_result, check in zip(results, checks):
+        checks = await asyncio.gather(*[check_manga_in_scraper(r.title) for r in results[:CHECK_LIMIT]])
+        for manga_result, check in zip(results[:CHECK_LIMIT], checks):
             manga_result.scraper_sources = check["sources"]
             manga_result.scraper_tomo_count = check["tomo_count"]
             manga_result.scraper_url = check["url"]
