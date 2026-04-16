@@ -170,7 +170,6 @@ async def search_manga(
     # that exceed the 30s axios timeout with a small default executor).
     CHECK_LIMIT = 8
     if results:
-        scraper = MangayComicsScraper()
         loop = asyncio.get_running_loop()
         stop_words = {'the', 'a', 'an', 'of', 'and', 'or', 'el', 'la', 'de', 'los', 'las', 'en', 'y'}
 
@@ -199,15 +198,19 @@ async def search_manga(
                 title_kw = {w.strip('":,.-!?[]') for w in title_lower.split()
                             if w not in stop_words and len(w.strip('":,.-!?[]')) > 2}
 
-                # Lanzar TomosManga y MangayComics en PARALELO
+                # Lanzar TomosManga y MangayComics en PARALELO.
+                # IMPORTANTE: crear instancia nueva de MangayComicsScraper por cada
+                # check para que last_request=0 — sin delays del _rate_limit_wait
+                # compartido (8 threads × 1s acumulados = 36s+ de bloqueo).
                 # timeout=6s > requests timeout=5s para que la petición HTTP
                 # falle antes de que asyncio abandone el futuro del executor
+                local_scraper = MangayComicsScraper()
                 tomos_task = asyncio.wait_for(
                     loop.run_in_executor(None, tomos_scraper.search, title),
                     timeout=6.0
                 )
                 mac_task = asyncio.wait_for(
-                    loop.run_in_executor(None, scraper.search_manga, title),
+                    loop.run_in_executor(None, local_scraper.search_manga, title),
                     timeout=6.0
                 )
                 tomos_results, mac_results = await asyncio.gather(
