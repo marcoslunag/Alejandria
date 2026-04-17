@@ -106,6 +106,14 @@ def get_notification_count(
     )
     total_errors = manga_errors + comic_errors + book_errors
 
+    stk_authenticated = False
+    try:
+        from app.services.stk_kindle_sender import get_stk_sender
+        sender = get_stk_sender(uid)
+        stk_authenticated = sender.is_authenticated()
+    except Exception:
+        pass
+
     return {
         "total": total,
         "manga_new": sum(i["count"] for i in items if i["type"] == "manga"),
@@ -113,6 +121,7 @@ def get_notification_count(
         "book_new": sum(i["count"] for i in items if i["type"] == "book"),
         "errors": total_errors,
         "items": items,
+        "stk_authenticated": stk_authenticated,
     }
 
 
@@ -175,6 +184,15 @@ def _build_notification_payload(user_id: int, db: Session) -> dict:
     comic_errors = db.query(func.count(ComicIssue.id)).join(Comic, ComicIssue.comic_id == Comic.id).filter(Comic.user_id == user_id, ComicIssue.status == "error").scalar() or 0
     book_errors = db.query(func.count(BookChapter.id)).join(Book, BookChapter.book_id == Book.id).filter(Book.user_id == user_id, BookChapter.status == "error").scalar() or 0
 
+    # STK authentication status
+    stk_authenticated = False
+    try:
+        from app.services.stk_kindle_sender import get_stk_sender
+        sender = get_stk_sender(user_id)
+        stk_authenticated = sender.is_authenticated()
+    except Exception:
+        pass
+
     return {
         "total": total,
         "manga_new": sum(i["count"] for i in items if i["type"] == "manga"),
@@ -182,6 +200,7 @@ def _build_notification_payload(user_id: int, db: Session) -> dict:
         "book_new": sum(i["count"] for i in items if i["type"] == "book"),
         "errors": manga_errors + comic_errors + book_errors,
         "items": items,
+        "stk_authenticated": stk_authenticated,
     }
 
 

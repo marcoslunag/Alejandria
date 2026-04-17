@@ -193,6 +193,54 @@ def test_stk(current_user: User = Depends(require_admin)):
         }
 
 
+@router.get("/scrapers-status")
+def get_scrapers_status(current_user: User = Depends(require_admin)):
+    """
+    Get circuit breaker status for all scrapers.
+    Shows which scrapers are open (blocked), half-open, or closed (healthy).
+    Only accessible by admins.
+    """
+    from app.services.circuit_breaker import get_circuit_breaker
+    cb = get_circuit_breaker()
+    statuses = cb.get_all_statuses()
+    return {
+        "scrapers": statuses,
+        "total": len(statuses),
+        "open_count": sum(1 for s in statuses.values() if s["status"] == "open"),
+    }
+
+
+@router.post("/scrapers-status/{scraper_name}/reset")
+def reset_scraper_circuit(scraper_name: str, current_user: User = Depends(require_admin)):
+    """Manually reset a scraper's circuit breaker (admin only)."""
+    from app.services.circuit_breaker import get_circuit_breaker
+    cb = get_circuit_breaker()
+    cb.reset(scraper_name)
+    return {"ok": True, "scraper": scraper_name, "status": "reset"}
+
+
+@router.get("/stk-status")
+def get_stk_status(current_user: User = Depends(get_current_user)):
+    """
+    Get STK authentication status for the current user.
+    Returns whether STK is authenticated and how many devices are configured.
+    Available to all authenticated users (not just admins).
+    """
+    from app.services.stk_kindle_sender import get_stk_sender
+    try:
+        sender = get_stk_sender(current_user.id)
+        is_auth = sender.is_authenticated()
+        devices = sender.get_devices() if is_auth else []
+        return {
+            "authenticated": is_auth,
+            "device_count": len(devices),
+            "status": "ok" if is_auth else "not_authenticated",
+        }
+    except Exception as e:
+        logger.debug(f"STK status check failed: {e}")
+        return {"authenticated": False, "device_count": 0, "status": "error"}
+
+
 @router.get("/dashboard")
 def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """

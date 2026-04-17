@@ -15,6 +15,7 @@ const Navbar = () => {
   const [notifErrors, setNotifErrors] = useState(0);
   const [notifItems, setNotifItems] = useState([]);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [stkAuthenticated, setStkAuthenticated] = useState(true); // assume OK until first check
   const notifRef = useRef(null);
 
   // SSE-based notification stream (replaces 60s polling)
@@ -28,6 +29,7 @@ const Navbar = () => {
           setNotifCount(data.total || 0);
           setNotifErrors(data.errors || 0);
           setNotifItems(data.items || []);
+          if (data.stk_authenticated !== undefined) setStkAuthenticated(data.stk_authenticated);
         } catch {}
       };
       fetchNotifs();
@@ -48,6 +50,9 @@ const Navbar = () => {
           setNotifCount(data.total || 0);
           setNotifErrors(data.errors || 0);
           setNotifItems(data.items || []);
+          if (data.stk_authenticated !== undefined) {
+            setStkAuthenticated(data.stk_authenticated);
+          }
         } catch {}
       };
       es.onerror = () => {
@@ -155,7 +160,13 @@ const Navbar = () => {
                   end={item.to === '/'}
                   className={navLinkClass}
                 >
-                  <item.icon />
+                  <span className="relative">
+                    <item.icon />
+                    {/* Warning dot on Settings when STK is not configured */}
+                    {item.to === '/settings' && !stkAuthenticated && (
+                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-orange-500 rounded-full" title="Kindle no configurado — ve a Ajustes" />
+                    )}
+                  </span>
                   <span className="hidden lg:inline">{item.label}</span>
                 </NavLink>
               ))

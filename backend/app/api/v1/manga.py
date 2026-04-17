@@ -197,6 +197,23 @@ async def search_manga(
                     }
             return None
 
+        from app.services.circuit_breaker import get_circuit_breaker
+        cb = get_circuit_breaker()
+
+        async def _run_scraper(scraper_fn, name: str, *args):
+            """Run a scraper in executor, respecting its circuit breaker."""
+            if not cb.allow_request(name):
+                logger.debug(f"CircuitBreaker [{name}]: skipping (circuit open)")
+                return None  # None = skipped, not an error
+            try:
+                result = await loop.run_in_executor(None, scraper_fn, *args)
+                cb.record_success(name)
+                return result
+            except Exception as exc:
+                cb.record_failure(name)
+                logger.debug(f"CircuitBreaker [{name}]: recorded failure ({exc})")
+                return exc  # Propagate as value so gather doesn't raise
+
         async def check_manga_in_scraper(title: str):
             try:
                 title_lower = title.lower()
@@ -205,10 +222,9 @@ async def search_manga(
 
                 # Instancia nueva por check — evita rate_limit_wait compartido
                 local_scraper = MangayComicsScraper()
-                tomos_fut = loop.run_in_executor(None, tomos_scraper.search, title)
-                mac_fut = loop.run_in_executor(None, local_scraper.search_manga, title)
                 tomos_results, mac_results = await asyncio.gather(
-                    tomos_fut, mac_fut, return_exceptions=True
+                    _run_scraper(tomos_scraper.search, "TomosManga", title),
+                    _run_scraper(local_scraper.search_manga, "MangayComics", title),
                 )
 
                 sources = []
