@@ -8,7 +8,7 @@ const TYPE_PATHS = { manga: '/manga', comic: '/comics', book: '/books' };
 const TYPE_LABELS = { manga: 'Manga', comic: 'Cómic', book: 'Libro' };
 
 const Navbar = () => {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, token } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [notifCount, setNotifCount] = useState(0);
@@ -17,21 +17,52 @@ const Navbar = () => {
   const [notifOpen, setNotifOpen] = useState(false);
   const notifRef = useRef(null);
 
-  // Notification polling
+  // SSE-based notification stream (replaces 60s polling)
   useEffect(() => {
-    if (isAdmin || !user) return;
-    const fetchNotifs = async () => {
-      try {
-        const { data } = await notificationsApi.getCount();
-        setNotifCount(data.total || 0);
-        setNotifErrors(data.errors || 0);
-        setNotifItems(data.items || []);
-      } catch {}
+    if (isAdmin || !user || !token) return;
+    if (typeof EventSource === 'undefined') {
+      // Fallback to polling if SSE not supported
+      const fetchNotifs = async () => {
+        try {
+          const { data } = await notificationsApi.getCount();
+          setNotifCount(data.total || 0);
+          setNotifErrors(data.errors || 0);
+          setNotifItems(data.items || []);
+        } catch {}
+      };
+      fetchNotifs();
+      const interval = setInterval(fetchNotifs, 60000);
+      return () => clearInterval(interval);
+    }
+
+    const apiBase = import.meta.env.VITE_API_URL || '/api/v1';
+    const url = `${apiBase}/notifications/stream?token=${encodeURIComponent(token)}`;
+    let es = new EventSource(url);
+    let reconnectTimer = null;
+
+    const connect = () => {
+      es = new EventSource(url);
+      es.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data);
+          setNotifCount(data.total || 0);
+          setNotifErrors(data.errors || 0);
+          setNotifItems(data.items || []);
+        } catch {}
+      };
+      es.onerror = () => {
+        es.close();
+        // Reconnect after 15s on error
+        reconnectTimer = setTimeout(connect, 15000);
+      };
     };
-    fetchNotifs();
-    const interval = setInterval(fetchNotifs, 60000);
-    return () => clearInterval(interval);
-  }, [user, isAdmin]);
+
+    connect();
+    return () => {
+      es.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
+  }, [user, isAdmin, token]);
 
   useEffect(() => {
     const handler = async (e) => {

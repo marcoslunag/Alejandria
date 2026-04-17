@@ -50,6 +50,7 @@ def list_queue(
         List of chapters with download activity
     """
     status_map = {
+        'pending': ['pending'],
         'downloading': ['downloading'],
         'converting': ['converting', 'downloaded'],  # 'downloaded' = pendiente de conversión KCC
         'completed': ['converted', 'sent'],
@@ -58,11 +59,18 @@ def list_queue(
 
     result = []
 
-    # Pre-fetch next_retry_at from DownloadQueue for failed items
+    # Pre-fetch DownloadQueue data: next_retry_at (failed) + progress (active)
     failed_dq = db.query(DownloadQueue).filter(DownloadQueue.status == 'failed').all()
+    active_dq = db.query(DownloadQueue).filter(DownloadQueue.status.in_(['queued', 'downloading'])).all()
+
     nra_by_chapter = {qi.chapter_id: qi.next_retry_at for qi in failed_dq if qi.chapter_id}
     nra_by_book_chapter = {qi.book_chapter_id: qi.next_retry_at for qi in failed_dq if qi.book_chapter_id}
     nra_by_comic_issue = {qi.comic_issue_id: qi.next_retry_at for qi in failed_dq if qi.comic_issue_id}
+
+    # Progress data from active queue items
+    prog_by_chapter = {qi.chapter_id: qi for qi in active_dq if qi.chapter_id}
+    prog_by_book_chapter = {qi.book_chapter_id: qi for qi in active_dq if qi.book_chapter_id}
+    prog_by_comic_issue = {qi.comic_issue_id: qi for qi in active_dq if qi.comic_issue_id}
 
     # Query MANGA chapters with download activity
     manga_query = db.query(Chapter).join(Manga).filter(Manga.user_id == current_user.id)
@@ -71,15 +79,16 @@ def list_queue(
         chapter_statuses = status_map.get(status, [status])
         manga_query = manga_query.filter(Chapter.status.in_(chapter_statuses))
     else:
-        manga_query = manga_query.filter(Chapter.status.in_(['downloading', 'converting', 'downloaded', 'converted', 'sent', 'error']))
+        manga_query = manga_query.filter(Chapter.status.in_(['pending', 'downloading', 'converting', 'downloaded', 'converted', 'sent', 'error']))
 
     from sqlalchemy import case, desc
     manga_query = manga_query.order_by(
         case(
             (Chapter.status == 'downloading', 0),
-            (Chapter.status == 'converting', 1),
-            (Chapter.status == 'error', 2),
-            else_=3
+            (Chapter.status == 'pending', 1),
+            (Chapter.status == 'converting', 2),
+            (Chapter.status == 'error', 3),
+            else_=4
         ),
         desc(Chapter.downloaded_at),
         desc(Chapter.created_at)
@@ -99,14 +108,15 @@ def list_queue(
             'error': 'failed'
         }.get(chapter.status, chapter.status)
 
+        dq = prog_by_chapter.get(chapter.id)
         result.append({
             "id": chapter.id,
             "chapter_id": chapter.id,
             "content_type": "manga",
             "status": queue_status,
-            "progress": 100 if chapter.status in ['converted', 'sent'] else 0,
-            "bytes_downloaded": 0,
-            "total_bytes": 0,
+            "progress": 100 if chapter.status in ['converted', 'sent'] else (dq.progress if dq else 0),
+            "bytes_downloaded": dq.bytes_downloaded if dq else 0,
+            "total_bytes": dq.total_bytes if dq else 0,
             "error_message": chapter.error_message,
             "retry_count": chapter.retry_count,
             "max_retries": 3,
@@ -160,14 +170,15 @@ def list_queue(
             'error': 'failed'
         }.get(chapter.status, chapter.status)
 
+        bdq = prog_by_book_chapter.get(chapter.id)
         result.append({
             "id": f"book_{chapter.id}",
             "book_chapter_id": chapter.id,
             "content_type": "book",
             "status": queue_status,
-            "progress": 100 if chapter.status in ['downloaded', 'converted', 'sent'] else 0,
-            "bytes_downloaded": 0,
-            "total_bytes": 0,
+            "progress": 100 if chapter.status in ['downloaded', 'converted', 'sent'] else (bdq.progress if bdq else 0),
+            "bytes_downloaded": bdq.bytes_downloaded if bdq else 0,
+            "total_bytes": bdq.total_bytes if bdq else 0,
             "error_message": chapter.error_message,
             "retry_count": 0,
             "max_retries": 3,
@@ -221,14 +232,15 @@ def list_queue(
             'error': 'failed'
         }.get(issue.status, issue.status)
 
+        cdq = prog_by_comic_issue.get(issue.id)
         result.append({
             "id": f"comic_{issue.id}",
             "comic_issue_id": issue.id,
             "content_type": "comic",
             "status": queue_status,
-            "progress": 100 if issue.status in ['converted', 'sent'] else 0,
-            "bytes_downloaded": 0,
-            "total_bytes": 0,
+            "progress": 100 if issue.status in ['converted', 'sent'] else (cdq.progress if cdq else 0),
+            "bytes_downloaded": cdq.bytes_downloaded if cdq else 0,
+            "total_bytes": cdq.total_bytes if cdq else 0,
             "error_message": issue.error_message,
             "retry_count": issue.download_attempts or 0,
             "max_retries": 3,

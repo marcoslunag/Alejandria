@@ -1039,47 +1039,69 @@ async def download_chapters(
             detail="Some chapter IDs are invalid or don't belong to this manga"
         )
 
+    from app.models.download import DownloadQueue
+
     # Deduplicar por download_url para evitar descargar el mismo archivo múltiples veces
     # Si varios capítulos comparten la misma URL (bundle), solo descargamos uno
     seen_urls = set()
-    chapters_to_download = []
-    all_chapter_ids = []  # Todos los IDs para marcar como downloading
-    
+    chapters_to_queue = []   # Capítulos que recibirán un DownloadQueue item
+    all_chapter_ids = []     # Todos los IDs seleccionados
+
     for chapter in chapters:
         if chapter.status in ['pending', 'error']:
             all_chapter_ids.append(chapter.id)
-            
-            # Solo añadir a la descarga si no hemos visto esta URL
+
             if chapter.download_url:
                 if chapter.download_url not in seen_urls:
                     seen_urls.add(chapter.download_url)
-                    chapters_to_download.append(chapter)
+                    chapters_to_queue.append(chapter)
             else:
-                # Sin URL, incluir siempre
-                chapters_to_download.append(chapter)
+                # Sin URL, añadir igualmente para que el scheduler intente resolverla
+                chapters_to_queue.append(chapter)
 
-    # Marcar TODOS los capítulos seleccionados como 'downloading'
-    # (incluidos los del bundle que no se descargarán directamente)
+    # Marcar todos los capítulos seleccionados como 'pending' y resetear retry_count
     for chapter in chapters:
         if chapter.id in all_chapter_ids:
-            chapter.status = 'downloading'
+            chapter.status = 'pending'
             chapter.retry_count = 0
+            chapter.error_message = None
+
+    # Crear DownloadQueue records para los capítulos únicos (deduplicados por URL)
+    # El scheduler los procesará en el próximo ciclo (proceso_download_queue).
+    for chapter in chapters_to_queue:
+        # Evitar duplicados: no crear si ya hay un item queued/downloading para este capítulo
+        existing = db.query(DownloadQueue).filter(
+            DownloadQueue.chapter_id == chapter.id,
+            DownloadQueue.status.in_(['queued', 'downloading'])
+        ).first()
+        if not existing:
+            queue_item = DownloadQueue(
+                chapter_id=chapter.id,
+                content_type='manga',
+                status='queued',
+                priority=5,  # Prioridad alta para descargas manuales
+            )
+            db.add(queue_item)
 
     db.commit()
 
-    # Trigger background download task solo para capítulos únicos por URL
-    if chapters_to_download:
-        background_tasks.add_task(
-            _process_chapter_downloads, 
-            manga_id, 
-            [c.id for c in chapters_to_download]
-        )
+    # Kick the scheduler to process the queue immediately (without waiting 5 min)
+    async def _kick_scheduler():
+        try:
+            from app.services.scheduler import get_scheduler
+            sched = get_scheduler()
+            if sched:
+                await sched.process_download_queue()
+        except Exception as e:
+            logger.debug(f"Scheduler kick failed (non-critical): {e}")
+
+    background_tasks.add_task(_kick_scheduler)
 
     return {
         "status": "queued",
         "manga_id": manga_id,
         "chapters_queued": len(all_chapter_ids),
-        "unique_downloads": len(chapters_to_download),
+        "unique_downloads": len(chapters_to_queue),
         "total_requested": len(request.chapter_ids)
     }
 

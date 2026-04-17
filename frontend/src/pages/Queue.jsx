@@ -524,7 +524,12 @@ const Queue = () => {
                             style={{ width: `${item.progress || 0}%` }}
                           />
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">{item.progress || 0}%</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {item.total_bytes > 0
+                            ? `${(item.bytes_downloaded / 1048576).toFixed(1)} / ${(item.total_bytes / 1048576).toFixed(1)} MB`
+                            : `${item.progress || 0}%`
+                          }
+                        </p>
                       </div>
                     )}
                     {item.status === 'converting' && (
