@@ -16,6 +16,7 @@ from app.models.book_chapter import BookChapter
 from app.models.comic import Comic, ComicIssue
 from app.models.download import DownloadQueue
 from app.services.scraper import TomosMangaScraper
+from app.services.mangaycomics_scraper import MangayComicsScraper
 from app.services.downloader import MangaDownloader
 from app.services.book_downloader import BookDownloader
 from app.services.converter import KCCConverter
@@ -217,8 +218,22 @@ class ContentScheduler:
         try:
             logger.info(f"Checking manga: {manga.title}")
 
+            # Guard: sin source_url no hay nada que scrapear
+            if not manga.source_url:
+                logger.debug(f"Skipping {manga.title} — no source_url set")
+                return
+
+            # Elegir scraper según la fuente del manga
+            source_type = (manga.source_type or 'tomosmanga').lower()
+            source_domain = manga.source_url.lower()
+            if 'mangaycomics' in source_domain or source_type == 'mangaycomics':
+                scraper = MangayComicsScraper()
+                logger.debug(f"Using MangayComics scraper for {manga.title}")
+            else:
+                scraper = self.scraper  # TomosMangaScraper por defecto
+
             # Scrapear página del manga
-            details = self.scraper.get_manga_details(manga.url)
+            details = scraper.get_manga_details(manga.source_url)
 
             if not details or not details.get('chapters'):
                 logger.warning(f"No chapters found for {manga.title}")

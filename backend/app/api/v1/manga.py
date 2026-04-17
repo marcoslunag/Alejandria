@@ -5,6 +5,7 @@ Kaizoku-inspired approach to manga library management
 
 import asyncio
 import gc
+import os
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
@@ -43,6 +44,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/manga", tags=["manga"])
 
 # Set de manga IDs cuya resolución de links está en progreso
+# Mantenido por retrocompatibilidad — ya no se usa como fuente de verdad.
+# El estado real de resolución se almacena en manga.is_resolving (BD).
 _resolving_manga_ids: set = set()
 
 
@@ -574,13 +577,32 @@ def get_library_stats(db: Session = Depends(get_db), current_user: User = Depend
         if manga.status:
             status_counts[manga.status] = status_counts.get(manga.status, 0) + 1
 
+    # Calcular uso real de disco sumando tamaños de archivos existentes
+    file_rows = db.query(Chapter.file_path, Chapter.converted_path).filter(
+        Chapter.manga_id.in_(user_manga_ids)
+    ).all()
+    disk_bytes = 0
+    seen_paths: set = set()
+    for file_path, converted_path in file_rows:
+        for path in (file_path, converted_path):
+            if path and path not in seen_paths:
+                # converted_path puede ser pipe-separated ("part1|part2")
+                for p in path.split('|'):
+                    p = p.strip()
+                    if p and p not in seen_paths:
+                        seen_paths.add(p)
+                        try:
+                            disk_bytes += os.path.getsize(p)
+                        except OSError:
+                            pass  # Archivo movido/borrado, ignorar
+
     return LibraryStats(
         total_manga=total_manga or 0,
         monitored_manga=monitored or 0,
         total_chapters=total_chapters or 0,
         downloaded_chapters=downloaded or 0,
         pending_downloads=pending or 0,
-        disk_usage_mb=0.0,  # TODO: Calculate actual disk usage
+        disk_usage_mb=round(disk_bytes / (1024 * 1024), 1),
         genres_distribution=genre_counts,
         status_distribution=status_counts
     )
@@ -797,7 +819,7 @@ def get_scraper_status(
 
     chapters_found = db.query(Chapter).filter(Chapter.manga_id == manga_id).count()
     return {
-        "resolving": manga_id in _resolving_manga_ids,
+        "resolving": bool(manga.is_resolving),  # fuente de verdad en BD, funciona cross-proceso
         "chapters_found": chapters_found
     }
 
@@ -1164,8 +1186,17 @@ async def _fetch_chapters_from_source(manga_id: int, source_url: str):
     """Background task to fetch chapters from source"""
     from app.database import SessionLocal
 
-    _resolving_manga_ids.add(manga_id)
+    _resolving_manga_ids.add(manga_id)  # legacy, mantenido por si acaso
     db = SessionLocal()
+
+    # Marcar en BD para que scraper-status funcione cross-proceso
+    try:
+        _manga = db.query(Manga).filter(Manga.id == manga_id).first()
+        if _manga:
+            _manga.is_resolving = True
+            db.commit()
+    except Exception:
+        pass
     try:
         parsed_url = urlparse(source_url)
         domain = parsed_url.netloc.lower()
@@ -1294,6 +1325,14 @@ async def _fetch_chapters_from_source(manga_id: int, source_url: str):
         db.rollback()
     finally:
         _resolving_manga_ids.discard(manga_id)
+        # Limpiar flag en BD siempre, incluso si hubo error
+        try:
+            _manga = db.query(Manga).filter(Manga.id == manga_id).first()
+            if _manga:
+                _manga.is_resolving = False
+                db.commit()
+        except Exception:
+            pass
         db.close()
 
 

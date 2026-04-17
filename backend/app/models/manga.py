@@ -75,6 +75,7 @@ class Manga(Base):
     monitored = Column(Boolean, default=True, index=True)
     auto_download = Column(Boolean, default=True)  # Auto-download new chapters
     last_check = Column(DateTime)
+    is_resolving = Column(Boolean, default=False)  # True mientras se resuelven links OUO/scraper
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

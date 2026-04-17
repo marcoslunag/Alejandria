@@ -1093,30 +1093,22 @@ async def verify_link_active(url: str) -> bool:
     """Check if a download link is still active (not 404)"""
     import aiohttp
 
-    logger.info(f"DEBUG: _verify_link_active() called for: {url[:60]}...")
+    logger.debug(f"_verify_link_active() called for: {url[:60]}...")
     try:
         async with aiohttp.ClientSession() as session:
-            logger.debug(f"DEBUG: Sending HEAD request to verify link...")
             async with session.head(url, timeout=aiohttp.ClientTimeout(total=10), allow_redirects=True) as response:
-                logger.info(f"DEBUG: HEAD response status: {response.status}")
-                # Accept 2xx and 3xx status codes
+                logger.debug(f"HEAD {url[:60]} → {response.status}")
                 if response.status < 400:
-                    logger.info(f"DEBUG: Link verified OK (status {response.status})")
                     return True
                 # Some hosts return 403 but file is still downloadable
                 if response.status == 403:
-                    logger.info(f"DEBUG: Got 403, trying GET request...")
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=10), allow_redirects=True) as get_resp:
-                        logger.info(f"DEBUG: GET response status: {get_resp.status}")
-                        result = get_resp.status < 400
-                        logger.info(f"DEBUG: Verification result after GET: {result}")
-                        return result
-                logger.warning(f"DEBUG: Link check failed with status {response.status}: {url[:50]}...")
+                        logger.debug(f"GET fallback {url[:60]} → {get_resp.status}")
+                        return get_resp.status < 400
+                logger.warning(f"Link check failed {response.status}: {url[:60]}")
                 return False
     except Exception as e:
-        logger.warning(f"DEBUG: Link verification error: {e}")
-        logger.info(f"DEBUG: Returning True (assume it might work)")
-        # If we can't verify, assume it might work
+        logger.debug(f"Link verification error (assuming OK): {e}")
         return True
 
 
@@ -1792,7 +1784,7 @@ async def search_scrapers_for_comic(comic_id: int, title: str):
 
                             if scrape_result.success and scrape_result.best_link:
                                 link_url = scrape_result.best_link.url
-                                logger.info(f"DEBUG: Found best_link URL for issue {issue.id} (#{issue_num}): {link_url[:80]}...")
+                                logger.debug(f"Found best_link URL for issue {issue.id} (#{issue_num}): {link_url[:80]}")
 
                                 is_shortener = scrape_result.best_link.link_status in ('shortener', 'needs_captcha')
 
@@ -1801,21 +1793,20 @@ async def search_scrapers_for_comic(comic_id: int, title: str):
                                     is_active = True
                                 else:
                                     is_active = await verify_link_active(link_url)
-                                    logger.info(f"DEBUG: Link verification result: {is_active} for {link_url[:60]}...")
+                                    logger.debug(f"Link verification: {is_active} for {link_url[:60]}")
 
                                 if is_active:
-                                    logger.info(f"DEBUG: Assigning URL to issue {issue.id} (#{issue_num})")
+                                    logger.debug(f"Assigning URL to issue {issue.id} (#{issue_num}): {link_url[:60]}")
                                     issue.download_url = link_url
                                     issue.source = scraper.name
                                     issue.link_status = scrape_result.best_link.link_status
-                                    logger.info(f"DEBUG: Assigned! issue.download_url = {issue.download_url[:60] if issue.download_url else 'None'}")
 
                                     if scrape_result.backup_link:
                                         backup_url = scrape_result.backup_link.url
                                         backup_is_shortener = scrape_result.backup_link.link_status in ('shortener', 'needs_captcha')
                                         if backup_is_shortener or await verify_link_active(backup_url):
                                             issue.backup_url = backup_url
-                                            logger.info(f"DEBUG: Backup URL also assigned")
+                                            logger.debug(f"Backup URL assigned for issue {issue.id}")
 
                                     logger.info(f"Found verified link for {title} #{issue_num} on {scraper.name}")
                                     db.commit()

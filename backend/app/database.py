@@ -153,6 +153,13 @@ def _migrate_columns():
                 conn.execute(text("ALTER TABLE users ADD COLUMN device_setup_completed BOOLEAN DEFAULT FALSE"))
                 logger.info("Added device_setup_completed column to users table")
 
+        # manga: campo is_resolving para estado de resolución de links
+        if 'manga' in tables:
+            mg_cols = {col['name'] for col in inspector.get_columns('manga')}
+            if 'is_resolving' not in mg_cols:
+                conn.execute(text("ALTER TABLE manga ADD COLUMN is_resolving BOOLEAN DEFAULT FALSE"))
+                logger.info("Added is_resolving column to manga table")
+
         # chapters: ampliar download_url/backup_url de VARCHAR(500) a TEXT
         if 'chapters' in tables:
             ch_cols = {col['name']: col for col in inspector.get_columns('chapters')}

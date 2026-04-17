@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, func
+from sqlalchemy import or_, and_, func, cast, Text
 from typing import List, Optional
 from app.database import get_db
 from app.models.book import Book
@@ -230,7 +230,7 @@ async def get_library(
             or_(
                 Book.title.ilike(search_term),
                 Book.title_original.ilike(search_term),
-                func.json_array_length(Book.authors) > 0
+                cast(Book.authors, Text).ilike(search_term),
             )
         )
 
