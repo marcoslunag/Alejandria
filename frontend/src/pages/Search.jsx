@@ -14,6 +14,7 @@ const Search = () => {
   const [loading, setLoading] = useState(false);
   const initialQuery = searchParams.get('q') || '';
   const [hasSearched, setHasSearched] = useState(!!initialQuery);
+  const [lastQuery, setLastQuery] = useState(initialQuery);
   // Feature 6: Duplicate detection modal
   const [duplicateModal, setDuplicateModal] = useState(null); // { matched_id, matched_title, type, forceAdd }
   // Tracking leídos en esta sesión (por anilist_id / google_books_id)
@@ -25,21 +26,24 @@ const Search = () => {
     }
   }, []);
 
-  const handleSearch = async (query) => {
+  const handleSearch = async (query, tabOverride) => {
     if (!query.trim()) return;
+
+    const tab = tabOverride || activeTab;
+    setLastQuery(query);
 
     try {
       setLoading(true);
       setHasSearched(true);
 
       let response;
-      if (activeTab === 'manga') {
+      if (tab === 'manga') {
         response = await mangaApi.search(query);
         setResults(response.data.results || []);
-      } else if (activeTab === 'comics') {
+      } else if (tab === 'comics') {
         response = await comicApi.search(query);
         setResults(response.data.results || []);
-      } else if (activeTab === 'books') {
+      } else if (tab === 'books') {
         response = await bookApi.searchGoogleBooks(query);
         setResults(response.data.results || []);
       }
@@ -59,8 +63,7 @@ const Search = () => {
       auto_download: true,
     }, force);
     toast.success(`"${manga.title}" añadido a la biblioteca`);
-    const query = searchParams.get('q') || initialQuery;
-    if (query) handleSearch(query);
+    if (lastQuery) handleSearch(lastQuery);
   };
 
   const handleAddManga = async (manga) => {
@@ -100,8 +103,7 @@ const Search = () => {
       const label = comic.volume_to_add ? `${comic.title} Vol ${comic.volume_to_add.number}` : comic.title;
       toast.success(`"${label}" añadido a la biblioteca`);
     }
-    const query = searchParams.get('q') || initialQuery;
-    if (query) handleSearch(query);
+    if (lastQuery) handleSearch(lastQuery);
   };
 
   const handleAddComic = async (comic) => {
@@ -133,8 +135,7 @@ const Search = () => {
       return;
     }
     toast.success(`"${book.title}" añadido a la biblioteca`);
-    const query = searchParams.get('q') || initialQuery;
-    if (query) handleSearch(query);
+    if (lastQuery) handleSearch(lastQuery);
   };
 
   const handleAddBook = async (book) => {
@@ -218,7 +219,11 @@ const Search = () => {
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setResults([]);
-    setHasSearched(false);
+    if (lastQuery) {
+      handleSearch(lastQuery, tab);
+    } else {
+      setHasSearched(false);
+    }
   };
 
   const getTabInfo = () => {
@@ -307,6 +312,7 @@ const Search = () => {
           onSearch={handleSearch}
           placeholder={tabInfo.placeholder}
           autoFocus={!initialQuery}
+          initialValue={lastQuery}
         />
       </div>
 

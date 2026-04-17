@@ -307,6 +307,10 @@ export const bookApi = {
 
   setReadingStatus: (bookId, status) =>
     api.patch(`/books/${bookId}/reading-status`, { status }),
+
+  // Queue actions
+  retryDownload: (bookChapterId) =>
+    api.post(`/queue/book/${bookChapterId}/retry`),
 };
 
 // Upload API

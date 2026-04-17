@@ -793,6 +793,37 @@ def retry_comic_download(issue_id: int, db: Session = Depends(get_db), current_u
     return {"id": issue.id, "status": "downloading", "retry_count": issue.download_attempts}
 
 
+@router.post("/book/{book_chapter_id}/retry")
+def retry_book_download(book_chapter_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Retry a failed book chapter download"""
+    chapter = db.query(BookChapter).join(Book).filter(
+        BookChapter.id == book_chapter_id,
+        Book.user_id == current_user.id
+    ).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Book chapter not found")
+
+    if chapter.status != 'error':
+        raise HTTPException(status_code=400, detail="Only failed downloads can be retried")
+
+    # Reset chapter status
+    chapter.status = 'pending'
+    chapter.error_message = None
+
+    # Create new queue item
+    queue_item = DownloadQueue(
+        book_chapter_id=chapter.id,
+        content_type='book',
+        status='queued',
+        priority=0
+    )
+    db.add(queue_item)
+    db.commit()
+
+    logger.info(f"Queued retry for book chapter {book_chapter_id}")
+    return {"id": chapter.id, "status": "pending"}
+
+
 @router.delete("/comic/{issue_id}/file")
 def delete_comic_file(issue_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Delete downloaded comic file and reset issue status"""

@@ -1,10 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { FaSearch } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 
-const SearchBar = ({ onSearch, placeholder = 'Search manga...', autoFocus = false }) => {
-  const [query, setQuery] = useState('');
+const SearchBar = ({ onSearch, placeholder = 'Search manga...', autoFocus = false, initialValue = '' }) => {
+  const [query, setQuery] = useState(initialValue);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (initialValue) setQuery(initialValue);
+  }, [initialValue]);
 
   const handleSubmit = (e) => {
     e.preventDefault();

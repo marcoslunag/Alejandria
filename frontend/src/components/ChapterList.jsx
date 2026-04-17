@@ -111,6 +111,23 @@ const ChapterList = ({ mangaId }) => {
     }
   };
 
+  const handleDownloadAll = async () => {
+    const allPending = tomos.filter(t => t.status === 'pending' || t.status === 'error');
+    if (allPending.length === 0) return;
+    try {
+      setDownloading(true);
+      await mangaApi.downloadChapters(mangaId, allPending.map(t => t.id));
+      toast.success(`${allPending.length} tomo(s) añadido(s) a la cola`);
+      setSelectedTomos([]);
+      setTimeout(loadTomos, 2000);
+    } catch (error) {
+      console.error('Error descargando todos:', error);
+      toast.error('Error al añadir tomos a la cola');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const copyToClipboard = (text, tomoNumber) => {
     navigator.clipboard.writeText(text).then(() => {
       toast.success(`URL del Tomo ${tomoNumber} copiada`);
@@ -300,6 +317,23 @@ const ChapterList = ({ mangaId }) => {
               <>
                 <FaDownload />
                 <span>Descargar seleccionados ({selectedTomos.length})</span>
+              </>
+            )}
+          </button>
+          <button
+            onClick={handleDownloadAll}
+            disabled={downloading}
+            className="btn btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed bg-blue-700 hover:bg-blue-600"
+          >
+            {downloading ? (
+              <>
+                <FaSpinner className="animate-spin" />
+                <span>Añadiendo...</span>
+              </>
+            ) : (
+              <>
+                <FaDownload />
+                <span>Descargar todos ({downloadableTomos.length})</span>
               </>
             )}
           </button>

@@ -133,6 +133,8 @@ const Queue = () => {
         await mangaApi.retryDownload(item.chapter_id);
       } else if (item.content_type === 'comic') {
         await comicApi.retryDownload(item.comic_issue_id);
+      } else if (item.content_type === 'book') {
+        await bookApi.retryDownload(item.book_chapter_id);
       }
       loadQueue();
     } catch (error) {
@@ -606,7 +608,7 @@ const Queue = () => {
                         <span className="ml-1">Cancelar</span>
                       </button>
                     )}
-                    {item.status === 'failed' && (item.content_type === 'manga' || item.content_type === 'comic') && (
+                    {item.status === 'failed' && (item.content_type === 'manga' || item.content_type === 'comic' || item.content_type === 'book') && (
                       <button
                         onClick={() => retryDownload(item)}
                         className="btn btn-sm btn-primary flex items-center gap-1"
