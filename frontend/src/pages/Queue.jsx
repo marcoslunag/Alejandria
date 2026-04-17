@@ -234,6 +234,7 @@ const Queue = () => {
 
   const getStatusText = (status) => {
     const map = {
+      'pending': 'En cola',
       'downloading': 'Descargando',
       'converting': 'Convirtiendo',
       'completed': 'Completado',

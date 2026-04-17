@@ -37,7 +37,7 @@ const Navbar = () => {
 
     const apiBase = import.meta.env.VITE_API_URL || '/api/v1';
     const url = `${apiBase}/notifications/stream?token=${encodeURIComponent(token)}`;
-    let es = new EventSource(url);
+    let es = null;
     let reconnectTimer = null;
 
     const connect = () => {

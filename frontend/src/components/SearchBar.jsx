@@ -7,7 +7,7 @@ const SearchBar = ({ onSearch, placeholder = 'Search manga...', autoFocus = fals
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (initialValue) setQuery(initialValue);
+    setQuery(initialValue);
   }, [initialValue]);
 
   const handleSubmit = (e) => {
