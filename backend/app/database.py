@@ -153,6 +153,16 @@ def _migrate_columns():
                 conn.execute(text("ALTER TABLE users ADD COLUMN device_setup_completed BOOLEAN DEFAULT FALSE"))
                 logger.info("Added device_setup_completed column to users table")
 
+        # chapters: ampliar download_url/backup_url de VARCHAR(500) a TEXT
+        if 'chapters' in tables:
+            ch_cols = {col['name']: col for col in inspector.get_columns('chapters')}
+            for col_name in ('download_url', 'backup_url'):
+                if col_name in ch_cols:
+                    col_type = str(ch_cols[col_name]['type'])
+                    if 'VARCHAR' in col_type.upper() or 'CHARACTER VARYING' in col_type.upper():
+                        conn.execute(text(f"ALTER TABLE chapters ALTER COLUMN {col_name} TYPE TEXT"))
+                        logger.info(f"Migrated chapters.{col_name} from VARCHAR to TEXT")
+
 
 def init_db():
     """Initialize database tables and create admin user if not exists"""

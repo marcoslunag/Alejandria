@@ -19,8 +19,8 @@ class Chapter(Base):
     number = Column(Float, nullable=False)  # Supports 1, 1.5, 2, etc
     title = Column(String(255))
     url = Column(String(500), nullable=False)
-    download_url = Column(String(500))  # URL principal de descarga
-    backup_url = Column(String(500))    # URL de backup
+    download_url = Column(Text)  # URL principal de descarga (Text para URLs largas)
+    backup_url = Column(Text)    # URL de backup
     download_host = Column(String(50))  # Host principal (mediafire, fireload, etc.)
 
     # Rango de tomos que contiene el archivo descargable

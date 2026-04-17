@@ -1116,6 +1116,14 @@ async def _resolve_ouo_link(url: str) -> tuple:
     if 'ouo.io' not in url_lower and 'ouo.press' not in url_lower:
         return url, None
 
+    # Dominios de descarga válidos — cualquier otro se descarta (ads, spam, etc.)
+    VALID_DOWNLOAD_HOSTS = (
+        'mega.nz', 'mega.io', 'mediafire.com', 'drive.google.com',
+        'terabox.com', '1024tera.com', 'terabox.app', 'fireload.com',
+        'dropbox.com', 'send.now', 'sendnow.cc', 'megaup.net',
+        'krakenfiles.com', 'upload.ee',
+    )
+
     try:
         from app.services.ouo_resolver import _resolve_ouo_with_playwright
         logger.info(f"Manga: Resolving ouo.io link: {url}")
@@ -1133,6 +1141,16 @@ async def _resolve_ouo_link(url: str) -> tuple:
                 host = 'TeraBox'
             elif 'fireload' in resolved_lower:
                 host = 'Fireload'
+
+            # Descartar si el dominio resuelto no es un host de descarga conocido
+            if host == 'unknown':
+                is_valid = any(h in resolved_lower for h in VALID_DOWNLOAD_HOSTS)
+                if not is_valid:
+                    logger.warning(
+                        f"Manga: ouo.io resolved to non-download domain, descartando: {resolved[:80]}"
+                    )
+                    return url, None  # Mantener ouo.io original en lugar de guardar basura
+
             logger.info(f"Manga: Resolved ouo.io -> {host}: {resolved[:80]}")
             return resolved, host
         logger.warning(f"Manga: Could not resolve ouo.io link: {url}")
