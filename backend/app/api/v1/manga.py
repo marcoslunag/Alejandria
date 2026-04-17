@@ -584,17 +584,18 @@ def get_library_stats(db: Session = Depends(get_db), current_user: User = Depend
     disk_bytes = 0
     seen_paths: set = set()
     for file_path, converted_path in file_rows:
-        for path in (file_path, converted_path):
-            if path and path not in seen_paths:
-                # converted_path puede ser pipe-separated ("part1|part2")
-                for p in path.split('|'):
-                    p = p.strip()
-                    if p and p not in seen_paths:
-                        seen_paths.add(p)
-                        try:
-                            disk_bytes += os.path.getsize(p)
-                        except OSError:
-                            pass  # Archivo movido/borrado, ignorar
+        for raw in (file_path, converted_path):
+            if not raw:
+                continue
+            # converted_path puede ser pipe-separated ("part1.epub|part2.epub")
+            for p in raw.split('|'):
+                p = p.strip()
+                if p and p not in seen_paths:
+                    seen_paths.add(p)
+                    try:
+                        disk_bytes += os.path.getsize(p)
+                    except OSError:
+                        pass  # Archivo movido/borrado, ignorar
 
     return LibraryStats(
         total_manga=total_manga or 0,
