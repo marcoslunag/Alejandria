@@ -15,10 +15,26 @@ logger = logging.getLogger(__name__)
 async def _resolve_ouo_with_playwright(ouo_url: str) -> Optional[str]:
     """
     Resolve an OUO.io link using Playwright headless browser.
-    OUO.io requires real JS execution — libraries and curl_cffi get 403.
-    Uses the existing PlaywrightBookScraper singleton for browser management.
+
+    OUO.io bypass — flujo de 2 pasos (verificado con Playwright):
+      Paso 1: ouo.io/XXXX  → botón "I'm a human" (sin form, solo button)
+              → navega a ouo.io/go/XXXX
+      Paso 2: ouo.io/go/XXXX → countdown (0-7s) → botón "Get Link" (sin form)
+              → URL final (fireload, mega, mediafire, etc.)
     """
     from app.services.book_scrapers.playwright_scraper import get_playwright_scraper
+
+    async def _find_and_click(pg, *selectors):
+        """Intenta encontrar y clickar el primer selector que coincida."""
+        for sel in selectors:
+            try:
+                el = await pg.query_selector(sel)
+                if el:
+                    await el.click()
+                    return True
+            except Exception:
+                pass
+        return False
 
     page = None
     try:
@@ -30,42 +46,72 @@ async def _resolve_ouo_with_playwright(ouo_url: str) -> Optional[str]:
         await asyncio.sleep(2)
 
         current_url = page.url
-
         if 'ouo.io' not in current_url and 'ouo.press' not in current_url:
             logger.info(f"OUO Playwright: Direct redirect to {current_url[:80]}")
             return current_url
 
-        # OUO.io 2-step form bypass
-        for step in range(2):
-            form = await page.query_selector('form#form-bypass')
-            if not form:
-                form = await page.query_selector('form')
+        # ── Paso 1: Click "I'm a human" ──────────────────────────────────────
+        # El botón NO está dentro de un <form> — selector directo por texto/tipo
+        clicked = await _find_and_click(
+            page,
+            'button:has-text("human")',        # "I'm a human"
+            'button:has-text("Human")',
+            '#btn-main',
+            '.btn-main',
+            'input[type="submit"]',
+            'button[type="submit"]',
+            'button',                           # cualquier botón como último recurso
+        )
+        if clicked:
+            await asyncio.sleep(3)
 
-            if form:
-                await asyncio.sleep(6)
+        current_url = page.url
+        if 'ouo.io' not in current_url and 'ouo.press' not in current_url:
+            logger.info(f"OUO Playwright: Resolved after step 1: {current_url[:80]}")
+            return current_url
 
-                submit_btn = await page.query_selector(
-                    'input[type="submit"], button[type="submit"], '
-                    '.btn-main, #btn-main, a.btn'
-                )
+        # ── Paso 2: ouo.io/go/XXXX — esperar countdown + Click "Get Link" ────
+        # El countdown es típicamente 5-7s; el botón "Get Link" aparece sin form
+        if '/go/' in page.url or 'ouo.io' in page.url or 'ouo.press' in page.url:
+            logger.info(f"OUO Playwright: Waiting for countdown on {page.url[:60]}")
 
-                if submit_btn:
-                    try:
-                        await submit_btn.click()
-                        await asyncio.sleep(3)
-                        try:
-                            await page.wait_for_load_state('networkidle', timeout=10000)
-                        except:
-                            pass
-                    except Exception as e:
-                        logger.debug(f"OUO Playwright: Click failed step {step+1}: {e}")
+            # Esperar hasta que el countdown llegue a 0 (máx 12 intentos × 1s)
+            for _ in range(12):
+                try:
+                    body_text = await page.text_content('body') or ''
+                    if '0' in body_text and ('Seconds' in body_text or 'seconds' in body_text):
+                        break
+                except Exception:
+                    pass
+                await asyncio.sleep(1)
 
-                current_url = page.url
-                if 'ouo.io' not in current_url and 'ouo.press' not in current_url:
-                    logger.info(f"OUO Playwright: Resolved after step {step+1}: {current_url[:80]}")
-                    return current_url
+            await asyncio.sleep(1)  # pequeño buffer tras countdown
 
-        # Fallback: search HTML for known host URLs
+            clicked2 = await _find_and_click(
+                page,
+                'button:has-text("Get Link")',   # botón principal en /go/
+                'button:has-text("get link")',
+                'button:has-text("Obtener")',
+                'a:has-text("Get Link")',
+                '#btn-main',
+                '.btn-main',
+                'input[type="submit"]',
+                'button[type="submit"]',
+                'button',
+            )
+            if clicked2:
+                await asyncio.sleep(3)
+                try:
+                    await page.wait_for_load_state('networkidle', timeout=10000)
+                except Exception:
+                    pass
+
+            current_url = page.url
+            if 'ouo.io' not in current_url and 'ouo.press' not in current_url:
+                logger.info(f"OUO Playwright: Resolved after step 2: {current_url[:80]}")
+                return current_url
+
+        # ── Fallback: buscar URLs de hosts conocidos en el HTML ───────────────
         html_content = await page.content()
         host_patterns = [
             (r'https?://(?:www\.)?fireload\.com/[^\s"\'<>]+', 'fireload'),
@@ -75,7 +121,6 @@ async def _resolve_ouo_with_playwright(ouo_url: str) -> Optional[str]:
             (r'https?://(?:www\.)?terabox\.com/[^\s"\'<>]+', 'terabox'),
             (r'https?://1fichier\.com/[^\s"\'<>]+', '1fichier'),
         ]
-
         for pattern, host_name in host_patterns:
             matches = re.findall(pattern, html_content)
             if matches:
@@ -83,7 +128,7 @@ async def _resolve_ouo_with_playwright(ouo_url: str) -> Optional[str]:
                 logger.info(f"OUO Playwright: Found {host_name} in HTML: {resolved[:80]}")
                 return resolved
 
-        # Last resort: scan all anchor hrefs
+        # Último recurso: links <a href> a hosts conocidos
         page_links = await page.query_selector_all('a[href]')
         for link in page_links:
             href = await link.get_attribute('href')
