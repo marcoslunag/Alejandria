@@ -1186,9 +1186,9 @@ async def _resolve_ouo_link(url: str) -> tuple:
     )
 
     try:
-        from app.services.ouo_resolver import _resolve_ouo_with_playwright
+        from app.services.ouo_resolver import resolve_ouo_link
         logger.info(f"Manga: Resolving ouo.io link: {url}")
-        resolved = await _resolve_ouo_with_playwright(url)
+        resolved = await resolve_ouo_link(url)
         if resolved and 'ouo.io' not in resolved.lower() and 'ouo.press' not in resolved.lower():
             host = 'unknown'
             resolved_lower = resolved.lower()
