@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { comicApi } from '../services/api';
 import ContentGrid from '../components/ContentGrid';
+import LibraryTabs from '../components/LibraryTabs';
 import {
   FaMask,
   FaFilter,
@@ -144,6 +145,9 @@ const Comics = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      {/* Unified library tabs */}
+      <LibraryTabs />
+
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">

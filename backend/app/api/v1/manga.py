@@ -1382,10 +1382,32 @@ async def _refresh_manga_task(manga_id: int):
     db = SessionLocal()
     try:
         manga = db.query(Manga).filter(Manga.id == manga_id).first()
-        if not manga or not manga.source_url:
+        if not manga:
             return
 
-        await _fetch_chapters_from_source(manga_id, manga.source_url)
+        source_url = manga.source_url
+
+        # Auto-detect source_url when missing
+        if not source_url:
+            logger.info(f"Manga {manga_id} has no source_url — searching scrapers for '{manga.title}'")
+            try:
+                from app.services.tomosmanga_search import TomosMangaSearch
+                searcher = TomosMangaSearch()
+                loop = asyncio.get_event_loop()
+                best = await loop.run_in_executor(None, searcher.find_best_match, manga.title)
+                if best and best.get("url"):
+                    source_url = best["url"]
+                    manga.source_url = source_url
+                    db.commit()
+                    logger.info(f"Auto-detected source_url for manga {manga_id}: {source_url}")
+            except Exception as e:
+                logger.warning(f"Auto-detect source_url failed for manga {manga_id}: {e}")
+
+        if not source_url:
+            logger.info(f"No source_url found for manga {manga_id}, skipping refresh")
+            return
+
+        await _fetch_chapters_from_source(manga_id, source_url)
 
     finally:
         db.close()

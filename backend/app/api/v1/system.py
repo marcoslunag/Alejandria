@@ -20,6 +20,7 @@ from app.services.scraper import TomosMangaScraper
 from app.services.converter import KCCConverter
 from app.core.deps import get_current_user
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -353,20 +354,50 @@ def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(ge
     )
     error_count = manga_errors + comic_errors + book_errors
 
-    # --- Storage used ---
+    # --- Storage used (per type, real file sizes on disk) ---
+    # Manga: walk file_path + converted_path columns
+    user_manga_ids = db.query(Manga.id).filter(Manga.user_id == uid).scalar_subquery()
+    manga_file_rows = db.query(Chapter.file_path, Chapter.converted_path).filter(
+        Chapter.manga_id.in_(user_manga_ids)
+    ).all()
+    manga_bytes = 0
+    seen_paths: set = set()
+    for fp, cp in manga_file_rows:
+        for raw in (fp, cp):
+            if not raw:
+                continue
+            for p in raw.split('|'):
+                p = p.strip()
+                if p and p not in seen_paths:
+                    seen_paths.add(p)
+                    try:
+                        manga_bytes += os.path.getsize(p)
+                    except OSError:
+                        pass
+
+    # Comics: file_size column (bytes stored in DB)
     comic_storage = (
         db.query(func.sum(ComicIssue.file_size))
         .join(Comic, ComicIssue.comic_id == Comic.id)
         .filter(Comic.user_id == uid, ComicIssue.file_size.isnot(None))
         .scalar() or 0
     )
+    # Books: file_size column (bytes stored in DB)
     book_storage = (
         db.query(func.sum(BookChapter.file_size))
         .join(Book, BookChapter.book_id == Book.id)
         .filter(Book.user_id == uid, BookChapter.file_size.isnot(None))
         .scalar() or 0
     )
-    storage_used_mb = round((comic_storage + book_storage) / (1024 * 1024), 1)
+
+    def _to_mb(b): return round(b / (1024 * 1024), 1)
+
+    storage_by_type = {
+        "manga":  _to_mb(manga_bytes),
+        "comics": _to_mb(comic_storage),
+        "books":  _to_mb(book_storage),
+    }
+    storage_used_mb = round(sum(storage_by_type.values()), 1)
 
     return {
         "library": {"manga": total_manga, "comics": total_comics, "books": total_books},
@@ -378,7 +409,80 @@ def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(ge
         "recent_downloads": recent,
         "error_count": error_count,
         "storage_used_mb": storage_used_mb,
+        "storage_by_type": storage_by_type,
     }
+
+
+@router.get("/kindle-history")
+def get_kindle_history(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get the last N items sent to Kindle across all content types.
+    Items are sorted by sent_at descending.
+    """
+    uid = current_user.id
+    history = []
+
+    # Manga chapters sent
+    manga_sent = (
+        db.query(Chapter, Manga.title, Manga.cover_image)
+        .join(Manga, Chapter.manga_id == Manga.id)
+        .filter(Manga.user_id == uid, Chapter.sent_at.isnot(None))
+        .order_by(Chapter.sent_at.desc())
+        .limit(limit)
+        .all()
+    )
+    for ch, manga_title, cover in manga_sent:
+        history.append({
+            "type": "manga",
+            "title": manga_title,
+            "cover": cover,
+            "item_title": f"Tomo {int(ch.number) if ch.number == int(ch.number) else ch.number}",
+            "sent_at": ch.sent_at.isoformat() if ch.sent_at else None,
+        })
+
+    # Comic issues sent
+    comic_sent = (
+        db.query(ComicIssue, Comic.title, Comic.cover_image)
+        .join(Comic, ComicIssue.comic_id == Comic.id)
+        .filter(Comic.user_id == uid, ComicIssue.sent_at.isnot(None))
+        .order_by(ComicIssue.sent_at.desc())
+        .limit(limit)
+        .all()
+    )
+    for issue, comic_title, cover in comic_sent:
+        history.append({
+            "type": "comic",
+            "title": comic_title,
+            "cover": cover,
+            "item_title": f"#{issue.issue_number}" if issue.issue_number else issue.title or "",
+            "sent_at": issue.sent_at.isoformat() if issue.sent_at else None,
+        })
+
+    # Book chapters sent
+    book_sent = (
+        db.query(BookChapter, Book.title, Book.cover_image)
+        .join(Book, BookChapter.book_id == Book.id)
+        .filter(Book.user_id == uid, BookChapter.sent_at.isnot(None))
+        .order_by(BookChapter.sent_at.desc())
+        .limit(limit)
+        .all()
+    )
+    for bc, book_title, cover in book_sent:
+        history.append({
+            "type": "book",
+            "title": book_title,
+            "cover": cover,
+            "item_title": bc.title or f"Vol. {bc.number}",
+            "sent_at": bc.sent_at.isoformat() if bc.sent_at else None,
+        })
+
+    # Sort all and take top N
+    history.sort(key=lambda x: x["sent_at"] or "", reverse=True)
+    return {"history": history[:limit], "total": len(history[:limit])}
 
 
 @router.get("/stats")

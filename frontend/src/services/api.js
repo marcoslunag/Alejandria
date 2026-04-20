@@ -331,6 +331,7 @@ export const recommendationsApi = {
 // System API
 export const systemApi = {
   getDashboard: () => api.get('/system/dashboard'),
+  getKindleHistory: (limit = 20) => api.get('/system/kindle-history', { params: { limit } }),
 };
 
 // Notifications API

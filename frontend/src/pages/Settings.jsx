@@ -252,6 +252,28 @@ const Settings = () => {
         </p>
       </div>
 
+      {/* STK Warning Banner — shown when Kindle user hasn't connected Amazon */}
+      {!loading && !isAdmin && settings.ereader_type === 'kindle' && !stkStatus.authenticated && (
+        <div className="mb-6 flex items-start gap-4 bg-orange-500/10 border border-orange-500/40 rounded-xl px-5 py-4">
+          <FaExclamationTriangle className="text-orange-400 text-xl flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-orange-300">Kindle no configurado</p>
+            <p className="text-sm text-gray-400 mt-0.5">
+              Conecta tu cuenta de Amazon para poder enviar contenido directamente a tu Kindle.
+              Baja hasta la sección <strong className="text-gray-200">Amazon Send to Kindle</strong> para autorizarte.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              document.getElementById('stk-section')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            className="flex-shrink-0 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium rounded-lg transition-colors"
+          >
+            Configurar
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div className="text-center py-20">
           <div className="spinner border-4 border-primary border-t-transparent rounded-full w-12 h-12 mx-auto mb-4 animate-spin" />
@@ -489,7 +511,7 @@ const Settings = () => {
           </section>
 
           {/* Amazon Send to Kindle (STK - OAuth2) — solo para Kindle, no admin */}
-          {!isAdmin && settings.ereader_type === 'kindle' && <section>
+          {!isAdmin && settings.ereader_type === 'kindle' && <section id="stk-section">
             <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
               <FaAmazon className="text-orange-400" />
               Amazon Send to Kindle

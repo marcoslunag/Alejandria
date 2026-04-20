@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { bookApi } from '../services/api';
 import ContentGrid from '../components/ContentGrid';
+import LibraryTabs from '../components/LibraryTabs';
 import {
   FaBookReader,
   FaSync,
@@ -95,6 +96,9 @@ const Books = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      {/* Unified library tabs */}
+      <LibraryTabs />
+
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">

@@ -1,4 +1,4 @@
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 import { FaHome, FaBook, FaSearch, FaCog, FaDownload, FaMask, FaBookReader, FaSignOutAlt, FaUser, FaUserShield, FaBars, FaTimes, FaCompass, FaBell, FaUpload, FaChartBar } from 'react-icons/fa';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,6 +9,9 @@ const TYPE_LABELS = { manga: 'Manga', comic: 'Cómic', book: 'Libro' };
 
 const Navbar = () => {
   const { user, logout, isAdmin, token } = useAuth();
+  const location = useLocation();
+  // Library section includes /library, /comics, /books
+  const LIBRARY_PATHS = ['/library', '/comics', '/books'];
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [notifCount, setNotifCount] = useState(0);
@@ -99,9 +102,7 @@ const Navbar = () => {
   const userNavItems = [
     { to: '/', icon: FaCompass, label: 'Descubrir' },
     { to: '/search', icon: FaSearch, label: 'Buscar' },
-    { to: '/books', icon: FaBookReader, label: 'Libros' },
-    { to: '/library', icon: FaBook, label: 'Manga' },
-    { to: '/comics', icon: FaMask, label: 'Comics' },
+    { to: '/library', icon: FaBook, label: 'Biblioteca' },
     { to: '/queue', icon: FaDownload, label: 'Descargas' },
     { to: '/upload', icon: FaUpload, label: 'Subir' },
     { to: '/dashboard', icon: FaChartBar, label: 'Estadísticas' },
@@ -153,23 +154,31 @@ const Navbar = () => {
                 <span className="hidden md:inline">Usuarios</span>
               </NavLink>
             ) : (
-              userNavItems.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.to === '/'}
-                  className={navLinkClass}
-                >
-                  <span className="relative">
-                    <item.icon />
-                    {/* Warning dot on Settings when STK is not configured */}
-                    {item.to === '/settings' && !stkAuthenticated && (
-                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-orange-500 rounded-full" title="Kindle no configurado — ve a Ajustes" />
-                    )}
-                  </span>
-                  <span className="hidden lg:inline">{item.label}</span>
-                </NavLink>
-              ))
+              userNavItems.map((item) => {
+                // "Biblioteca" is active when on any library-related path
+                const isLibraryItem = item.to === '/library';
+                const isLibraryActive = isLibraryItem && LIBRARY_PATHS.some(p => location.pathname.startsWith(p));
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === '/'}
+                    className={isLibraryActive
+                      ? () => navLinkClass({ isActive: true })
+                      : navLinkClass
+                    }
+                  >
+                    <span className="relative">
+                      <item.icon />
+                      {/* Warning dot on Settings when STK is not configured */}
+                      {item.to === '/settings' && !stkAuthenticated && (
+                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-orange-500 rounded-full" title="Kindle no configurado — ve a Ajustes" />
+                      )}
+                    </span>
+                    <span className="hidden lg:inline">{item.label}</span>
+                  </NavLink>
+                );
+              })
             )}
 
             {/* Notification bell (non-admin only) */}
@@ -293,22 +302,28 @@ const Navbar = () => {
               Usuarios
             </NavLink>
           ) : (
-            userNavItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === '/'}
-                onClick={() => setMenuOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors ${
-                    isActive ? 'bg-primary text-white' : 'text-gray-400 hover:text-white hover:bg-dark-lighter'
-                  }`
-                }
-              >
-                <item.icon />
-                {item.label}
-              </NavLink>
-            ))
+            userNavItems.map((item) => {
+              const isLibraryItem = item.to === '/library';
+              const isLibraryActive = isLibraryItem && LIBRARY_PATHS.some(p => location.pathname.startsWith(p));
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === '/'}
+                  onClick={() => setMenuOpen(false)}
+                  className={isLibraryActive
+                    ? `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors bg-primary text-white`
+                    : ({ isActive }) =>
+                        `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors ${
+                          isActive ? 'bg-primary text-white' : 'text-gray-400 hover:text-white hover:bg-dark-lighter'
+                        }`
+                  }
+                >
+                  <item.icon />
+                  {item.label}
+                </NavLink>
+              );
+            })
           )}
           <div className="flex items-center justify-between px-3 py-3 mt-1 border-t border-gray-700">
             <div className="flex items-center gap-2 text-gray-400 text-sm">
