@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     KCC_FORMAT: str = "EPUB"
     KCC_TIMEOUT: int = 300
 
+    # External Services
+    FLARESOLVERR_URL: Optional[str] = None   # e.g. http://flaresolverr:8191
+    CAPTCHA_API_KEY: Optional[str] = None    # 2captcha key for uii.io / KrakenFiles
+
     # API Settings
     API_V1_PREFIX: str = "/api/v1"
     # CORS: comma-separated origins in env var CORS_ORIGINS overrides defaults

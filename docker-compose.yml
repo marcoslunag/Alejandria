@@ -40,8 +40,8 @@ services:
       - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY:-}
       # Captcha resolver API key (2captcha.com) for resolving shortener captchas
       - CAPTCHA_API_KEY=${CAPTCHA_API_KEY:-}
-      # FlareSolverr URL for bypassing Cloudflare protection
-      - FLARESOLVERR_URL=${FLARESOLVERR_URL:-}
+      # FlareSolverr URL for bypassing Cloudflare protection (ouo.io/ouo.press)
+      - FLARESOLVERR_URL=${FLARESOLVERR_URL:-http://flaresolverr:8191}
       # Disable scheduler in backend (runs in separate container)
       - DISABLE_SCHEDULER=true
       # Import folder for external files (Feature 5)
@@ -77,7 +77,7 @@ services:
       - COMICVINE_API_KEY=${COMICVINE_API_KEY:-}
       - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY:-}
       - CAPTCHA_API_KEY=${CAPTCHA_API_KEY:-}
-      - FLARESOLVERR_URL=${FLARESOLVERR_URL:-}
+      - FLARESOLVERR_URL=${FLARESOLVERR_URL:-http://flaresolverr:8191}
       - IMPORT_DIR=/imports
     volumes:
       - downloads:/downloads
@@ -119,19 +119,18 @@ services:
     networks:
       - alejandria
 
-  # FlareSolverr (Optional - for bypassing Cloudflare and shortener captchas)
-  # To enable: uncomment below and set FLARESOLVERR_URL=http://flaresolverr:8191 in .env
-  # flaresolverr:
-  #   image: ghcr.io/flaresolverr/flaresolverr:latest
-  #   container_name: alejandria-flaresolverr
-  #   environment:
-  #     - LOG_LEVEL=info
-  #     - CAPTCHA_SOLVER=none
-  #   ports:
-  #     - "8191:8191"
-  #   restart: unless-stopped
-  #   networks:
-  #     - alejandria
+  # FlareSolverr - bypasses Cloudflare for ouo.io/ouo.press shortener resolution
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: alejandria-flaresolverr
+    environment:
+      - LOG_LEVEL=info
+      - CAPTCHA_SOLVER=none
+    ports:
+      - "8191:8191"
+    restart: unless-stopped
+    networks:
+      - alejandria
 
   # Watchtower (Optional - auto-updates containers)
   # watchtower:
