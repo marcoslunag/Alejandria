@@ -23,7 +23,7 @@
   }
 
   .btn-secondary {
-    @apply bg-dark-card hover:bg-dark-lighter text-white border border-white/10;
+    @apply bg-dark-card hover:bg-dark-lighter text-white border border-white/[0.08];
   }
 
   .card {
@@ -40,9 +40,9 @@
 .skeleton-shimmer {
   background: linear-gradient(
     90deg,
-    #161b22 0%,
-    #21262d 50%,
-    #161b22 100%
+    theme('colors.dark.card') 0%,
+    theme('colors.dark.lighter') 50%,
+    theme('colors.dark.card') 100%
   );
   background-size: 200% 100%;
   animation: shimmer 1.8s linear infinite;
