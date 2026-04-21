@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Outlet, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Outlet, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -30,31 +30,17 @@ const LoadingSpinner = () => (
 
 function ProtectedLayout() {
   const { mustChangePassword, isAdmin, deviceSetupCompleted, loading } = useAuth();
+  const location = useLocation();
 
-  // Wait for /auth/me to resolve before making redirect decisions.
-  // Without this guard, user=null during loading → deviceSetupCompleted=false
-  // → redirect to /device-setup on every page reload.
   if (loading) return <LoadingSpinner />;
-
-  // Admin users go straight to user management
-  if (isAdmin) {
-    return <Navigate to="/admin/users" replace />;
-  }
-
-  // Force redirect to change-password if needed
-  if (mustChangePassword) {
-    return <Navigate to="/change-password" replace />;
-  }
-
-  // Force device setup for non-admin users who haven't configured their device yet
-  if (!deviceSetupCompleted) {
-    return <Navigate to="/device-setup" replace />;
-  }
+  if (isAdmin) return <Navigate to="/admin/users" replace />;
+  if (mustChangePassword) return <Navigate to="/change-password" replace />;
+  if (!deviceSetupCompleted) return <Navigate to="/device-setup" replace />;
 
   return (
     <ProtectedRoute>
       <Navbar />
-      <main>
+      <main key={location.key} className="animate-page-in">
         <ErrorBoundary>
           <Outlet />
         </ErrorBoundary>
@@ -65,19 +51,16 @@ function ProtectedLayout() {
 
 function AdminLayout() {
   const { isAdmin, mustChangePassword, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) return <LoadingSpinner />;
-
-  if (mustChangePassword) {
-    return <Navigate to="/change-password" replace />;
-  }
-
+  if (mustChangePassword) return <Navigate to="/change-password" replace />;
   if (!isAdmin) return <Navigate to="/" replace />;
 
   return (
     <ProtectedRoute>
       <Navbar />
-      <main>
+      <main key={location.key} className="animate-page-in">
         <ErrorBoundary>
           <Outlet />
         </ErrorBoundary>
@@ -95,12 +78,13 @@ function App() {
           toastOptions={{
             duration: 4000,
             style: {
-              background: '#1f2937',
+              background: '#161b22',
               color: '#f3f4f6',
-              border: '1px solid #374151',
+              border: '1px solid rgba(201,168,76,0.2)',
+              fontFamily: 'Outfit, system-ui, sans-serif',
             },
             success: {
-              iconTheme: { primary: '#10b981', secondary: '#f3f4f6' },
+              iconTheme: { primary: '#7aa67a', secondary: '#f3f4f6' },
             },
             error: {
               duration: 5000,
@@ -108,7 +92,7 @@ function App() {
             },
           }}
         />
-        <div className="min-h-screen bg-dark">
+        <div className="min-h-screen bg-dark-base">
           <Routes>
             {/* Public routes */}
             <Route path="/login" element={<Login />} />
