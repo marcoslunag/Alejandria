@@ -2,93 +2,26 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { recommendationsApi, mangaApi, bookApi } from '../services/api';
-import { FaCompass, FaSync, FaStar, FaPlus, FaCheck, FaFire } from 'react-icons/fa';
+import { FaCompass, FaSync, FaFire } from 'react-icons/fa';
+import ContentCard from '../components/ContentCard';
 
-const TYPE_LABELS = {
-  manga: { label: 'Manga', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-  comic: { label: 'Cómic', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
-  book: { label: 'Libro', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
-};
-
-const RecommendationCard = ({ rec, onAdd, addedIds }) => {
-  const typeConfig = TYPE_LABELS[rec.content_type] || TYPE_LABELS.manga;
-  const isAdded = addedIds.has(rec.external_id);
-  const score = rec.score ? Math.round(rec.score) : null;
-
-  return (
-    <div className="bg-dark-card rounded-lg overflow-hidden flex flex-col hover:ring-1 hover:ring-gray-600 transition-all">
-      {/* Cover */}
-      <div className="relative aspect-[2/3] bg-dark-lighter overflow-hidden">
-        {rec.cover ? (
-          <img
-            src={rec.cover}
-            alt={rec.title}
-            className="w-full h-full object-cover"
-            loading="lazy"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-600 text-4xl">
-            📚
-          </div>
-        )}
-        {score !== null && (
-          <div className="absolute top-2 right-2 bg-black/70 text-yellow-400 text-xs px-1.5 py-0.5 rounded flex items-center gap-1">
-            <FaStar className="text-[9px]" />
-            {score}
-          </div>
-        )}
-      </div>
-
-      {/* Info */}
-      <div className="p-3 flex-1 flex flex-col gap-2">
-        <div>
-          <h3 className="font-medium text-sm line-clamp-2 leading-tight">{rec.title}</h3>
-          {rec.authors?.length > 0 && (
-            <p className="text-xs text-gray-500 mt-0.5 truncate">{rec.authors[0]}</p>
-          )}
-        </div>
-
-        <div className="flex flex-wrap gap-1 mt-auto">
-          <span className={`text-[10px] px-1.5 py-0.5 rounded border ${typeConfig.color}`}>
-            {typeConfig.label}
-          </span>
-          {rec.recommendation_score > 0 && (
-            <span className="text-[10px] px-1.5 py-0.5 bg-purple-500/20 text-purple-400 rounded border border-purple-500/30">
-              {Math.round(rec.recommendation_score * 100)}% match
-            </span>
-          )}
-        </div>
-
-        {rec.reason_label && (
-          <p className="text-[10px] text-gray-500 italic">{rec.reason_label}</p>
-        )}
-
-        <button
-          onClick={() => onAdd(rec)}
-          disabled={isAdded}
-          className={`mt-1 w-full py-1.5 rounded text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
-            isAdded
-              ? 'bg-green-600/20 text-green-400 cursor-default'
-              : 'bg-primary hover:bg-primary/80 text-white'
-          }`}
-        >
-          {isAdded ? <><FaCheck className="text-[9px]" /> Añadido</> : <><FaPlus className="text-[9px]" /> Añadir</>}
-        </button>
-      </div>
-    </div>
-  );
-};
-
-const SkeletonCard = () => (
-  <div className="bg-dark-card rounded-lg overflow-hidden animate-pulse">
-    <div className="aspect-[2/3] bg-dark-lighter" />
-    <div className="p-3 space-y-2">
-      <div className="h-3 bg-dark-lighter rounded w-3/4" />
-      <div className="h-3 bg-dark-lighter rounded w-1/2" />
-      <div className="h-6 bg-dark-lighter rounded mt-3" />
-    </div>
-  </div>
-);
+// Adapta un objeto recommendation al shape que espera ContentCard
+const adaptRecToItem = (rec) => ({
+  id: rec.anilist_id || rec.google_books_id || rec.external_id,
+  library_id: null,
+  title: rec.title,
+  cover_image: rec.cover,
+  cover: rec.cover,
+  description: rec.reason_label || '',
+  average_score: rec.score,
+  average_rating: rec.score,
+  authors: rec.authors || [],
+  genres: rec.genres || [],
+  in_library: false,
+  reading_status: 'not_started',
+  anilist_id: rec.anilist_id,
+  google_books_id: rec.google_books_id,
+});
 
 const Discover = () => {
   const navigate = useNavigate();
@@ -168,41 +101,43 @@ const Discover = () => {
 
   return (
     <div className="container mx-auto px-4 py-6 max-w-7xl">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <FaCompass className="text-primary text-2xl" />
-          <div>
-            <h1 className="text-2xl font-bold">Descubrir</h1>
-            <p className="text-gray-400 text-sm">Recomendaciones basadas en tu biblioteca</p>
+      {/* Hero section */}
+      <div className="bg-dark-card rounded-xl px-6 py-5 mb-6 border border-white/5 relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent to-gold/[0.03] pointer-events-none" />
+        <div className="relative">
+          <p className="text-[10px] font-semibold text-gold uppercase tracking-[3px] mb-1">
+            Recomendado para ti
+          </p>
+          <h1 className="font-serif text-3xl font-bold mb-1">Descubrir</h1>
+          <p className="text-gray-500 text-sm mb-4">
+            {usingFallback ? 'Tendencias de AniList' : 'Basado en tu biblioteca'}
+            {!loading && recommendations.length > 0 && ` · ${recommendations.length} sugerencias`}
+          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Type filter — pills */}
+            <div className="flex gap-2">
+              {typeFilters.map((f) => (
+                <button
+                  key={f.value}
+                  onClick={() => setTypeFilter(f.value)}
+                  className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors border ${
+                    typeFilter === f.value
+                      ? 'bg-gold/15 border-gold/30 text-gold'
+                      : 'bg-transparent border-white/10 text-gray-500 hover:text-white hover:border-white/20'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={loadRecommendations}
+              className="ml-auto text-gray-500 hover:text-white p-1.5 rounded-lg hover:bg-dark-lighter transition-colors"
+              title="Actualizar recomendaciones"
+            >
+              <FaSync className={`text-sm ${loading ? 'animate-spin' : ''}`} />
+            </button>
           </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {/* Type filter */}
-          <div className="flex gap-1 bg-dark-lighter rounded-lg p-1">
-            {typeFilters.map((f) => (
-              <button
-                key={f.value}
-                onClick={() => setTypeFilter(f.value)}
-                className={`px-3 py-1.5 rounded text-sm transition-colors ${
-                  typeFilter === f.value
-                    ? 'bg-primary text-white'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-
-          <button
-            onClick={loadRecommendations}
-            className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-dark-lighter transition-colors"
-            title="Actualizar recomendaciones"
-          >
-            <FaSync className={loading ? 'animate-spin' : ''} />
-          </button>
         </div>
       </div>
 
@@ -225,7 +160,7 @@ const Discover = () => {
           <p className="text-sm mt-1">Añade contenido a tu biblioteca para empezar</p>
           <button
             onClick={() => navigate('/search')}
-            className="mt-4 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/80 transition-colors text-sm"
+            className="mt-4 px-4 py-2 bg-gold text-dark-base font-semibold rounded-lg hover:bg-gold-light transition-colors text-sm"
           >
             Explorar contenido
           </button>
@@ -233,15 +168,25 @@ const Discover = () => {
       )}
 
       {/* Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
         {loading
-          ? Array.from({ length: 12 }).map((_, i) => <SkeletonCard key={i} />)
+          ? Array.from({ length: 10 }).map((_, i) => (
+              <div key={i} className="rounded-xl overflow-hidden bg-dark-card">
+                <div className="aspect-[2/3] skeleton-shimmer" />
+                <div className="p-4 space-y-2">
+                  <div className="h-4 skeleton-shimmer rounded w-3/4" />
+                  <div className="h-3 skeleton-shimmer rounded w-1/2" />
+                  <div className="h-8 skeleton-shimmer rounded mt-3" />
+                </div>
+              </div>
+            ))
           : recommendations.map((rec, i) => (
-              <RecommendationCard
+              <ContentCard
                 key={`${rec.content_type}-${rec.external_id || i}`}
-                rec={rec}
-                onAdd={handleAdd}
-                addedIds={addedIds}
+                item={adaptRecToItem(rec)}
+                type={rec.content_type === 'comic' ? 'comic' : rec.content_type === 'book' ? 'book' : 'manga'}
+                showAddButton={!addedIds.has(rec.external_id)}
+                onAdd={() => handleAdd(rec)}
               />
             ))}
       </div>

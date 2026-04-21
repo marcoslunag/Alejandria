@@ -59,12 +59,15 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onTog
 
   const config = {
     manga: {
-      accentColor: item.cover_color || '#3B82F6',
+      accentColor: item.cover_color || '#6b9bd2',
       icon: FaBook,
-      hoverTextClass: 'group-hover:text-primary',
-      badgeClass: 'bg-primary',
+      hoverTextClass: 'group-hover:text-manga',
+      badgeClass: 'bg-manga',
+      typeTextClass: 'text-manga',
+      typeBgClass: 'bg-manga/10 border border-manga/20',
       addBtnClass: 'btn btn-primary',
-      progressBarClass: 'bg-primary',
+      progressGradient: 'from-manga to-manga/60',
+      borderTopColor: item.cover_color || '#6b9bd2',
       detailPath: '/manga',
       getLink: () => {
         const id = item.library_id || (item.id && item.id > 0 ? item.id : null);
@@ -87,16 +90,23 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onTog
       }),
       getStatusBadge: () => item.status ? {
         label: item.status,
-        className: item.status === 'RELEASING' ? 'bg-green-500' : item.status === 'FINISHED' ? 'bg-blue-500' : 'bg-gray-500',
+        className: item.status === 'RELEASING'
+          ? 'bg-manga/20 text-manga border border-manga/30'
+          : item.status === 'FINISHED'
+            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+            : 'bg-gray-500/20 text-gray-400',
       } : null,
     },
     comic: {
-      accentColor: '#EF4444',
+      accentColor: '#c07a5a',
       icon: FaMask,
-      hoverTextClass: 'group-hover:text-red-500',
-      badgeClass: 'bg-red-500',
-      addBtnClass: 'btn bg-red-500 hover:bg-red-600 text-white',
-      progressBarClass: 'bg-red-500',
+      hoverTextClass: 'group-hover:text-comic',
+      badgeClass: 'bg-comic',
+      typeTextClass: 'text-comic',
+      typeBgClass: 'bg-comic/10 border border-comic/20',
+      addBtnClass: 'btn bg-comic hover:bg-comic/80 text-white',
+      progressGradient: 'from-comic to-comic/60',
+      borderTopColor: '#c07a5a',
       detailPath: '/comics',
       getLink: () => {
         const id = item.library_id || item.id;
@@ -112,22 +122,27 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onTog
       },
       getStats: () => {
         const total = item.count_of_issues || item.total_issues || '?';
-        return [{ type: 'count', label: `${item.downloaded_issues || 0}/${total} issues`, className: 'text-red-400' }];
+        return [{ type: 'count', label: `${item.downloaded_issues || 0}/${total} issues`, className: 'text-comic' }];
       },
       getProgress: () => ({
         current: item.downloaded_issues || 0,
         total: item.count_of_issues || item.total_issues || 0,
         show: item.in_library && (item.count_of_issues || item.total_issues) > 0,
       }),
-      getStatusBadge: () => item.downloaded_issues > 0 ? { label: 'Descargado', className: 'bg-red-500' } : null,
+      getStatusBadge: () => item.downloaded_issues > 0
+        ? { label: 'Descargado', className: 'bg-comic/20 text-comic border border-comic/30' }
+        : null,
     },
     book: {
-      accentColor: '#10B981',
+      accentColor: '#7aa67a',
       icon: FaBookReader,
-      hoverTextClass: 'group-hover:text-green-500',
-      badgeClass: 'bg-green-500',
+      hoverTextClass: 'group-hover:text-book',
+      badgeClass: 'bg-book',
+      typeTextClass: 'text-book',
+      typeBgClass: 'bg-book/10 border border-book/20',
       addBtnClass: 'btn btn-primary',
-      progressBarClass: 'bg-green-500',
+      progressGradient: 'from-book to-book/60',
+      borderTopColor: '#7aa67a',
       detailPath: '/books',
       getLink: () => {
         const id = item.library_id || item.id;
@@ -148,7 +163,9 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onTog
         total: item.total_chapters || 0,
         show: item.in_library && item.total_chapters > 0,
       }),
-      getStatusBadge: () => item.downloaded_chapters > 0 ? { label: 'Descargado', className: 'bg-green-500' } : null,
+      getStatusBadge: () => item.downloaded_chapters > 0
+        ? { label: 'Descargado', className: 'bg-book/20 text-book border border-book/30' }
+        : null,
     },
   };
 
@@ -187,14 +204,10 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onTog
 
   const CardContent = () => (
     <div
-      className="card group cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-2xl relative"
+      className="card group cursor-pointer transition-all duration-300 hover:scale-[1.02] hover:shadow-[0_12px_40px_rgba(0,0,0,0.6)] relative"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      style={{
-        borderTop: type === 'manga' && item.cover_color
-          ? `4px solid ${item.cover_color}`
-          : `4px solid ${c.accentColor}`,
-      }}
+      style={{ borderTop: `2px solid ${c.borderTopColor}` }}
     >
       {/* Cover Image */}
       <div className="relative aspect-[2/3] overflow-hidden bg-gray-800">
@@ -230,7 +243,7 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onTog
         {/* Reading status badge */}
         {item.in_library && item.reading_status === 'completed' && (
           <div className="absolute bottom-2 left-0 right-0 flex justify-center pointer-events-none">
-            <span className="bg-green-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+            <span className="bg-book/80 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
               <FaEye className="text-[8px]" /> Leído
             </span>
           </div>
@@ -277,17 +290,25 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onTog
 
       {/* Info */}
       <div className="p-4">
-        <h3 className={`font-bold text-lg mb-2 line-clamp-2 ${c.hoverTextClass} transition-colors`}>
+        {/* Title — Playfair Display */}
+        <h3 className={`font-serif font-bold text-lg mb-1 line-clamp-2 ${c.hoverTextClass} transition-colors`}>
           {item.title}
         </h3>
 
-        {/* Sub info (genres for manga, publisher/year for comics, authors for books) */}
+        {/* Subtitle — first subInfo item in type color */}
         {subInfo.length > 0 && (
+          <p className={`text-xs font-semibold uppercase tracking-wider mb-2 ${c.typeTextClass}`}>
+            {subInfo[0].label}
+          </p>
+        )}
+
+        {/* Genre badges — remaining subInfo items */}
+        {subInfo.length > 1 && (
           <div className="flex flex-wrap gap-1 mb-2">
-            {subInfo.map((info) => (
+            {subInfo.slice(1).map((info) => (
               <span
                 key={info.key}
-                className="text-xs px-2 py-1 bg-dark-lighter rounded text-gray-300"
+                className={`text-[10px] px-2 py-0.5 rounded ${c.typeBgClass} ${c.typeTextClass}`}
               >
                 {info.label}
               </span>
@@ -301,8 +322,8 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onTog
             if (stat.type === 'score') {
               return (
                 <div key={i} className="flex items-center gap-1">
-                  <FaStar className="text-yellow-400 text-xs" />
-                  <span>{stat.value}</span>
+                  <FaStar className="text-gold text-xs" />
+                  <span className="text-gold font-semibold">{stat.value}</span>
                 </div>
               );
             }
@@ -319,16 +340,16 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onTog
           })}
         </div>
 
-        {/* Progress bar */}
+        {/* Progress bar — gradient, 3px height */}
         {progress.show && progress.total > 0 && (
           <div className="mt-2">
-            <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
-              <span>Descargados</span>
-              <span>{progress.current}/{progress.total}</span>
+            <div className="flex items-center justify-between text-[10px] text-gray-500 mb-1 font-light">
+              <span>{progress.current} de {progress.total}</span>
+              <span>{Math.round((progress.current / progress.total) * 100)}%</span>
             </div>
-            <div className="w-full bg-dark-lighter rounded-full h-1.5">
+            <div className="w-full bg-dark-base rounded-full h-[3px]">
               <div
-                className={`${c.progressBarClass} h-1.5 rounded-full transition-all`}
+                className={`bg-gradient-to-r ${c.progressGradient} h-[3px] rounded-full transition-all`}
                 style={{ width: `${(progress.current / progress.total) * 100}%` }}
               />
             </div>
@@ -351,8 +372,8 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onTog
         {item.in_library && (
           <div className="flex items-center justify-between mt-3 pt-2 border-t border-dark-lighter">
             <span className={`text-xs ${
-              readingStatus === 'completed' ? 'text-green-400' :
-              readingStatus === 'reading' ? 'text-yellow-400' :
+              readingStatus === 'completed' ? 'text-book' :
+              readingStatus === 'reading' ? 'text-gold' :
               'text-gray-500'
             }`}>
               {READ_STATUS_LABELS[readingStatus]}

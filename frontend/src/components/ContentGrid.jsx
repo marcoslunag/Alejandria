@@ -27,10 +27,13 @@ const ContentGrid = ({
     return (
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6">
         {[...Array(12)].map((_, i) => (
-          <div key={i} className="animate-pulse">
-            <div className="aspect-[2/3] bg-dark-lighter rounded-lg mb-3" />
-            <div className="h-4 bg-dark-lighter rounded mb-2" />
-            <div className="h-3 bg-dark-lighter rounded w-2/3" />
+          <div key={i} className="rounded-xl overflow-hidden bg-dark-card">
+            <div className="aspect-[2/3] skeleton-shimmer" />
+            <div className="p-4 space-y-2">
+              <div className="h-4 skeleton-shimmer rounded w-3/4" />
+              <div className="h-3 skeleton-shimmer rounded w-1/2" />
+              <div className="h-3 skeleton-shimmer rounded w-2/3" />
+            </div>
           </div>
         ))}
       </div>

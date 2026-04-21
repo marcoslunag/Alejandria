@@ -8,15 +8,15 @@ import {
 } from 'react-icons/fa';
 
 const TYPE_CONFIG = {
-  books:  { label: 'Libros',  color: 'text-green-400', bg: 'bg-green-500/20', icon: FaBookReader, path: '/books'   },
-  manga:  { label: 'Manga',   color: 'text-blue-400',  bg: 'bg-blue-500/20',  icon: FaBook,       path: '/library' },
-  comics: { label: 'Cómics',  color: 'text-red-400',   bg: 'bg-red-500/20',   icon: FaMask,       path: '/comics'  },
+  books:  { label: 'Libros',  color: 'text-book',  bg: 'bg-book/20',  icon: FaBookReader, path: '/books'   },
+  manga:  { label: 'Manga',   color: 'text-manga', bg: 'bg-manga/20', icon: FaBook,       path: '/library' },
+  comics: { label: 'Cómics',  color: 'text-comic', bg: 'bg-comic/20', icon: FaMask,       path: '/comics'  },
 };
 
 const DOWNLOAD_TYPE_CONFIG = {
-  book:   { color: 'text-green-400', label: 'Libro'  },
-  manga:  { color: 'text-blue-400',  label: 'Manga'  },
-  comic:  { color: 'text-red-400',   label: 'Comic'  },
+  book:   { color: 'text-book',  label: 'Libro'  },
+  manga:  { color: 'text-manga', label: 'Manga'  },
+  comic:  { color: 'text-comic', label: 'Comic'  },
 };
 
 const ReadingBar = ({ stats, type }) => {
@@ -38,10 +38,10 @@ const ReadingBar = ({ stats, type }) => {
       </div>
       <div className="h-2 rounded-full bg-dark-lighter overflow-hidden flex">
         {completedPct > 0 && (
-          <div className="bg-green-500 h-full" style={{ width: `${completedPct}%` }} />
+          <div className="bg-book h-full" style={{ width: `${completedPct}%` }} />
         )}
         {readingPct > 0 && (
-          <div className="bg-blue-500 h-full" style={{ width: `${readingPct}%` }} />
+          <div className="bg-gold h-full" style={{ width: `${readingPct}%` }} />
         )}
         {(100 - completedPct - readingPct) > 0 && (
           <div className="bg-gray-600 h-full" style={{ width: `${100 - completedPct - readingPct}%` }} />
@@ -49,11 +49,11 @@ const ReadingBar = ({ stats, type }) => {
       </div>
       <div className="flex gap-3 text-[10px] text-gray-500">
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+          <span className="w-2 h-2 rounded-full bg-book inline-block" />
           Completados {stats.completed || 0}
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+          <span className="w-2 h-2 rounded-full bg-gold inline-block" />
           En curso {stats.reading || 0}
         </span>
         <span className="flex items-center gap-1">
@@ -121,7 +121,7 @@ const Home = () => {
 
       {/* === Mi Biblioteca === */}
       <section className="mb-8">
-        <h2 className="text-lg font-semibold mb-4 text-gray-300">Mi Biblioteca</h2>
+        <h2 className="font-serif text-lg font-semibold mb-4 text-gray-200">Mi Biblioteca</h2>
 
         {loadingDash ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
@@ -151,15 +151,15 @@ const Home = () => {
                   <button
                     key={type}
                     onClick={() => navigate(cfg.path)}
-                    className="bg-dark-card rounded-xl p-4 text-left hover:ring-1 hover:ring-gray-600 transition-all"
+                    className="bg-dark-card rounded-xl p-4 text-left hover:ring-1 hover:ring-gold/20 transition-all border border-white/5"
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-lg ${cfg.bg} flex items-center justify-center`}>
-                        <Icon className={`${cfg.color} text-base`} />
+                      <div className={`w-10 h-10 rounded-lg ${cfg.bg} flex items-center justify-center`}>
+                        <Icon className={`${cfg.color} text-lg`} />
                       </div>
                       <div>
-                        <p className="text-xl font-bold">{count}</p>
-                        <p className="text-xs text-gray-400">{cfg.label}</p>
+                        <p className="font-serif text-2xl font-bold">{count}</p>
+                        <p className="text-xs text-gray-500 uppercase tracking-wide">{cfg.label}</p>
                       </div>
                     </div>
                   </button>
@@ -230,7 +230,7 @@ const Home = () => {
       {/* === Almacenamiento === */}
       {!loadingDash && totalStorageMb > 0 && (
         <section className="mb-8">
-          <h2 className="text-lg font-semibold mb-4 text-gray-300">Almacenamiento</h2>
+          <h2 className="font-serif text-lg font-semibold mb-4 text-gray-200">Almacenamiento</h2>
           <div className="bg-dark-card rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2 text-sm text-gray-400">
@@ -245,9 +245,9 @@ const Home = () => {
             </div>
             <div className="space-y-2">
               {[
-                { type: 'manga',  label: 'Manga',   color: 'bg-blue-500'  },
-                { type: 'comics', label: 'Cómics',  color: 'bg-red-500'   },
-                { type: 'books',  label: 'Libros',  color: 'bg-green-500' },
+                { type: 'manga',  label: 'Manga',   color: 'bg-manga'  },
+                { type: 'comics', label: 'Cómics',  color: 'bg-comic'  },
+                { type: 'books',  label: 'Libros',  color: 'bg-book'   },
               ].map(({ type, label, color }) => {
                 const mb = storageByType[type] || 0;
                 const pct = totalStorageMb > 0 ? Math.round((mb / totalStorageMb) * 100) : 0;
@@ -272,7 +272,7 @@ const Home = () => {
       {/* === Enviados a Kindle === */}
       {!loadingHistory && kindleHistory.length > 0 && (
         <section className="mb-8">
-          <h2 className="text-lg font-semibold mb-4 text-gray-300">Enviados a Kindle</h2>
+          <h2 className="font-serif text-lg font-semibold mb-4 text-gray-200">Enviados a Kindle</h2>
           <div className="bg-dark-card rounded-xl p-5">
             <div className="space-y-2">
               {kindleHistory.map((item, i) => {

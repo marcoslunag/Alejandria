@@ -14,7 +14,7 @@ import {
  * Usado por MangaDetails, ComicDetails y BookDetails.
  *
  * Props:
- *   accentColor       - Color hex para acentos (ej: "#3B82F6" azul, "#EF4444" rojo, "#10B981" verde)
+ *   accentColor       - Color hex para acentos (ej: "#6b9bd2" manga, "#c07a5a" comic, "#7aa67a" book)
  *   bannerImage       - URL de banner real (si existe)
  *   coverImage        - URL de portada
  *   title             - Título principal
@@ -38,7 +38,7 @@ import {
  *   children          - Contenido después del detalle (chapter list, issue list, etc.)
  */
 const ContentDetailPage = ({
-  accentColor = '#3B82F6',
+  accentColor = '#6b9bd2',
   bannerImage,
   coverImage,
   title,
@@ -64,11 +64,13 @@ const ContentDetailPage = ({
   // Loading state
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="animate-pulse space-y-4">
-          <div className="h-64 bg-dark-lighter rounded-lg" />
-          <div className="h-8 bg-dark-lighter rounded w-1/2" />
-          <div className="h-4 bg-dark-lighter rounded w-3/4" />
+      <div className="min-h-screen">
+        <div className="h-56 skeleton-shimmer" />
+        <div className="container mx-auto px-4 py-8 space-y-4">
+          <div className="h-10 skeleton-shimmer rounded w-1/2" />
+          <div className="h-5 skeleton-shimmer rounded w-1/3" />
+          <div className="h-4 skeleton-shimmer rounded w-3/4" />
+          <div className="h-4 skeleton-shimmer rounded w-2/3" />
         </div>
       </div>
     );
@@ -93,39 +95,34 @@ const ContentDetailPage = ({
     return text.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, '');
   };
 
-  // Accent color classes for genres
-  const accentBg = `${accentColor}33`; // 20% opacity hex
-
   return (
     <div className="min-h-screen">
-      {/* Banner */}
-      {coverImage && (
-        <div className="w-full h-64 relative overflow-hidden">
-          {bannerImage ? (
-            // Real banner image (like manga from AniList)
-            <div
-              className="absolute inset-0 bg-cover bg-center"
-              style={{ backgroundImage: `url(${sanitizeUrl(bannerImage)})` }}
-            />
-          ) : (
-            // Blurred cover as banner (books, comics)
-            <div
-              className="absolute inset-0 bg-cover bg-center"
-              style={{
-                backgroundImage: `url(${sanitizeUrl(coverImage)})`,
-                filter: 'blur(8px)',
-                transform: 'scale(1.1)',
-              }}
-            />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-dark/50 to-dark" />
-        </div>
-      )}
+      {/* Banner — always rendered, cinematographic overlay */}
+      <div className="w-full h-56 relative overflow-hidden">
+        {bannerImage ? (
+          <div
+            className="absolute inset-0 bg-cover bg-center"
+            style={{ backgroundImage: `url(${sanitizeUrl(bannerImage)})` }}
+          />
+        ) : coverImage ? (
+          <div
+            className="absolute inset-0 bg-cover bg-center"
+            style={{
+              backgroundImage: `url(${sanitizeUrl(coverImage)})`,
+              filter: 'blur(12px)',
+              transform: 'scale(1.15)',
+            }}
+          />
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-br from-dark-card to-dark" />
+        )}
+        {/* Dark overlay */}
+        <div className="absolute inset-0 bg-gradient-to-b from-dark-base/30 via-dark/60 to-dark" />
+        {/* Bottom gradient */}
+        <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-dark to-transparent" />
+      </div>
 
-      <div
-        className="container mx-auto px-4 pb-8"
-        style={{ marginTop: coverImage ? '-8rem' : '2rem' }}
-      >
+      <div className="container mx-auto px-4 pb-8" style={{ marginTop: '-8rem' }}>
         <div className="flex flex-col md:flex-row gap-8">
           {/* Cover */}
           <div className="flex-shrink-0">
@@ -133,13 +130,13 @@ const ContentDetailPage = ({
               <img
                 src={coverImage}
                 alt={title}
-                className="w-64 rounded-lg shadow-2xl"
-                style={{ borderTop: `4px solid ${accentColor}` }}
+                className="w-64 rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.6)]"
+                style={{ borderTop: `2px solid ${accentColor}` }}
               />
             ) : (
               <div
-                className="w-64 h-96 rounded-lg shadow-2xl bg-dark-lighter flex items-center justify-center"
-                style={{ borderTop: `4px solid ${accentColor}` }}
+                className="w-64 h-96 rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.6)] bg-dark-lighter flex items-center justify-center"
+                style={{ borderTop: `2px solid ${accentColor}` }}
               >
                 <FaBook className="text-6xl text-gray-600" />
               </div>
@@ -148,8 +145,8 @@ const ContentDetailPage = ({
 
           {/* Info */}
           <div className="flex-1">
-            {/* Title */}
-            <h1 className="text-4xl font-bold mb-2">{title}</h1>
+            {/* Title — Playfair Display */}
+            <h1 className="font-serif text-4xl font-bold mb-2 text-white/95">{title}</h1>
             {subtitles.filter(Boolean).map((sub, i) => (
               <p
                 key={i}
@@ -159,12 +156,12 @@ const ContentDetailPage = ({
               </p>
             ))}
 
-            {/* Meta - Score + Badges */}
+            {/* Meta — Score + Badges */}
             <div className="flex flex-wrap gap-4 mb-6">
               {score != null && (
                 <div className="flex items-center gap-2">
-                  <FaStar className="text-yellow-400" />
-                  <span className="font-bold">
+                  <FaStar className="text-gold" />
+                  <span className="font-bold text-gold">
                     {typeof score === 'number' && scoreMax > 10
                       ? (score / (scoreMax / 10)).toFixed(1)
                       : typeof score === 'number'
@@ -176,23 +173,24 @@ const ContentDetailPage = ({
               {badges.map((badge, i) => (
                 <span
                   key={i}
-                  className={badge.className || 'px-3 py-1 bg-dark-lighter rounded'}
+                  className={badge.className || 'px-3 py-1 bg-dark-lighter rounded text-sm'}
                 >
                   {badge.label}
                 </span>
               ))}
             </div>
 
-            {/* Genres / Categories */}
+            {/* Genres — pill style with border */}
             {genres.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-6">
                 {genres.map((genre, i) => (
                   <span
                     key={i}
-                    className="px-3 py-1 rounded-full text-sm"
+                    className="px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide border"
                     style={{
-                      backgroundColor: accentBg,
+                      backgroundColor: `${accentColor}18`,
                       color: accentColor,
+                      borderColor: `${accentColor}35`,
                     }}
                   >
                     {genre}
@@ -263,15 +261,15 @@ const ContentDetailPage = ({
               </div>
             )}
 
-            {/* Actions */}
+            {/* Actions — first action gets btn-primary by default */}
             {actions.length > 0 && (
-              <div className="flex flex-wrap gap-4">
+              <div className="flex flex-wrap gap-3 mt-2">
                 {actions.map((action, i) => (
                   <div key={i} className="relative group">
                     <button
                       onClick={action.onClick}
                       disabled={action.disabled}
-                      className={action.className || 'btn btn-secondary flex items-center gap-2'}
+                      className={action.className || (i === 0 ? 'btn btn-primary flex items-center gap-2' : 'btn btn-secondary flex items-center gap-2')}
                       title={action.title}
                     >
                       {action.icon && action.icon}
@@ -289,15 +287,19 @@ const ContentDetailPage = ({
           </div>
         </div>
 
-        {/* Stats */}
+        {/* Stats row */}
         {stats.length > 0 && (
-          <div className="mt-12">
-            <h2 className="text-2xl font-bold mb-6">Estadisticas de Descarga</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          <div className="mt-8">
+            <div className="flex flex-wrap gap-4 bg-dark-card rounded-xl p-5 border border-white/5">
               {stats.map((stat, i) => (
-                <div key={i} className="card p-4">
-                  <p className="text-gray-400 text-sm">{stat.label}</p>
-                  <p className={`text-2xl font-bold ${stat.color || ''}`}>{stat.value}</p>
+                <div key={i} className="flex-1 min-w-[80px] text-center">
+                  <p
+                    className="text-2xl font-bold mb-1"
+                    style={{ color: stat.color || '#f8f4ef' }}
+                  >
+                    {stat.value}
+                  </p>
+                  <p className="text-xs text-gray-500 uppercase tracking-widest font-light">{stat.label}</p>
                 </div>
               ))}
             </div>
@@ -311,9 +313,9 @@ const ContentDetailPage = ({
                     {progress.current} / {progress.total} ({Math.round((progress.current / progress.total) * 100)}%)
                   </span>
                 </div>
-                <div className="w-full bg-dark-lighter rounded-full h-3">
+                <div className="w-full bg-dark-lighter rounded-full h-[3px]">
                   <div
-                    className="h-3 rounded-full transition-all"
+                    className="h-[3px] rounded-full transition-all"
                     style={{
                       width: `${(progress.current / progress.total) * 100}%`,
                       backgroundColor: progress.color || accentColor,

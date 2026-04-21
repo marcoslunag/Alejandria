@@ -22,20 +22,28 @@ import {
   FaChevronDown,
   FaChevronUp,
 } from 'react-icons/fa';
+import {
+  FiClock,
+  FiDownload,
+  FiCheckCircle,
+  FiAlertCircle,
+  FiSettings,
+  FiSend,
+} from 'react-icons/fi';
 
 const ACTIVITY_ICONS = {
-  queued:      { icon: '🕐', color: 'text-gray-400' },
-  downloading: { icon: '⬇️', color: 'text-blue-400' },
-  completed:   { icon: '✅', color: 'text-green-400' },
-  failed:      { icon: '❌', color: 'text-red-400' },
-  converting:  { icon: '⚙️', color: 'text-purple-400' },
-  sent_kindle: { icon: '📤', color: 'text-orange-400' },
+  queued:      { Icon: FiClock,        colorClass: 'text-gray-400' },
+  downloading: { Icon: FiDownload,     colorClass: 'text-manga' },
+  completed:   { Icon: FiCheckCircle,  colorClass: 'text-book' },
+  failed:      { Icon: FiAlertCircle,  colorClass: 'text-red-400' },
+  converting:  { Icon: FiSettings,     colorClass: 'text-purple-400' },
+  sent_kindle: { Icon: FiSend,         colorClass: 'text-gold' },
 };
 
 const ITEM_TYPE_COLORS = {
-  manga: 'text-blue-400',
-  comic: 'text-red-400',
-  book:  'text-emerald-400',
+  manga: 'text-manga',
+  comic: 'text-comic',
+  book:  'text-book',
 };
 
 const Queue = () => {
@@ -473,59 +481,54 @@ const Queue = () => {
             return (
               <div
                 key={item.id}
-                className={`card p-4 transition-all ${
-                  (item.status === 'downloading' || item.status === 'converting') ? `ring-2 ${ringColor}` : ''
+                className={`bg-dark-card rounded-xl p-3 flex items-center gap-3 border transition-colors ${
+                  item.status === 'downloading' ? 'border-manga/25' :
+                  item.status === 'completed'   ? 'border-book/25' :
+                  item.status === 'failed'      ? 'border-red-500/25' :
+                  item.status === 'converting'  ? 'border-purple-500/25' :
+                  item.status === 'sent_kindle' ? 'border-gold/25' :
+                  'border-white/5'
                 }`}
               >
-                <div className="flex items-center gap-4">
-                  {/* Cover with volume number overlay */}
-                  <div className="relative w-14 h-20 flex-shrink-0">
+                  {/* Miniatura */}
+                  <div className="relative w-9 h-12 flex-shrink-0">
                     {info.cover ? (
                       <img
                         src={info.cover}
                         alt={info.title}
                         className="w-full h-full object-cover rounded"
+                        loading="lazy"
                       />
                     ) : (
-                      <div className="w-full h-full bg-gray-700 rounded flex items-center justify-center">
-                        <IconComponent className={`text-gray-500 ${info.isBook ? 'text-emerald-500/50' : ''}`} />
-                      </div>
-                    )}
-                    {/* Volume/Issue number badge */}
-                    <div className={`absolute bottom-0 right-0 ${badgeColor} text-white text-xs font-bold px-1.5 py-0.5 rounded-tl rounded-br`}>
-                      {info.isComic ? `#${info.itemNumber}` : Math.floor(info.itemNumber || 0)}
-                    </div>
-                    {/* Content type indicator */}
-                    {(info.isBook || info.isComic) && (
-                      <div className={`absolute top-0 left-0 ${badgeColor} text-white text-[8px] font-bold px-1 py-0.5 rounded-br rounded-tl`}>
-                        {info.isComic ? 'COMIC' : 'LIBRO'}
+                      <div className="w-full h-full bg-dark-lighter rounded flex items-center justify-center">
+                        <FiDownload className="text-gray-600 text-xs" />
                       </div>
                     )}
                   </div>
 
                   {/* Info */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      {getStatusIcon(item.status)}
-                      <Link
-                        to={info.detailUrl}
-                        className={`font-bold hover:${info.isBook ? 'text-emerald-400' : 'text-primary'} truncate`}
-                      >
-                        {info.title}
-                      </Link>
-                      <span className="text-gray-500">-</span>
-                      <span className="text-gray-400">{info.itemLabel} {info.isComic ? `#${info.itemNumber}` : info.itemNumber}</span>
-                    </div>
+                    <Link
+                      to={info.detailUrl}
+                      className="font-serif text-sm text-white hover:text-gold transition-colors truncate block"
+                    >
+                      {info.title}
+                    </Link>
+                    <p className={`text-xs font-semibold uppercase tracking-wide ${ITEM_TYPE_COLORS[item.content_type] || 'text-gray-400'}`}>
+                      {item.content_type}
+                      {item.status && ` · ${getStatusText(item.status)}`}
+                      {' · '}{info.itemLabel} {info.isComic ? `#${info.itemNumber}` : info.itemNumber}
+                    </p>
 
                     {item.status === 'downloading' && (
-                      <div className="mt-2">
-                        <div className="w-full bg-gray-700 rounded-full h-2">
+                      <div className="mt-1">
+                        <div className="h-[3px] bg-dark-base rounded-full overflow-hidden">
                           <div
-                            className={`${info.accentColor === 'emerald' ? 'bg-emerald-500' : info.accentColor === 'red' ? 'bg-red-500' : 'bg-blue-500'} h-2 rounded-full transition-all`}
+                            className="h-full bg-gradient-to-r from-manga to-manga/60 rounded-full transition-all"
                             style={{ width: `${item.progress || 0}%` }}
                           />
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">
+                        <p className="text-[10px] text-gray-500 mt-0.5">
                           {item.total_bytes > 0
                             ? `${(item.bytes_downloaded / 1048576).toFixed(1)} / ${(item.total_bytes / 1048576).toFixed(1)} MB`
                             : `${item.progress || 0}%`
@@ -634,7 +637,6 @@ const Queue = () => {
                       </button>
                     )}
                   </div>
-                </div>
               </div>
             );
           })}
@@ -709,7 +711,10 @@ const Queue = () => {
 
                 return (
                   <div key={idx} className="flex items-start gap-3 px-4 py-2.5 hover:bg-gray-700/30 transition-colors">
-                    <span className="text-base mt-0.5 flex-shrink-0">{icon.icon}</span>
+                    {(() => {
+                      const { Icon, colorClass } = icon;
+                      return <Icon className={`${colorClass} text-sm flex-shrink-0 mt-0.5`} />;
+                    })()}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-baseline gap-1.5 flex-wrap">
                         <Link
@@ -720,7 +725,7 @@ const Queue = () => {
                         </Link>
                         <span className="text-gray-500 text-xs">—</span>
                         <span className="text-gray-400 text-xs">{evt.detail}</span>
-                        <span className={`text-xs capitalize ${icon.color}`}>
+                        <span className={`text-xs capitalize ${icon.colorClass}`}>
                           · {evt.event_type === 'sent_kindle' ? 'enviado a Kindle'
                             : evt.event_type === 'downloading' ? 'descargando'
                             : evt.event_type === 'completed' ? 'completado'

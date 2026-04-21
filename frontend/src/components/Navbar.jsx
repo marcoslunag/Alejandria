@@ -116,10 +116,10 @@ const Navbar = () => {
   };
 
   const navLinkClass = ({ isActive }) =>
-    `flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+    `flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm border ${
       isActive
-        ? 'bg-primary text-white'
-        : 'text-gray-400 hover:text-white hover:bg-dark-lighter'
+        ? 'bg-gold/10 border-gold/25 text-gold font-semibold'
+        : 'text-gray-400 hover:text-white hover:bg-dark-lighter border-transparent'
     }`;
 
   return (
@@ -128,11 +128,13 @@ const Navbar = () => {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link to={isAdmin ? '/admin/users' : '/'} className="flex items-center gap-3">
-            <div className="text-3xl">📚</div>
+            <div className="w-8 h-8 bg-gradient-to-br from-gold to-gold-light rounded-lg flex items-center justify-center flex-shrink-0">
+              <span className="font-serif font-black text-dark-base text-lg leading-none">A</span>
+            </div>
             <div>
-              <h1 className="text-xl font-bold text-primary">Alejandría</h1>
-              <p className="text-xs text-gray-400">
-                {isAdmin ? 'Panel de administración' : 'Tu biblioteca digital'}
+              <h1 className="font-serif text-lg font-bold text-white leading-tight">Alejandría</h1>
+              <p className="text-[10px] text-gray-500 leading-tight">
+                {isAdmin ? 'Administración' : 'Tu biblioteca digital'}
               </p>
             </div>
           </Link>
@@ -143,10 +145,10 @@ const Navbar = () => {
               <NavLink
                 to="/admin/users"
                 className={({ isActive }) =>
-                  `flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                  `flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm border ${
                     isActive
-                      ? 'bg-purple-600 text-white'
-                      : 'text-gray-400 hover:text-white hover:bg-dark-lighter'
+                      ? 'bg-gold/10 border-gold/25 text-gold font-semibold'
+                      : 'text-gray-400 hover:text-white hover:bg-dark-lighter border-transparent'
                   }`
                 }
               >
@@ -175,7 +177,7 @@ const Navbar = () => {
                         <span className="absolute -top-1 -right-1 w-2 h-2 bg-orange-500 rounded-full" title="Kindle no configurado — ve a Ajustes" />
                       )}
                     </span>
-                    <span className="hidden lg:inline">{item.label}</span>
+                    <span className="hidden md:inline">{item.label}</span>
                   </NavLink>
                 );
               })
@@ -293,8 +295,8 @@ const Navbar = () => {
               to="/admin/users"
               onClick={() => setMenuOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors ${
-                  isActive ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white hover:bg-dark-lighter'
+                `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors border ${
+                  isActive ? 'bg-gold/10 border-gold/25 text-gold font-semibold' : 'text-gray-400 hover:text-white hover:bg-dark-lighter border-transparent'
                 }`
               }
             >
@@ -312,10 +314,10 @@ const Navbar = () => {
                   end={item.to === '/'}
                   onClick={() => setMenuOpen(false)}
                   className={isLibraryActive
-                    ? `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors bg-primary text-white`
+                    ? `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors border bg-gold/10 border-gold/25 text-gold font-semibold`
                     : ({ isActive }) =>
-                        `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors ${
-                          isActive ? 'bg-primary text-white' : 'text-gray-400 hover:text-white hover:bg-dark-lighter'
+                        `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors border ${
+                          isActive ? 'bg-gold/10 border-gold/25 text-gold font-semibold' : 'text-gray-400 hover:text-white hover:bg-dark-lighter border-transparent'
                         }`
                   }
                 >
@@ -340,6 +342,8 @@ const Navbar = () => {
           </div>
         </div>
       )}
+      {/* Gold accent line */}
+      <div className="h-px bg-gradient-to-r from-transparent via-gold/20 to-transparent" />
     </nav>
   );
 };
