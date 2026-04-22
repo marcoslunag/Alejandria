@@ -36,7 +36,7 @@ RUN which 7z && which unrar && which ebook-convert
 # Instalar dependencias Python
 RUN pip install --no-cache-dir \
     packaging \
-    git+https://github.com/ciromattia/kcc.git \
+    'git+https://github.com/ciromattia/kcc.git@v9.7.2' \
     watchdog \
     python-dotenv \
     Pillow

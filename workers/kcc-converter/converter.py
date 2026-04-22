@@ -1276,6 +1276,9 @@ class ArchiveHandler(FileSystemEventHandler):
         is_comic = bool(metadata and (metadata.get('comicvine_id') or metadata.get('publisher')))
         is_manga = not is_comic
 
+        # NOTA: NO usar '-q' — en KCC v9.7+ significa '--hq' (Panel View),
+        # que hace que el Kindle amplíe automáticamente paneles individuales.
+        # En versiones antiguas '-q' era modo silencioso (sin efecto en Panel View).
         cmd = [
             'kcc-c2e',
             str(input_file),
@@ -1283,7 +1286,6 @@ class ArchiveHandler(FileSystemEventHandler):
             '-f', KCC_FORMAT,
             '-o', str(OUTPUT_DIR),
             '--jpeg-quality', KCC_QUALITY,
-            '-q',
             '--forcecolor'
         ]
 
