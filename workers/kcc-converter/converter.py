@@ -468,22 +468,37 @@ class ArchiveHandler(FileSystemEventHandler):
             # Loop de reintentos si el output excede el límite
             min_parts = 1
             retry_count = 0
+            # Números de tomo ya convertidos correctamente en intentos anteriores (no re-procesar)
+            skip_volumes: set = set()
+            # Archivos convertidos y guardados en intentos anteriores (acumulados)
+            prior_converted: list = []
 
             while retry_count < MAX_CONVERSION_RETRIES:
                 retry_count += 1
                 logger.info(f"Conversion attempt {retry_count}/{MAX_CONVERSION_RETRIES} (min_parts={min_parts})")
 
                 # normalize_archive ahora retorna una lista de CBZs
-                normalized_files = self.normalize_archive(file_path, metadata, min_parts=min_parts)
+                normalized_files = self.normalize_archive(
+                    file_path, metadata, min_parts=min_parts,
+                    skip_volumes=skip_volumes if skip_volumes else None
+                )
 
                 if not normalized_files:
-                    logger.error("Normalization failed.")
-                    return
+                    if skip_volumes:
+                        # Todos los volúmenes ya fueron procesados en intentos anteriores
+                        logger.info("All volumes already converted in previous attempt(s), nothing left to process")
+                        all_success = True
+                        needs_more_parts = False
+                    else:
+                        logger.error("Normalization failed.")
+                        return
+                    break
 
                 all_success = True
                 converted_files = []
                 needs_more_parts = False
                 max_output_size_found = 0
+                failed_volume_nums: set = set()  # Tomos que excedieron el límite en este intento
 
                 for normalized_file in normalized_files:
                     if not normalized_file.exists():
@@ -519,6 +534,10 @@ class ArchiveHandler(FileSystemEventHandler):
                                 needs_more_parts = True
                                 # Eliminar el archivo que excede el límite
                                 final_output.unlink(missing_ok=True)
+                                # Registrar qué tomo falló para el retry inteligente
+                                vol_m = re.search(r'tomo\s*0*(\d+)', part_stem, re.IGNORECASE)
+                                if vol_m:
+                                    failed_volume_nums.add(int(vol_m.group(1)))
                             else:
                                 converted_files.append(final_output.name)
                                 logger.info(f"✅ Saved: {final_output.name} ({output_size_mb:.1f}MB)")
@@ -533,6 +552,9 @@ class ArchiveHandler(FileSystemEventHandler):
                                         logger.warning(f"⚠️ Output exceeds limit: {p.name} ({output_size_mb:.1f}MB)")
                                         needs_more_parts = True
                                         p.unlink(missing_ok=True)
+                                        vol_m = re.search(r'tomo\s*0*(\d+)', part_stem, re.IGNORECASE)
+                                        if vol_m:
+                                            failed_volume_nums.add(int(vol_m.group(1)))
                                     else:
                                         converted_files.append(p.name)
                                         logger.info(f"✅ Found output: {p.name} ({output_size_mb:.1f}MB)")
@@ -546,19 +568,26 @@ class ArchiveHandler(FileSystemEventHandler):
                     # Limpiar archivo temporal
                     normalized_file.unlink(missing_ok=True)
 
-                # Si necesitamos más partes, limpiar los archivos ya convertidos y reintentar
+                # Si necesitamos más partes, reintentar — pero conservar archivos de tomos que sí cupieron
                 if needs_more_parts and retry_count < MAX_CONVERSION_RETRIES:
-                    logger.info(f"Cleaning up and retrying with more parts...")
+                    logger.info("Cleaning up and retrying with more parts...")
+                    failed_count = 0
                     for f in converted_files:
-                        output_path = OUTPUT_DIR / f
-                        output_path.unlink(missing_ok=True)
-                    converted_files.clear()
+                        vol_m = re.search(r'tomo\s*0*(\d+)', f, re.IGNORECASE)
+                        file_vol = int(vol_m.group(1)) if vol_m else None
+                        if file_vol is not None and file_vol not in failed_volume_nums:
+                            # Este tomo convirtió bien → conservar, no volver a procesar
+                            prior_converted.append(f)
+                            skip_volumes.add(file_vol)
+                        else:
+                            # Este tomo falló (o no tiene nº de tomo) → borrar y reintentar
+                            (OUTPUT_DIR / f).unlink(missing_ok=True)
 
-                    # Calcular cuántas partes adicionales necesitamos
-                    # Si el máximo encontrado fue X MB y el límite es Y MB, necesitamos ceil(X/Y) veces más partes
+                    # min_parts basado sólo en tomos que fallaron
+                    failed_count = len(failed_volume_nums) if failed_volume_nums else len(normalized_files)
                     if max_output_size_found > 0:
                         extra_factor = int(max_output_size_found / MAX_OUTPUT_SIZE_MB) + 1
-                        min_parts = max(min_parts * extra_factor, len(normalized_files) + extra_factor)
+                        min_parts = max(min_parts * extra_factor, failed_count + extra_factor)
                     else:
                         min_parts = min_parts * 2
 
@@ -567,6 +596,9 @@ class ArchiveHandler(FileSystemEventHandler):
 
                 # Si llegamos aquí, terminamos (éxito o fallo sin posibilidad de retry)
                 break
+
+            # Combinar archivos de todos los intentos
+            converted_files = prior_converted + converted_files
 
             if all_success and converted_files and not needs_more_parts:
                 # Limpiar archivo original solo si todas las partes se convirtieron correctamente
@@ -742,7 +774,7 @@ class ArchiveHandler(FileSystemEventHandler):
 
         return volumes
 
-    def normalize_archive(self, file_path: Path, metadata: dict = None, min_parts: int = 1) -> list[Path] | None:
+    def normalize_archive(self, file_path: Path, metadata: dict = None, min_parts: int = 1, skip_volumes: set = None) -> list[Path] | None:
         """
         Crea archivo(s) temporal(es) .clean.cbz para procesamiento interno.
 
@@ -782,6 +814,17 @@ class ArchiveHandler(FileSystemEventHandler):
 
             # NUEVO: Detectar si hay múltiples tomos en carpetas separadas
             volume_folders = self._detect_volume_folders(temp_extract_dir)
+
+            # Excluir tomos ya convertidos exitosamente en intentos anteriores
+            if skip_volumes and volume_folders:
+                before = set(volume_folders.keys())
+                volume_folders = {k: v for k, v in volume_folders.items() if k not in skip_volumes}
+                skipped = before - set(volume_folders.keys())
+                if skipped:
+                    logger.info(f"Skipping already-converted volumes: {sorted(skipped)}")
+                if not volume_folders:
+                    logger.info("All volumes already converted in previous attempts")
+                    return []
 
             if len(volume_folders) > 1:
                 logger.info(f"📚 Detected {len(volume_folders)} separate volumes in archive: {sorted(volume_folders.keys())}")

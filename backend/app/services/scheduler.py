@@ -1014,8 +1014,12 @@ class ContentScheduler:
 
             converted_files.sort(key=lambda f: (f.name.lower(), extract_part_number(f)))
 
-            # Si encontramos archivos convertidos, actualizar DB
+            # Si encontramos archivos convertidos, actualizar DB (solo si no está ya enviado)
             if converted_files:
+                if chapter.status == 'sent':
+                    # Ya fue enviado — no sobreescribir con archivos nuevos para evitar re-envíos
+                    logger.info(f"Chapter {chapter_num} of {manga.title} already sent, skipping re-conversion check")
+                    return
                 chapter.status = 'converted'
                 # Guardar todas las rutas separadas por '|' para archivos divididos
                 chapter.converted_path = '|'.join(str(f) for f in converted_files)
@@ -1136,8 +1140,11 @@ class ContentScheduler:
 
             converted_files.sort(key=lambda f: (f.name.lower(), extract_part_number(f)))
 
-            # Si encontramos archivos convertidos, actualizar DB
+            # Si encontramos archivos convertidos, actualizar DB (solo si no está ya enviado)
             if converted_files:
+                if issue.status == 'sent':
+                    logger.info(f"Issue {issue_num} of {comic.title} already sent, skipping re-conversion check")
+                    return
                 issue.status = 'converted'
                 issue.converted_path = '|'.join(str(f) for f in converted_files)
                 issue.converted_at = datetime.utcnow()
