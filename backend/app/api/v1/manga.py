@@ -799,6 +799,58 @@ def delete_manga(manga_id: int, db: Session = Depends(get_db), current_user: Use
     return None
 
 
+@router.delete("/{manga_id}/chapters/{chapter_id}", status_code=204)
+def delete_chapter(
+    manga_id: int,
+    chapter_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Delete a single manga chapter/tomo, including its files on disk
+    """
+    from app.models.download import DownloadQueue
+
+    chapter = (
+        db.query(Chapter)
+        .join(Manga)
+        .filter(
+            Chapter.id == chapter_id,
+            Chapter.manga_id == manga_id,
+            Manga.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    # Clean up queue entries (FK may not have CASCADE in DB)
+    db.query(DownloadQueue).filter(DownloadQueue.chapter_id == chapter_id).delete(
+        synchronize_session=False
+    )
+
+    # Delete files from disk
+    if chapter.file_path and os.path.exists(chapter.file_path):
+        try:
+            os.remove(chapter.file_path)
+        except OSError as e:
+            logger.warning(f"Could not delete file {chapter.file_path}: {e}")
+
+    if chapter.converted_path and os.path.exists(chapter.converted_path):
+        try:
+            os.remove(chapter.converted_path)
+        except OSError as e:
+            logger.warning(f"Could not delete converted file {chapter.converted_path}: {e}")
+
+    tomo_num = chapter.number
+    db.delete(chapter)
+    db.commit()
+
+    logger.info(f"Deleted chapter {chapter_id} (Tomo {tomo_num}) from manga {manga_id}")
+    return None
+
+
 @router.post("/{manga_id}/refresh", status_code=202)
 async def refresh_manga(
     manga_id: int,

@@ -19,7 +19,8 @@ import {
   FaSortAmountDown,
   FaSortAmountUp,
   FaTabletAlt,
-  FaEye
+  FaEye,
+  FaTrash
 } from 'react-icons/fa';
 
 const ChapterList = ({ mangaId }) => {
@@ -30,6 +31,7 @@ const ChapterList = ({ mangaId }) => {
   const [downloading, setDownloading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortOrder, setSortOrder] = useState('asc'); // 'asc' or 'desc'
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null); // tomo id awaiting delete confirmation
 
   useEffect(() => {
     loadTomos();
@@ -185,6 +187,20 @@ const ChapterList = ({ mangaId }) => {
     } catch (error) {
       console.error('Error marcando como leído:', error);
       toast.error('Error al marcar como leído');
+    }
+  };
+
+  const handleDeleteTomo = async (tomoId) => {
+    try {
+      await mangaApi.deleteChapter(mangaId, tomoId);
+      setTomos(prev => prev.filter(t => t.id !== tomoId));
+      setSelectedTomos(prev => prev.filter(id => id !== tomoId));
+      toast.success('Tomo eliminado');
+    } catch (error) {
+      console.error('Error eliminando tomo:', error);
+      toast.error('Error al eliminar el tomo');
+    } finally {
+      setConfirmDeleteId(null);
     }
   };
 
@@ -490,6 +506,34 @@ const ChapterList = ({ mangaId }) => {
                     size="sm"
                     showLabel={false}
                   />
+                )}
+
+                {/* Delete button */}
+                {confirmDeleteId === tomo.id ? (
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteTomo(tomo.id); }}
+                      className="text-xs px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded transition-colors"
+                    >
+                      Confirmar
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
+                      className="text-xs px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  !['downloading', 'converting'].includes(tomo.status) && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(tomo.id); }}
+                      title="Eliminar tomo"
+                      className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/30 transition-colors"
+                    >
+                      <FaTrash className="text-sm" />
+                    </button>
+                  )
                 )}
               </div>
             </div>

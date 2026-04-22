@@ -698,6 +698,62 @@ async def delete_comic(
     return {"message": f"Removed '{title}' from library"}
 
 
+@router.delete("/{comic_id}/issues/{issue_id}", status_code=204)
+async def delete_issue(
+    comic_id: int,
+    issue_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Delete a single comic issue, including its files on disk
+    """
+    import os
+
+    issue = (
+        db.query(ComicIssue)
+        .join(Comic)
+        .filter(
+            ComicIssue.id == issue_id,
+            ComicIssue.comic_id == comic_id,
+            Comic.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    # Clean up queue entries
+    db.query(DownloadQueue).filter(DownloadQueue.comic_issue_id == issue_id).delete(
+        synchronize_session=False
+    )
+
+    # Delete files from disk
+    if issue.file_path and os.path.exists(issue.file_path):
+        try:
+            os.remove(issue.file_path)
+        except OSError as e:
+            logger.warning(f"Could not delete file {issue.file_path}: {e}")
+
+    # converted_path can be pipe-separated for multi-part EPUBs
+    if issue.converted_path:
+        for path in issue.converted_path.split("|"):
+            path = path.strip()
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    logger.warning(f"Could not delete converted file {path}: {e}")
+
+    issue_num = issue.issue_number
+    db.delete(issue)
+    db.commit()
+
+    logger.info(f"Deleted issue {issue_id} (#{issue_num}) from comic {comic_id}")
+    return None
+
+
 @router.post("/{comic_id}/refresh")
 async def refresh_comic(
     comic_id: int,

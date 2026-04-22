@@ -20,7 +20,8 @@ import {
   FaTabletAlt,
   FaBox,
   FaLink,
-  FaLock
+  FaLock,
+  FaTrash
 } from 'react-icons/fa';
 
 const ComicIssueList = ({ comicId, refreshKey = 0 }) => {
@@ -30,6 +31,7 @@ const ComicIssueList = ({ comicId, refreshKey = 0 }) => {
   const [downloading, setDownloading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortOrder, setSortOrder] = useState('asc'); // 'asc' or 'desc'
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null); // issue id awaiting delete confirmation
 
   useEffect(() => {
     loadIssues();
@@ -152,6 +154,20 @@ const ComicIssueList = ({ comicId, refreshKey = 0 }) => {
       'error': 'Error'
     };
     return statusMap[status] || status;
+  };
+
+  const handleDeleteIssue = async (issueId) => {
+    try {
+      await comicApi.deleteIssue(comicId, issueId);
+      setIssues(prev => prev.filter(i => i.id !== issueId));
+      setSelectedIssues(prev => prev.filter(id => id !== issueId));
+      toast.success('Issue eliminado');
+    } catch (error) {
+      console.error('Error eliminando issue:', error);
+      toast.error('Error al eliminar el issue');
+    } finally {
+      setConfirmDeleteId(null);
+    }
   };
 
   const handleKindleSent = (issueId, sentAt) => {
@@ -467,6 +483,34 @@ const ComicIssueList = ({ comicId, refreshKey = 0 }) => {
                     size="sm"
                     showLabel={false}
                   />
+                )}
+
+                {/* Delete button */}
+                {confirmDeleteId === issue.id ? (
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteIssue(issue.id); }}
+                      className="text-xs px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded transition-colors"
+                    >
+                      Confirmar
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
+                      className="text-xs px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  !['downloading', 'converting'].includes(issue.status) && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(issue.id); }}
+                      title="Eliminar issue"
+                      className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/30 transition-colors"
+                    >
+                      <FaTrash className="text-sm" />
+                    </button>
+                  )
                 )}
               </div>
             </div>
