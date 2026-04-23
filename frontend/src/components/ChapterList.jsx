@@ -192,13 +192,18 @@ const ChapterList = ({ mangaId }) => {
 
   const handleDeleteTomo = async (tomoId) => {
     try {
-      await mangaApi.deleteChapter(mangaId, tomoId);
-      setTomos(prev => prev.filter(t => t.id !== tomoId));
+      const response = await mangaApi.deleteChapterFiles(mangaId, tomoId);
+      // Reset the tomo in local state (stays in list, back to pending)
+      setTomos(prev => prev.map(t =>
+        t.id === tomoId
+          ? { ...t, status: 'pending', file_path: null, converted_path: null, downloaded_at: null, converted_at: null, sent_at: null }
+          : t
+      ));
       setSelectedTomos(prev => prev.filter(id => id !== tomoId));
-      toast.success('Tomo eliminado');
+      toast.success('Descarga eliminada — el tomo vuelve a pendiente');
     } catch (error) {
-      console.error('Error eliminando tomo:', error);
-      toast.error('Error al eliminar el tomo');
+      console.error('Error eliminando descarga:', error);
+      toast.error('Error al eliminar la descarga');
     } finally {
       setConfirmDeleteId(null);
     }
@@ -525,10 +530,10 @@ const ChapterList = ({ mangaId }) => {
                     </button>
                   </div>
                 ) : (
-                  !['downloading', 'converting'].includes(tomo.status) && (
+                  ['downloaded', 'converting', 'converted', 'sent'].includes(tomo.status) && (
                     <button
                       onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(tomo.id); }}
-                      title="Eliminar tomo"
+                      title="Eliminar descarga (vuelve a pendiente)"
                       className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/30 transition-colors"
                     >
                       <FaTrash className="text-sm" />

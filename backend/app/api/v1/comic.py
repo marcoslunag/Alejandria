@@ -698,15 +698,16 @@ async def delete_comic(
     return {"message": f"Removed '{title}' from library"}
 
 
-@router.delete("/{comic_id}/issues/{issue_id}", status_code=204)
-async def delete_issue(
+@router.delete("/{comic_id}/issues/{issue_id}/files", status_code=200)
+async def delete_issue_files(
     comic_id: int,
     issue_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Delete a single comic issue, including its files on disk
+    Delete the downloaded files for a comic issue and reset it to 'pending'.
+    The issue entry itself is kept in the library.
     """
     import os
 
@@ -724,7 +725,7 @@ async def delete_issue(
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
 
-    # Clean up queue entries
+    # Remove from download queue
     db.query(DownloadQueue).filter(DownloadQueue.comic_issue_id == issue_id).delete(
         synchronize_session=False
     )
@@ -746,12 +747,20 @@ async def delete_issue(
                 except OSError as e:
                     logger.warning(f"Could not delete converted file {path}: {e}")
 
-    issue_num = issue.issue_number
-    db.delete(issue)
+    # Reset issue back to pending
+    issue.status = "pending"
+    issue.file_path = None
+    issue.converted_path = None
+    issue.downloaded_at = None
+    issue.converted_at = None
+    issue.sent_at = None
+    issue.error_message = None
+    issue.download_attempts = 0
     db.commit()
+    db.refresh(issue)
 
-    logger.info(f"Deleted issue {issue_id} (#{issue_num}) from comic {comic_id}")
-    return None
+    logger.info(f"Reset issue {issue_id} (#{issue.issue_number}) to pending for comic {comic_id}")
+    return {"id": issue.id, "status": issue.status, "issue_number": issue.issue_number}
 
 
 @router.post("/{comic_id}/refresh")

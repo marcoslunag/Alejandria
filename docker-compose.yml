@@ -79,10 +79,13 @@ services:
       - CAPTCHA_API_KEY=${CAPTCHA_API_KEY:-}
       - FLARESOLVERR_URL=${FLARESOLVERR_URL:-http://flaresolverr:8191}
       - IMPORT_DIR=/imports
+      # STK data dir shared with backend so the scheduler can also send to Kindle
+      - STK_DATA_DIR=/stk-data
     volumes:
       - downloads:/downloads
       - library:/library
       - imports:/imports
+      - stk_data:/stk-data
     depends_on:
       postgres:
         condition: service_healthy

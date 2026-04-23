@@ -84,6 +84,7 @@ const Settings = () => {
 
   // STK (Send to Kindle) OAuth state
   const [stkStatus, setStkStatus] = useState({ authenticated: false, devices: [] });
+  const [stkDevicesLoading, setStkDevicesLoading] = useState(false);
   const [stkSigninUrl, setStkSigninUrl] = useState('');
   const [stkRedirectUrl, setStkRedirectUrl] = useState('');
   const [stkLoading, setStkLoading] = useState(false);
@@ -181,6 +182,20 @@ const Settings = () => {
       setStkMessage({ type: 'info', text: 'Sesion cerrada' });
     } catch (error) {
       console.error('Error logout STK:', error);
+    }
+  };
+
+  // Load Kindle device list explicitly — only called on demand to avoid hitting Amazon API on every page load
+  const handleLoadDevices = async () => {
+    try {
+      setStkDevicesLoading(true);
+      const response = await mangaApi.stkGetDevices();
+      setStkStatus(prev => ({ ...prev, devices: response.data.devices || [] }));
+    } catch (error) {
+      console.error('Error loading STK devices:', error);
+      setStkMessage({ type: 'error', text: 'Error al cargar dispositivos. Verifica tu conexión.' });
+    } finally {
+      setStkDevicesLoading(false);
     }
   };
 
@@ -634,6 +649,23 @@ const Settings = () => {
               )}
 
               {/* Selector de dispositivo destino */}
+              {stkStatus.authenticated && stkStatus.devices?.length === 0 && (
+                <div>
+                  <button
+                    onClick={handleLoadDevices}
+                    disabled={stkDevicesLoading}
+                    className="btn btn-secondary flex items-center gap-2 text-sm"
+                  >
+                    {stkDevicesLoading ? <FaSpinner className="animate-spin" /> : <FaTabletAlt />}
+                    {stkDevicesLoading ? 'Cargando dispositivos...' : 'Ver dispositivos Kindle'}
+                  </button>
+                  {settings.stk_device_name && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Dispositivo actual: <span className="text-gray-300">{settings.stk_device_name}</span>
+                    </p>
+                  )}
+                </div>
+              )}
               {stkStatus.authenticated && stkStatus.devices?.length > 0 && (
                 <div>
                   <h4 className="text-sm font-medium text-gray-300 mb-2">Enviar a dispositivo:</h4>

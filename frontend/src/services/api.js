@@ -73,8 +73,8 @@ export const mangaApi = {
   deleteManga: (id) =>
     api.delete(`/manga/${id}`),
 
-  deleteChapter: (mangaId, chapterId) =>
-    api.delete(`/manga/${mangaId}/chapters/${chapterId}`),
+  deleteChapterFiles: (mangaId, chapterId) =>
+    api.delete(`/manga/${mangaId}/chapters/${chapterId}/files`),
 
   refreshManga: (id) =>
     api.post(`/manga/${id}/refresh`),
@@ -209,8 +209,8 @@ export const comicApi = {
   deleteComic: (id) =>
     api.delete(`/comics/${id}`),
 
-  deleteIssue: (comicId, issueId) =>
-    api.delete(`/comics/${comicId}/issues/${issueId}`),
+  deleteIssueFiles: (comicId, issueId) =>
+    api.delete(`/comics/${comicId}/issues/${issueId}/files`),
 
   refreshComic: (id) =>
     api.post(`/comics/${id}/refresh`),

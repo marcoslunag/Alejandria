@@ -799,15 +799,16 @@ def delete_manga(manga_id: int, db: Session = Depends(get_db), current_user: Use
     return None
 
 
-@router.delete("/{manga_id}/chapters/{chapter_id}", status_code=204)
-def delete_chapter(
+@router.delete("/{manga_id}/chapters/{chapter_id}/files", status_code=200)
+def delete_chapter_files(
     manga_id: int,
     chapter_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Delete a single manga chapter/tomo, including its files on disk
+    Delete the downloaded files for a manga chapter and reset it to 'pending'.
+    The chapter entry itself is kept in the library.
     """
     from app.models.download import DownloadQueue
 
@@ -825,7 +826,7 @@ def delete_chapter(
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
-    # Clean up queue entries (FK may not have CASCADE in DB)
+    # Remove from download queue
     db.query(DownloadQueue).filter(DownloadQueue.chapter_id == chapter_id).delete(
         synchronize_session=False
     )
@@ -843,12 +844,20 @@ def delete_chapter(
         except OSError as e:
             logger.warning(f"Could not delete converted file {chapter.converted_path}: {e}")
 
-    tomo_num = chapter.number
-    db.delete(chapter)
+    # Reset chapter back to pending
+    chapter.status = "pending"
+    chapter.file_path = None
+    chapter.converted_path = None
+    chapter.downloaded_at = None
+    chapter.converted_at = None
+    chapter.sent_at = None
+    chapter.error_message = None
+    chapter.retry_count = 0
     db.commit()
+    db.refresh(chapter)
 
-    logger.info(f"Deleted chapter {chapter_id} (Tomo {tomo_num}) from manga {manga_id}")
-    return None
+    logger.info(f"Reset chapter {chapter_id} (Tomo {chapter.number}) to pending for manga {manga_id}")
+    return {"id": chapter.id, "status": chapter.status, "number": chapter.number}
 
 
 @router.post("/{manga_id}/refresh", status_code=202)

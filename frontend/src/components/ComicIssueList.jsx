@@ -158,13 +158,18 @@ const ComicIssueList = ({ comicId, refreshKey = 0 }) => {
 
   const handleDeleteIssue = async (issueId) => {
     try {
-      await comicApi.deleteIssue(comicId, issueId);
-      setIssues(prev => prev.filter(i => i.id !== issueId));
+      await comicApi.deleteIssueFiles(comicId, issueId);
+      // Reset the issue in local state (stays in list, back to pending)
+      setIssues(prev => prev.map(i =>
+        i.id === issueId
+          ? { ...i, status: 'pending', file_path: null, converted_path: null, downloaded_at: null, converted_at: null, sent_at: null }
+          : i
+      ));
       setSelectedIssues(prev => prev.filter(id => id !== issueId));
-      toast.success('Issue eliminado');
+      toast.success('Descarga eliminada — el issue vuelve a pendiente');
     } catch (error) {
-      console.error('Error eliminando issue:', error);
-      toast.error('Error al eliminar el issue');
+      console.error('Error eliminando descarga:', error);
+      toast.error('Error al eliminar la descarga');
     } finally {
       setConfirmDeleteId(null);
     }
@@ -502,10 +507,10 @@ const ComicIssueList = ({ comicId, refreshKey = 0 }) => {
                     </button>
                   </div>
                 ) : (
-                  !['downloading', 'converting'].includes(issue.status) && (
+                  ['downloaded', 'converting', 'converted', 'sent'].includes(issue.status) && (
                     <button
                       onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(issue.id); }}
-                      title="Eliminar issue"
+                      title="Eliminar descarga"
                       className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/30 transition-colors"
                     >
                       <FaTrash className="text-sm" />

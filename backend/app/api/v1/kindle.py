@@ -84,13 +84,15 @@ async def check_kindle_configured(db: Session = Depends(get_db), current_user: U
 
 @router.get("/stk/status")
 async def stk_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Check if STK is authenticated for the current user"""
+    """Check if STK is authenticated for the current user.
+    NOTE: We deliberately do NOT call get_devices() here to avoid hitting Amazon's API
+    on every Settings page load. Spurious Amazon errors could trigger _record_failure()
+    and clear the session after 3 consecutive failures. Use /stk/devices for live device list.
+    """
     from app.services.stk_kindle_sender import get_stk_sender
 
     sender = get_stk_sender(current_user.id)
     is_auth = sender.is_authenticated()
-
-    devices = sender.get_devices() if is_auth else []
 
     saved_device = None
     if current_user.stk_device_serial:
@@ -101,7 +103,7 @@ async def stk_status(db: Session = Depends(get_db), current_user: User = Depends
 
     return {
         "authenticated": is_auth,
-        "devices": devices,
+        "devices": [],  # Use GET /stk/devices to fetch the live device list
         "saved_device": saved_device,
         "message": "Ready to send" if is_auth else "Not authenticated. Use /stk/signin-url to get authorization URL."
     }
