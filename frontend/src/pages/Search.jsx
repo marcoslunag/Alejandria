@@ -75,6 +75,15 @@ const Search = () => {
     } catch (error) {
       console.error('Error buscando:', error);
       setResults([]);
+      const isTimeout = error.code === 'ECONNABORTED' || error.message?.toLowerCase().includes('timeout');
+      const status = error.response?.status;
+      if (isTimeout || status === 504 || status === 502) {
+        toast.error('La búsqueda tardó demasiado. Inténtalo de nuevo en unos segundos.');
+      } else if (status >= 500) {
+        toast.error('Error del servidor al buscar. Revisa los logs.');
+      } else if (!error.response) {
+        toast.error('No se pudo conectar con el servidor.');
+      }
     } finally {
       setLoading(false);
     }
