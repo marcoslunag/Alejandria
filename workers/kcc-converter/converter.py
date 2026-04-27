@@ -826,7 +826,12 @@ class ArchiveHandler(FileSystemEventHandler):
                     logger.info("All volumes already converted in previous attempts")
                     return []
 
-            if len(volume_folders) > 1:
+            # Use volume-aware path when:
+            # - archive has multiple volumes (normal multi-tomo case), OR
+            # - we are in a retry that skip_volumes reduced to a single remaining volume
+            #   (without this check the rglob below would scan ALL extracted dirs and
+            #   produce flat "Parte N" files mixing pages from all volumes)
+            if len(volume_folders) > 1 or (skip_volumes and volume_folders):
                 logger.info(f"📚 Detected {len(volume_folders)} separate volumes in archive: {sorted(volume_folders.keys())}")
                 if min_parts <= 1:
                     # First attempt: check if any volume is large enough to need splitting
