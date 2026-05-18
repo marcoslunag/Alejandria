@@ -1017,9 +1017,24 @@ class ContentScheduler:
             # Si encontramos archivos convertidos, actualizar DB (solo si no está ya enviado)
             if converted_files:
                 if chapter.status == 'sent':
-                    # Ya fue enviado — no sobreescribir con archivos nuevos para evitar re-envíos
-                    logger.info(f"Chapter {chapter_num} of {manga.title} already sent, skipping re-conversion check")
+                    # Comprobar si hay partes extra que no se enviaron (race condition con KCC)
+                    if chapter.converted_path:
+                        already_sent = set(chapter.converted_path.split('|'))
+                        extra_parts = [f for f in converted_files if str(f) not in already_sent]
+                        if extra_parts:
+                            logger.info(f"Found {len(extra_parts)} extra part(s) for {manga.title} Ch {chapter_num} not yet sent")
+                            chapter.converted_path = '|'.join(str(f) for f in extra_parts)
+                            chapter.status = 'converted'
+                            db.commit()
+                        else:
+                            logger.info(f"Chapter {chapter_num} of {manga.title} already sent, skipping re-conversion check")
                     return
+
+                # Si el archivo fuente aún existe, KCC todavía puede estar convirtiendo partes
+                if chapter.file_path and Path(chapter.file_path).exists():
+                    logger.debug(f"Source file still exists, KCC still converting: {Path(chapter.file_path).name}")
+                    return
+
                 chapter.status = 'converted'
                 # Guardar todas las rutas separadas por '|' para archivos divididos
                 chapter.converted_path = '|'.join(str(f) for f in converted_files)

@@ -186,6 +186,8 @@ class MangaDownloader:
             return await self._download_mega(url, filename, on_progress)
         elif 'drive.google' in url_lower:
             return await self._download_gdrive(url, filename, on_progress)
+        elif 'send.now' in url_lower:
+            return await self._download_sendnow(url, filename, on_progress)
         else:
             # Asumimos enlace directo
             return await self._download_direct(url, filename, on_progress)
@@ -710,6 +712,45 @@ class MangaDownloader:
                 callback(downloaded, total)
         except Exception as e:
             logger.warning(f"Progress callback error: {e}")
+
+    async def _download_sendnow(
+        self,
+        url: str,
+        filename: str,
+        on_progress=None
+    ) -> Optional[Path]:
+        """Download from send.now using Playwright (#downloadbtn click)."""
+        from app.services.sendnow_downloader import download_from_sendnow
+
+        output_path = self.download_dir / filename
+        lock_file = self.download_dir / f"{filename}.downloading"
+
+        try:
+            lock_file.touch()
+            logger.info(f"Created lock file: {lock_file.name}")
+
+            success = await download_from_sendnow(url, output_path)
+            if not success:
+                lock_file.unlink(missing_ok=True)
+                raise ValueError(f"SendNow download failed for {url}")
+
+            # sendnow_downloader may adjust the extension — find the actual file
+            if output_path.exists():
+                lock_file.unlink(missing_ok=True)
+                return output_path
+
+            base_stem = output_path.stem
+            for f in self.download_dir.iterdir():
+                if f.stem == base_stem and not f.name.endswith('.downloading'):
+                    lock_file.unlink(missing_ok=True)
+                    return f
+
+            lock_file.unlink(missing_ok=True)
+            raise ValueError(f"SendNow: file not found after download")
+
+        except Exception as e:
+            lock_file.unlink(missing_ok=True)
+            raise
 
     async def _download_terabox(
         self,
