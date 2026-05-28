@@ -284,135 +284,169 @@ async def _resolve_with_flaresolverr(ouo_url: str, flaresolverr_url: str) -> Opt
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Playwright fallback (mantener por si FlareSolverr no está configurado)
+# Playwright fallback
 # ──────────────────────────────────────────────────────────────────────────────
 
 async def _resolve_with_playwright(ouo_url: str) -> Optional[str]:
     """
-    Fallback: Playwright headless.
-    Funciona solo si Cloudflare no exige cf_clearance (raro con ouo.io actual).
+    Resuelve ouo.io / ouo.press usando Playwright + reCAPTCHA v3 token injection.
+
+    Flujo (idéntico al de FlareSolverr pero con Playwright como browser):
+      Paso 1: GET  ouo.press/{id}          → extraer _token del form
+              GET recaptcha v3 token        → inyectar x-token
+              Click submit                  → redirect a /go/{id} o URL final
+      Paso 2: GET  ouo.press/go/{id}       → extraer nuevo _token
+              GET recaptcha v3 token        → inyectar x-token
+              Click submit                  → URL final
+
+    La diferencia clave con el approach anterior (click de botones):
+      El form de ouo.press requiere un token reCAPTCHA v3 válido en el campo
+      "x-token" para que el servidor acepte el POST. Sin él, la página no avanza
+      aunque hagas click en el botón. Este approach lo obtiene e inyecta
+      directamente en el DOM antes del submit.
     """
     from app.services.book_scrapers.playwright_scraper import get_playwright_scraper
+    from bs4 import BeautifulSoup
 
-    async def _find_and_click(pg, *selectors):
-        for sel in selectors:
-            try:
-                el = await pg.query_selector(sel)
-                if el:
-                    await el.click()
-                    return True
-            except Exception:
-                pass
-        return False
+    # Siempre ouo.press (reCAPTCHA v3, sin Turnstile)
+    press_url = re.sub(r'https?://ouo\.io/', 'https://ouo.press/', ouo_url)
+    if 'ouo.press' not in press_url:
+        press_url = re.sub(r'https?://[^/]+/', 'https://ouo.press/', ouo_url)
+    ouo_id = press_url.rstrip('/').split('/')[-1]
+
+    def _extract_token(html: str) -> str:
+        bs = BeautifulSoup(html, 'lxml')
+        form = bs.find('form')
+        if form:
+            inp = form.find('input', {'name': '_token'})
+            if inp:
+                return inp.get('value', '')
+        m = re.search(
+            r'<input[^>]+name=["\']_token["\'][^>]+value=["\']([^"\']+)["\']'
+            r'|<input[^>]+value=["\']([^"\']+)["\'][^>]+name=["\']_token["\']',
+            html
+        )
+        if m:
+            return m.group(1) or m.group(2)
+        return ''
 
     page = None
     try:
         pw_scraper = await get_playwright_scraper()
         page = await pw_scraper._create_page()
-        logger.info(f"OUO Playwright: Navigating to {ouo_url}")
 
-        await page.goto(ouo_url, wait_until='domcontentloaded', timeout=20000)
-        await asyncio.sleep(2)
+        logger.info(f"OUO Playwright: cargando {press_url}")
+        await page.goto(press_url, wait_until='domcontentloaded', timeout=30000)
+        # Esperar a que Cloudflare JS challenge se auto-resuelva (si aplica)
+        await asyncio.sleep(4)
 
-        current_url = page.url
-        if _is_final_url(current_url):
-            return current_url
-        if 'ouo.io' not in current_url and 'ouo.press' not in current_url:
-            logger.info(f"OUO Playwright: Direct redirect to {current_url[:80]}")
-            return current_url
+        # ¿Redirigió ya a URL final?
+        if _is_final_url(page.url):
+            return page.url
+        if 'ouo' not in page.url.lower():
+            logger.info(f"OUO Playwright: redirect directo → {page.url[:80]}")
+            return page.url
 
-        # Paso 1: click "I'm a human"
-        clicked = await _find_and_click(
-            page,
-            'button:has-text("human")',
-            'button:has-text("Human")',
-            '#btn-main', '.btn-main',
-            'input[type="submit"]',
-            'button[type="submit"]',
-            'button',
-        )
-        if clicked:
+        # ─── DOS PASOS DE FORM SUBMISSION ──────────────────────────────────
+        for step in range(2):
+            current_url = page.url
+            logger.info(f"OUO Playwright paso {step + 1}: en {current_url[:70]}")
+
+            if _is_final_url(current_url):
+                return current_url
+            if 'ouo' not in current_url.lower():
+                return current_url
+
+            html = await page.content()
+
+            # Buscar URL en HTML (a veces ya está embebida)
+            extracted = _extract_url_from_html(html)
+            if extracted:
+                logger.info(f"OUO Playwright: URL encontrada en HTML → {extracted[:80]}")
+                return extracted
+
+            # Extraer _token del form
+            _token = _extract_token(html)
+            if not _token:
+                logger.warning(f"OUO Playwright paso {step + 1}: no se encontró _token")
+                break
+            logger.info(f"OUO Playwright paso {step + 1}: _token obtenido ({len(_token)} chars)")
+
+            # reCAPTCHA v3 (sin API key externa, igual que FlareSolverr)
             try:
-                await page.wait_for_url(
-                    lambda u: '/go/' in u or _is_final_url(u),
-                    timeout=8000
+                x_token = await asyncio.get_event_loop().run_in_executor(
+                    None, _get_recaptcha_v3_sync
                 )
-            except Exception:
-                await asyncio.sleep(4)
+                logger.info(f"OUO Playwright paso {step + 1}: x-token obtenido ({len(x_token)} chars)")
+            except Exception as e:
+                logger.warning(f"OUO Playwright paso {step + 1}: reCAPTCHA falló ({e}), intentando sin token")
+                x_token = ""
 
-        current_url = page.url
-        if _is_final_url(current_url):
-            return current_url
-        if 'ouo.io' not in current_url and 'ouo.press' not in current_url:
-            return current_url
+            # Inyectar tokens en los campos del form
+            safe_token = _token.replace('\\', '\\\\').replace("'", "\\'")
+            safe_xtoken = x_token.replace('\\', '\\\\').replace("'", "\\'")
+            await page.evaluate(f"""() => {{
+                const setVal = (name, val) => {{
+                    document.querySelectorAll('input[name="' + name + '"]').forEach(el => el.value = val);
+                }};
+                setVal('_token', '{safe_token}');
+                setVal('x-token', '{safe_xtoken}');
+                setVal('v-token', 'bx');
+            }}""")
 
-        # Paso 2: countdown + "Get Link"
-        if '/go/' in page.url or 'ouo.io' in page.url or 'ouo.press' in page.url:
-            logger.info(f"OUO Playwright: Waiting for countdown on {page.url[:60]}")
-
-            # Esperar a que countdown llegue a 0s (texto "0 Seconds")
-            for _ in range(15):
+            # Click en el botón de submit (cualquier submit del form)
+            submitted = False
+            for sel in ['#btn-main', '.btn-main', 'button[type="submit"]',
+                        'input[type="submit"]', 'form button']:
                 try:
-                    body_text = await page.text_content('body') or ''
-                    if re.search(r'\b0\s+[Ss]econd', body_text):
+                    el = await page.query_selector(sel)
+                    if el:
+                        await el.click()
+                        submitted = True
+                        logger.info(f"OUO Playwright paso {step + 1}: click en '{sel}'")
                         break
                 except Exception:
                     pass
-                await asyncio.sleep(1)
 
-            await asyncio.sleep(1)
+            if not submitted:
+                # JS submit como último recurso
+                await page.evaluate("const f = document.querySelector('form'); if(f) f.submit();")
+                logger.info(f"OUO Playwright paso {step + 1}: form.submit() via JS")
 
-            clicked2 = await _find_and_click(
-                page,
-                'button:has-text("Get Link")',
-                'button:has-text("get link")',
-                'a:has-text("Get Link")',
-                '#btn-main', '.btn-main',
-                'input[type="submit"]',
-                'button[type="submit"]',
-                'button',
-            )
-            if clicked2:
-                try:
-                    await page.wait_for_url(
-                        lambda u: _is_final_url(u),
-                        timeout=10000
-                    )
-                except Exception:
-                    await asyncio.sleep(4)
-                    try:
-                        await page.wait_for_load_state('networkidle', timeout=8000)
-                    except Exception:
-                        pass
+            # Esperar navegación (networkidle o timeout)
+            try:
+                await page.wait_for_load_state('networkidle', timeout=15000)
+            except Exception:
+                await asyncio.sleep(6)
 
-            current_url = page.url
-            if _is_final_url(current_url):
-                return current_url
-            if 'ouo.io' not in current_url and 'ouo.press' not in current_url:
-                return current_url
+            new_url = page.url
+            logger.info(f"OUO Playwright paso {step + 1} completado: {new_url[:80]}")
 
-        # Fallback: buscar en HTML
-        html_content = await page.content()
-        extracted = _extract_url_from_html(html_content)
+            if _is_final_url(new_url):
+                return new_url
+            if 'ouo' not in new_url.lower():
+                return new_url
+
+        # ─── Último intento: escanear HTML y links ──────────────────────────
+        html = await page.content()
+        extracted = _extract_url_from_html(html)
         if extracted:
             return extracted
 
-        # Último recurso: links <a>
-        page_links = await page.query_selector_all('a[href]')
-        for link in page_links:
-            href = await link.get_attribute('href')
+        for link_el in await page.query_selector_all('a[href]'):
+            href = await link_el.get_attribute('href')
             if href and 'ouo' not in href.lower() and _is_final_url(href):
-                logger.info(f"OUO Playwright: Found host link in <a>: {href[:80]}")
+                logger.info(f"OUO Playwright: link <a> encontrado: {href[:80]}")
                 return href
 
-        logger.warning(f"OUO Playwright: Could not resolve {ouo_url}, final URL: {page.url[:80]}")
+        logger.warning(f"OUO Playwright: no se pudo resolver {ouo_url}, URL final: {page.url[:80]}")
         return None
 
     except asyncio.TimeoutError:
-        logger.warning(f"OUO Playwright: Timeout resolving {ouo_url}")
+        logger.warning(f"OUO Playwright: timeout resolviendo {ouo_url}")
         return None
     except Exception as e:
-        logger.error(f"OUO Playwright: Error resolving {ouo_url}: {e}")
+        logger.error(f"OUO Playwright: error resolviendo {ouo_url}: {e}")
         return None
     finally:
         if page:
