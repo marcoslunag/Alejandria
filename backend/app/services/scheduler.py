@@ -332,13 +332,27 @@ class ContentScheduler:
 
             if not comics:
                 # Also check comics with issues missing download URLs
-                comics_with_missing = db.query(Comic).join(ComicIssue).filter(
-                    and_(
-                        Comic.monitored == True,
-                        ComicIssue.download_url == None,
-                        ComicIssue.status == 'pending'
+                # NOTE: .distinct() on tables with JSON columns causes PostgreSQL
+                # "could not identify an equality operator for type json" — use subquery on IDs instead
+                missing_ids = (
+                    db.query(ComicIssue.comic_id)
+                    .join(Comic, Comic.id == ComicIssue.comic_id)
+                    .filter(
+                        and_(
+                            Comic.monitored == True,
+                            ComicIssue.download_url == None,
+                            ComicIssue.status == 'pending'
+                        )
                     )
-                ).distinct().limit(5).all()
+                    .distinct()
+                    .limit(5)
+                    .all()
+                )
+                comics_with_missing = (
+                    db.query(Comic)
+                    .filter(Comic.id.in_([r[0] for r in missing_ids]))
+                    .all()
+                )
                 comics = comics_with_missing
 
             if not comics:

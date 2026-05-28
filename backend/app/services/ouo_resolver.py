@@ -138,7 +138,7 @@ async def _resolve_with_flaresolverr(ouo_url: str, flaresolverr_url: str) -> Opt
             "cmd": cmd,
             "url": url,
             "session": session_id,
-            "maxTimeout": 60000,
+            "maxTimeout": 120000,
         }
         if post_data is not None:
             payload["postData"] = post_data
@@ -446,22 +446,38 @@ class OUOResolver:
         except Exception:
             flaresolverr_url = None
 
-        # Seleccionar estrategia
-        if flaresolverr_url:
-            logger.info(f"OUO: Using FlareSolverr ({flaresolverr_url})")
-            resolver_coro = _resolve_with_flaresolverr(ouo_url, flaresolverr_url)
-        else:
-            logger.info("OUO: FlareSolverr not configured — falling back to Playwright")
-            resolver_coro = _resolve_with_playwright(ouo_url)
+        result = None
 
-        try:
-            result = await asyncio.wait_for(resolver_coro, timeout=timeout / 1000)
-        except asyncio.TimeoutError:
-            logger.error(f"OUO: Global timeout ({timeout}ms) resolving {ouo_url}")
-            return {"ok": False, "error": f"Timeout after {timeout}ms"}
-        except Exception as e:
-            logger.error(f"OUO: Unexpected error: {e}")
-            return {"ok": False, "error": str(e)}
+        # Intentar FlareSolverr primero (si está configurado)
+        if flaresolverr_url:
+            logger.info(f"OUO: Trying FlareSolverr ({flaresolverr_url})")
+            try:
+                result = await asyncio.wait_for(
+                    _resolve_with_flaresolverr(ouo_url, flaresolverr_url),
+                    timeout=min(timeout / 1000, 150)  # máx 150s para FlareSolverr
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"OUO: FlareSolverr timeout — intentando Playwright como fallback")
+            except Exception as e:
+                logger.warning(f"OUO: FlareSolverr error ({e}) — intentando Playwright como fallback")
+
+        # Playwright: si FlareSolverr no está, o si falló/no resolvió
+        if not result:
+            if flaresolverr_url:
+                logger.info("OUO: FlareSolverr no resolvió el enlace, usando Playwright como fallback")
+            else:
+                logger.info("OUO: FlareSolverr no configurado — usando Playwright")
+            try:
+                result = await asyncio.wait_for(
+                    _resolve_with_playwright(ouo_url),
+                    timeout=60
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"OUO: Playwright fallback también expiró para {ouo_url}")
+                return {"ok": False, "error": f"Timeout en FlareSolverr y Playwright"}
+            except Exception as e:
+                logger.error(f"OUO: Playwright fallback error: {e}")
+                return {"ok": False, "error": str(e)}
 
         if result:
             final_host = 'unknown'

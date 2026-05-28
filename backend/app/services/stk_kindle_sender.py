@@ -26,13 +26,15 @@ import stkclient
 
 logger = logging.getLogger(__name__)
 
-# Número de fallos consecutivos antes de considerar el token definitivamente muerto
-MAX_CONSECUTIVE_FAILURES = 3
+# Número de fallos consecutivos antes de considerar el token definitivamente muerto.
+# Se usa 5 (no 3) porque "deviceinfotoken" puede ser una respuesta temporal de Amazon
+# (rate-limit, mantenimiento), y perder la sesión es muy molesto para el usuario.
+MAX_CONSECUTIVE_FAILURES = 5
 
 # Palabras clave que Amazon devuelve cuando el ADP token está DEFINITIVAMENTE revocado.
 # '403' y 'forbidden' NO están aquí porque son demasiado genéricos (rate limit, etc.)
 _DEFINITIVE_EXPIRY_SIGNALS = [
-    'deviceinfotoken',       # Amazon: ADP token inválido/revocado
+    'deviceinfotoken',       # Amazon: ADP token inválido/revocado (puede ser transitorio)
     'device not registered', # Dispositivo eliminado de la cuenta
     'invalid adp token',
     'adp_token is invalid',
