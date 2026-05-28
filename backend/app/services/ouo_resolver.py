@@ -19,7 +19,8 @@ Flujo de ouo.press (2 pasos):
 import asyncio
 import logging
 import re
-from typing import Optional, Dict
+import time
+from typing import Optional, Dict, Tuple
 from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,18 @@ logger = logging.getLogger(__name__)
 # Semáforo: máximo 1 resolución ouo.io con Playwright a la vez.
 # Playwright abre Chromium completo — 3 instancias simultáneas agotan la RAM.
 _playwright_ouo_sem = asyncio.Semaphore(1)
+
+# ── Cache y deduplicación de resoluciones ──────────────────────────────────────
+# Varios capítulos del mismo manga suelen compartir el mismo ouo URL.
+# Sin cache resolvemos el mismo enlace 3 veces; con cache lo hacemos 1 sola vez.
+_resolution_cache: Dict[str, Tuple[float, Optional[str]]] = {}  # key → (ts, url)
+_resolution_in_flight: Dict[str, "asyncio.Future[Optional[str]]"] = {}  # key → Future
+_CACHE_TTL = 300  # 5 minutos
+
+
+def _ouo_key(url: str) -> str:
+    """Extrae el ID único de un enlace ouo.io/ouo.press."""
+    return re.sub(r'https?://ouo\.(io|press)/', '', url).strip('/')
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -480,7 +493,43 @@ class OUOResolver:
         Resuelve un enlace OUO de forma asíncrona.
 
         Usa FlareSolverr si FLARESOLVERR_URL está configurado; si no, Playwright.
+
+        Incluye cache (5 min) y deduplicación in-flight: si varios capítulos
+        comparten el mismo ouo URL, la resolución se hace UNA sola vez y el
+        resultado se comparte, evitando múltiples instancias de Playwright
+        simultáneas para el mismo enlace.
         """
+        url_key = _ouo_key(ouo_url)
+
+        # ── 1. Cache hit ───────────────────────────────────────────────────────
+        if url_key in _resolution_cache:
+            ts, cached = _resolution_cache[url_key]
+            if time.time() - ts < _CACHE_TTL and cached:
+                logger.info(f"OUO: Cache hit para {url_key} → {cached[:60]}")
+                return self._make_ok(cached)
+
+        # ── 2. Deduplicación in-flight ─────────────────────────────────────────
+        # Si ya hay una resolución en curso para este URL, esperar su resultado.
+        if url_key in _resolution_in_flight:
+            logger.info(f"OUO: Resolución en curso para {url_key}, esperando resultado...")
+            try:
+                shared = await asyncio.wait_for(
+                    asyncio.shield(_resolution_in_flight[url_key]),
+                    timeout=240
+                )
+                if shared:
+                    return self._make_ok(shared)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+            except Exception as e:
+                logger.warning(f"OUO: Error esperando resolución compartida: {e}")
+            return {"ok": False, "error": "Timeout esperando resolución compartida"}
+
+        # ── 3. Nueva resolución ────────────────────────────────────────────────
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future = loop.create_future()
+        _resolution_in_flight[url_key] = future
+
         logger.info(f"OUO: Resolving {ouo_url}")
 
         try:
@@ -492,53 +541,70 @@ class OUOResolver:
 
         result = None
 
-        # Intentar FlareSolverr primero (si está configurado)
-        if flaresolverr_url:
-            logger.info(f"OUO: Trying FlareSolverr ({flaresolverr_url})")
-            try:
-                result = await asyncio.wait_for(
-                    _resolve_with_flaresolverr(ouo_url, flaresolverr_url),
-                    timeout=min(timeout / 1000, 150)  # máx 150s para FlareSolverr
-                )
-            except asyncio.TimeoutError:
-                logger.warning(f"OUO: FlareSolverr timeout — intentando Playwright como fallback")
-            except Exception as e:
-                logger.warning(f"OUO: FlareSolverr error ({e}) — intentando Playwright como fallback")
-
-        # Playwright: si FlareSolverr no está, o si falló/no resolvió.
-        # Semáforo de 1: solo 1 Playwright ouo a la vez para no agotar RAM.
-        if not result:
+        try:
+            # Intentar FlareSolverr primero (si está configurado)
             if flaresolverr_url:
-                logger.info("OUO: FlareSolverr no resolvió el enlace, usando Playwright como fallback")
-            else:
-                logger.info("OUO: FlareSolverr no configurado — usando Playwright")
-            try:
-                async with _playwright_ouo_sem:
+                logger.info(f"OUO: Trying FlareSolverr ({flaresolverr_url})")
+                try:
                     result = await asyncio.wait_for(
-                        _resolve_with_playwright(ouo_url),
-                        timeout=75
+                        _resolve_with_flaresolverr(ouo_url, flaresolverr_url),
+                        timeout=min(timeout / 1000, 150)  # máx 150s para FlareSolverr
                     )
-            except asyncio.TimeoutError:
-                logger.error(f"OUO: Playwright fallback también expiró para {ouo_url}")
-                return {"ok": False, "error": f"Timeout en FlareSolverr y Playwright"}
-            except Exception as e:
-                logger.error(f"OUO: Playwright fallback error: {e}")
-                return {"ok": False, "error": str(e)}
+                except asyncio.TimeoutError:
+                    logger.warning(f"OUO: FlareSolverr timeout — intentando Playwright como fallback")
+                except Exception as e:
+                    logger.warning(f"OUO: FlareSolverr error ({e}) — intentando Playwright como fallback")
 
-        if result:
-            final_host = 'unknown'
-            r = result.lower()
-            if 'fireload' in r:       final_host = 'fireload'
-            elif 'mediafire' in r:    final_host = 'mediafire'
-            elif 'mega.nz' in r or 'mega.co.nz' in r:  final_host = 'mega'
-            elif '1fichier' in r:     final_host = '1fichier'
-            elif 'drive.google' in r: final_host = 'google_drive'
-            elif 'terabox' in r:      final_host = 'terabox'
+            # Playwright: si FlareSolverr no está, o si falló/no resolvió.
+            # Semáforo de 1: solo 1 Playwright ouo a la vez para no agotar RAM.
+            if not result:
+                if flaresolverr_url:
+                    logger.info("OUO: FlareSolverr no resolvió el enlace, usando Playwright como fallback")
+                else:
+                    logger.info("OUO: FlareSolverr no configurado — usando Playwright")
+                try:
+                    async with _playwright_ouo_sem:
+                        result = await asyncio.wait_for(
+                            _resolve_with_playwright(ouo_url),
+                            timeout=120  # 120s: margen para los 2 pasos del formulario
+                        )
+                except asyncio.TimeoutError:
+                    logger.error(f"OUO: Playwright fallback también expiró para {ouo_url}")
+                except Exception as e:
+                    logger.error(f"OUO: Playwright fallback error: {e}")
 
-            logger.info(f"OUO: Successfully resolved to {final_host}: {result}")
-            return {"ok": True, "final_url": result, "host": final_host}
+            # Guardar en cache solo si hubo éxito
+            if result:
+                _resolution_cache[url_key] = (time.time(), result)
 
-        return {"ok": False, "error": "No se pudo resolver el enlace de OUO.io"}
+            # Notificar a los waiters
+            if not future.done():
+                future.set_result(result)
+
+            if result:
+                return self._make_ok(result)
+
+            return {"ok": False, "error": "No se pudo resolver el enlace de OUO.io"}
+
+        except Exception as e:
+            if not future.done():
+                future.set_exception(e)
+            raise
+        finally:
+            _resolution_in_flight.pop(url_key, None)
+
+    def _make_ok(self, url: str) -> Dict:
+        """Construye respuesta de éxito detectando el host."""
+        final_host = 'unknown'
+        r = url.lower()
+        if 'fireload' in r:       final_host = 'fireload'
+        elif 'mediafire' in r:    final_host = 'mediafire'
+        elif 'mega.nz' in r or 'mega.co.nz' in r:  final_host = 'mega'
+        elif '1fichier' in r:     final_host = '1fichier'
+        elif 'drive.google' in r: final_host = 'google_drive'
+        elif 'terabox' in r:      final_host = 'terabox'
+        logger.info(f"OUO: Successfully resolved to {final_host}: {url}")
+        return {"ok": True, "final_url": url, "host": final_host}
 
     async def close(self):
         """Cleanup (no-op)."""
