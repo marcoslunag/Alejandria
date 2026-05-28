@@ -86,6 +86,7 @@ services:
       - library:/library
       - imports:/imports
       - stk_data:/stk-data
+      - ./backend:/app/backend   # Live source mount — same as backend, no rebuild needed on code changes
     depends_on:
       postgres:
         condition: service_healthy
