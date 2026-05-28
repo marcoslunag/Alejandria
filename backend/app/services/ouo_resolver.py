@@ -341,8 +341,14 @@ async def _resolve_with_playwright(ouo_url: str) -> Optional[str]:
 
         logger.info(f"OUO Playwright: cargando {press_url}")
         await page.goto(press_url, wait_until='domcontentloaded', timeout=30000)
-        # Esperar a que Cloudflare JS challenge se auto-resuelva (si aplica)
-        await asyncio.sleep(4)
+        # El form de ouo.press es JS-rendered — esperar a que aparezca en el DOM
+        # (hasta 20s). Si no aparece, caemos al sleep de 5s como fallback.
+        try:
+            await page.wait_for_selector('input[name="_token"]', timeout=20000)
+            logger.info("OUO Playwright: form _token detectado en DOM")
+        except Exception:
+            logger.warning("OUO Playwright: wait_for_selector timeout — esperando 5s fallback")
+            await asyncio.sleep(5)
 
         # ¿Redirigió ya a URL final?
         if _is_final_url(page.url):
