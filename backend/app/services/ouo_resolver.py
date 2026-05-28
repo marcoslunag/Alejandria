@@ -24,6 +24,10 @@ from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
 
+# Semáforo: máximo 1 resolución ouo.io con Playwright a la vez.
+# Playwright abre Chromium completo — 3 instancias simultáneas agotan la RAM.
+_playwright_ouo_sem = asyncio.Semaphore(1)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -495,17 +499,19 @@ class OUOResolver:
             except Exception as e:
                 logger.warning(f"OUO: FlareSolverr error ({e}) — intentando Playwright como fallback")
 
-        # Playwright: si FlareSolverr no está, o si falló/no resolvió
+        # Playwright: si FlareSolverr no está, o si falló/no resolvió.
+        # Semáforo de 1: solo 1 Playwright ouo a la vez para no agotar RAM.
         if not result:
             if flaresolverr_url:
                 logger.info("OUO: FlareSolverr no resolvió el enlace, usando Playwright como fallback")
             else:
                 logger.info("OUO: FlareSolverr no configurado — usando Playwright")
             try:
-                result = await asyncio.wait_for(
-                    _resolve_with_playwright(ouo_url),
-                    timeout=60
-                )
+                async with _playwright_ouo_sem:
+                    result = await asyncio.wait_for(
+                        _resolve_with_playwright(ouo_url),
+                        timeout=75
+                    )
             except asyncio.TimeoutError:
                 logger.error(f"OUO: Playwright fallback también expiró para {ouo_url}")
                 return {"ok": False, "error": f"Timeout en FlareSolverr y Playwright"}
