@@ -213,12 +213,8 @@ def _resolve_curl_cffi_sync(ouo_url: str) -> Optional[str]:
         x_token = ""
 
     # ── POST 1: ouo.io/go/{id} ─────────────────────────────────────────────────
-    # Re-crear session con el fingerprint que funcionó para los POSTs
-    if used_fingerprint:
-        session = cffi_requests.Session(impersonate=used_fingerprint)
-        # Copiar cookies del GET para mantener la sesión
-        for cookie in r0.cookies.jar:
-            session.cookies.set(cookie.name, cookie.value, domain=cookie.domain)
+    # IMPORTANTE: usar la MISMA sesión del GET para que las cookies CF
+    # (cf_clearance, __cf_bm) se incluyan automáticamente en el POST
     go_url = f'https://ouo.io/go/{ouo_id}'
     session.headers.update({
         'content-type': 'application/x-www-form-urlencoded',
@@ -248,10 +244,6 @@ def _resolve_curl_cffi_sync(ouo_url: str) -> Optional[str]:
         return extracted1
 
     # ── POST 2: ouo.io/xreallcygo/{id} ────────────────────────────────────────
-    # Propagar cookies del POST1 al POST2
-    if used_fingerprint:
-        for cookie in r1.cookies.jar:
-            session.cookies.set(cookie.name, cookie.value, domain=cookie.domain)
     _token2 = _extract_token_from_html(r1.text) or _token
     try:
         x_token2 = _get_recaptcha_v3_sync()
