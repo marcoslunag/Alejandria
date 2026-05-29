@@ -326,39 +326,53 @@ def _follow_intermediate_sync(url: str) -> Optional[str]:
 
 async def _resolve_with_flaresolverr(ouo_url: str, flaresolverr_url: str) -> Optional[str]:
     """
-    FlareSolverr navega el flujo completo de ouo.io en su Chrome (~90s):
-      1. GET ouo.io/{id} → CF challenge + countdown auto-submit
-      2. Chrome navega hasta mks98.com/link2 (página de tracking intermedia)
-      3. Seguimos el redirect de mks98.com → URL de descarga final
+    Bypass de ouo.io usando FlareSolverr (Chrome headless) + 3 pasos HTTP:
 
-    No se necesitan POSTs manuales — FlareSolverr lo hace todo en un solo GET.
-    Usa ouo.io (no ouo.press) — ouo.press tiene WAF más agresivo en GET también.
+      1. GET ouo.io/{id}           (~50s) — FlareSolverr resuelve CF challenge
+                                            → obtiene _token + v-token DINÁMICO
+      2. POST ouo.io/go/{id}       (~10s) — "Challenge not detected!" con v-token real
+                                            → página con countdown (nuevo _token + v-token)
+      3. POST ouo.io/xreallcygo/{id} (~18s) → URL final (fireload/mega/mediafire)
+
+    CRÍTICO: v-token es generado dinámicamente por el servidor cuando CF está resuelto.
+    NO usar v-token='bx' ni 'vm' hardcodeados — solo funcionan los valores del form.
+    Los 3 pasos van por la misma sesión FlareSolverr (mismo Chrome con cf_clearance).
     """
     import aiohttp
 
-    # Usar ouo.io (Chrome de FlareSolverr navega el countdown auto-submit)
     io_url = re.sub(r'https?://ouo\.(io|press)/', 'https://ouo.io/', ouo_url)
     ouo_id = io_url.rstrip('/').split('/')[-1]
     session_id = f"alejandria_ouo_{ouo_id}"
-
     fs_base = flaresolverr_url.rstrip('/')
 
-    async def fs_get(url: str, timeout_ms: int = 130000) -> Optional[dict]:
-        payload = {"cmd": "request.get", "url": url, "session": session_id, "maxTimeout": timeout_ms}
+    def _extract_vtok(html: str) -> str:
+        """Extrae el v-token dinámico del formulario (crucial para el bypass)."""
+        m = re.search(r"name=['\"]v-token['\"][^>]+value=['\"]([^'\"]+)['\"]", html)
+        if m:
+            return m.group(1)
+        m = re.search(r"value=['\"]([^'\"]+)['\"][^>]+name=['\"]v-token['\"]", html)
+        if m:
+            return m.group(1)
+        return "vm"  # fallback (raramente correcto)
+
+    async def fs_request(cmd: str, url: str, post_data: Optional[str] = None, timeout_ms: int = 130000) -> Optional[dict]:
+        payload = {"cmd": cmd, "url": url, "session": session_id, "maxTimeout": timeout_ms}
+        if post_data is not None:
+            payload["postData"] = post_data
         http_timeout = aiohttp.ClientTimeout(total=timeout_ms / 1000 + 20)
         try:
             async with aiohttp.ClientSession(timeout=http_timeout) as sess:
                 async with sess.post(f"{fs_base}/v1", json=payload) as resp:
                     if resp.status != 200:
-                        logger.warning(f"OUO FlareSolverr: HTTP {resp.status}")
+                        logger.warning(f"OUO FlareSolverr: HTTP {resp.status} para {cmd}")
                         return None
                     data = await resp.json()
             if data.get("status") != "ok":
-                logger.warning(f"OUO FlareSolverr: {data.get('status')} — {data.get('message','')[:120]}")
+                logger.warning(f"OUO FlareSolverr: {cmd} failed: {data.get('message','')[:120]}")
                 return None
             return data.get("solution")
         except Exception as e:
-            logger.warning(f"OUO FlareSolverr: error GET: {e}")
+            logger.warning(f"OUO FlareSolverr: error en {cmd}: {e}")
             return None
 
     async def destroy_session():
@@ -369,88 +383,95 @@ async def _resolve_with_flaresolverr(ouo_url: str, flaresolverr_url: str) -> Opt
             pass
 
     try:
-        # Crear sesión persistente
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as sess:
                 await sess.post(f"{fs_base}/v1", json={"cmd": "sessions.create", "session": session_id})
         except Exception:
             pass
 
-        # GET ouo.io/{id} — Chrome navega CF + countdown auto-submit (~90s)
+        # ── Paso 1: GET ouo.io/{id} — FlareSolverr resuelve CF (~50s) ─────────
         logger.info(f"OUO FlareSolverr: GET {io_url}")
-        sol = await fs_get(io_url, timeout_ms=130000)
-        if not sol:
+        sol1 = await fs_request("request.get", io_url, timeout_ms=130000)
+        if not sol1:
             return None
 
-        final_url = sol.get("url", "")
-        html = sol.get("response", "")
-        logger.info(f"OUO FlareSolverr: GET terminó → {final_url[:80]}")
+        url1 = sol1.get("url", "")
+        html1 = sol1.get("response", "")
+        logger.info(f"OUO FlareSolverr: GET terminó url={url1[:60]}")
 
-        # Caso 1: URL de descarga directa
-        if _is_final_url(final_url):
-            logger.info(f"OUO FlareSolverr: URL final directa → {final_url[:80]}")
-            return final_url
+        # Bypass exitoso si Chrome ya navegó fuera de ouo.io (auto-submit del countdown)
+        if _is_final_url(url1):
+            return url1
+        if url1 and 'ouo.io' not in url1 and 'ouo.press' not in url1:
+            logger.info(f"OUO FlareSolverr: auto-navegó a {url1[:60]}, siguiendo chain")
+            real = await asyncio.get_event_loop().run_in_executor(None, _follow_intermediate_sync, url1)
+            return real or _extract_url_from_html(html1)
 
-        # Caso 2: Chrome navegó más allá de ouo.io (bypass exitoso!)
-        # final_url es mks98.com/... u otro intermediario → seguir redirect
-        if final_url and 'ouo.io' not in final_url and 'ouo.press' not in final_url:
-            logger.info(f"OUO FlareSolverr: bypass exitoso, siguiendo intermediario {final_url[:60]}")
-            real_url = await asyncio.get_event_loop().run_in_executor(
-                None, _follow_intermediate_sync, final_url
-            )
-            if real_url:
-                return real_url
-            # Buscar en el HTML de la página intermediaria
-            extracted = _extract_url_from_html(html)
-            if extracted:
-                return extracted
-            logger.warning(f"OUO FlareSolverr: intermediario {final_url[:60]} no tiene URL de descarga")
+        # Extraer _token y v-token DINÁMICO del formulario (post-CF solve)
+        _token1 = _extract_token_from_html(html1)
+        if not _token1:
+            logger.warning(f"OUO FlareSolverr: no _token en GET (html[:100]={html1[:100]!r})")
+            return _extract_url_from_html(html1)
+
+        vtok1 = _extract_vtok(html1)
+        logger.info(f"OUO FlareSolverr: _token={len(_token1)}ch v-token={len(vtok1)}ch")
+
+        # reCAPTCHA v3 para x-token
+        try:
+            x_token1 = await asyncio.get_event_loop().run_in_executor(None, _get_recaptcha_v3_sync)
+        except Exception:
+            x_token1 = ""
+
+        # ── Paso 2: POST ouo.io/go/{id} (~10s) — "Challenge not detected!" ────
+        go_url = f"https://ouo.io/go/{ouo_id}"
+        form1 = urlencode({"_token": _token1, "x-token": x_token1, "v-token": vtok1})
+        logger.info(f"OUO FlareSolverr: POST {go_url} (v-token={len(vtok1)}ch)")
+        sol2 = await fs_request("request.post", go_url, post_data=form1, timeout_ms=60000)
+        if not sol2:
+            logger.warning("OUO FlareSolverr: POST /go/ falló")
             return None
 
-        # Caso 3: Chrome sigue en ouo.io (countdown no terminó o form pendiente)
-        # Extraer _token e intentar POSTs manuales como último recurso
-        _token = _extract_token_from_html(html)
-        if not _token:
-            logger.warning(f"OUO FlareSolverr: sin redirect Y sin _token. html[:200]={html[:200]!r}")
-            extracted = _extract_url_from_html(html)
+        url2 = sol2.get("url", "")
+        html2 = sol2.get("response", "")
+        logger.info(f"OUO FlareSolverr: POST /go/ ok url={url2[:60]}")
+
+        if _is_final_url(url2):
+            return url2
+        if url2 and 'ouo.io' not in url2 and 'ouo.press' not in url2:
+            real = await asyncio.get_event_loop().run_in_executor(None, _follow_intermediate_sync, url2)
+            return real or _extract_url_from_html(html2)
+
+        # ── Paso 3: POST ouo.io/xreallcygo/{id} (~18s) — URL final ───────────
+        _token2 = _extract_token_from_html(html2) or _token1
+        vtok2 = _extract_vtok(html2)
+        try:
+            x_token2 = await asyncio.get_event_loop().run_in_executor(None, _get_recaptcha_v3_sync)
+        except Exception:
+            x_token2 = x_token1
+
+        xreal_url = f"https://ouo.io/xreallcygo/{ouo_id}"
+        form2 = urlencode({"_token": _token2, "x-token": x_token2, "v-token": vtok2})
+        logger.info(f"OUO FlareSolverr: POST {xreal_url} (v-token={len(vtok2)}ch)")
+        sol3 = await fs_request("request.post", xreal_url, post_data=form2, timeout_ms=60000)
+        if not sol3:
+            logger.warning("OUO FlareSolverr: POST /xreallcygo/ falló")
+            return None
+
+        url3 = sol3.get("url", "")
+        html3 = sol3.get("response", "")
+        logger.info(f"OUO FlareSolverr: POST /xreallcygo/ ok url={url3[:80]}")
+
+        if _is_final_url(url3):
+            return url3
+        if url3 and 'ouo.io' not in url3 and 'ouo.press' not in url3:
+            real = await asyncio.get_event_loop().run_in_executor(None, _follow_intermediate_sync, url3)
+            return real or _extract_url_from_html(html3)
+
+        extracted = _extract_url_from_html(html3)
+        if extracted:
             return extracted
 
-        logger.info(f"OUO FlareSolverr: form pendiente, intentando POST manual")
-        try:
-            x_token = await asyncio.get_event_loop().run_in_executor(None, _get_recaptcha_v3_sync)
-        except Exception:
-            x_token = ""
-
-        # POST manual a ouo.io/go/{id} via FlareSolverr
-        go_url = f"https://ouo.io/go/{ouo_id}"
-        form_data = urlencode({"_token": _token, "x-token": x_token, "v-token": "bx"})
-        payload_post = {
-            "cmd": "request.post", "url": go_url, "session": session_id,
-            "postData": form_data, "maxTimeout": 120000,
-        }
-        http_timeout2 = aiohttp.ClientTimeout(total=140)
-        try:
-            async with aiohttp.ClientSession(timeout=http_timeout2) as sess:
-                async with sess.post(f"{fs_base}/v1", json=payload_post) as resp:
-                    data2 = await resp.json() if resp.status == 200 else {}
-        except Exception as e:
-            logger.warning(f"OUO FlareSolverr: POST manual error: {e}")
-            data2 = {}
-
-        sol2 = data2.get("solution") if data2.get("status") == "ok" else None
-        if sol2:
-            fu2 = sol2.get("url", "")
-            if _is_final_url(fu2):
-                return fu2
-            if fu2 and 'ouo' not in fu2.lower():
-                real_url = await asyncio.get_event_loop().run_in_executor(None, _follow_intermediate_sync, fu2)
-                if real_url:
-                    return real_url
-            extracted2 = _extract_url_from_html(sol2.get("response", ""))
-            if extracted2:
-                return extracted2
-
-        logger.warning(f"OUO FlareSolverr: no se pudo resolver {ouo_url}")
+        logger.warning(f"OUO FlareSolverr: no URL final. url3={url3[:60]} html3[:100]={html3[:100]!r}")
         return None
 
     finally:
