@@ -329,12 +329,13 @@ async def _resolve_with_flaresolverr(ouo_url: str, flaresolverr_url: str) -> Opt
             logger.warning(f"OUO: reCAPTCHA v3 falló ({e}), sin x-token")
             x_token = ""
 
-        # ── Paso 2: POST ouo.press/go/{id} via FlareSolverr (~5-10s) ──────────
-        # Mismo Chrome session → cf_clearance válido, sin nuevo challenge
+        # ── Paso 2: POST ouo.press/go/{id} via FlareSolverr ─────────────────────
+        # ouo.press dispara un nuevo CF challenge en el POST (distinta ruta).
+        # FlareSolverr necesita ~60s para resolverlo → maxTimeout=120s
         go_url = f"https://ouo.press/go/{ouo_id}"
         form_data = urlencode({"_token": _token, "x-token": x_token, "v-token": "bx"})
         logger.info(f"OUO FlareSolverr: POST {go_url}")
-        sol2 = await fs_request("request.post", go_url, post_data=form_data, req_timeout=30000)
+        sol2 = await fs_request("request.post", go_url, post_data=form_data, req_timeout=120000)
 
         if sol2:
             final_url2 = sol2.get("url", "")
@@ -347,7 +348,7 @@ async def _resolve_with_flaresolverr(ouo_url: str, flaresolverr_url: str) -> Opt
             if extracted2:
                 return extracted2
 
-            # ── Paso 3: POST ouo.press/xreallcygo/{id} (~5-10s) ────────────────
+            # ── Paso 3: POST ouo.press/xreallcygo/{id} ──────────────────────────
             _token2 = _extract_token_from_html(html2) or _token
             try:
                 x_token2 = await asyncio.get_event_loop().run_in_executor(
@@ -359,7 +360,7 @@ async def _resolve_with_flaresolverr(ouo_url: str, flaresolverr_url: str) -> Opt
             xreal_url = f"https://ouo.press/xreallcygo/{ouo_id}"
             form_data2 = urlencode({"_token": _token2, "x-token": x_token2, "v-token": "bx"})
             logger.info(f"OUO FlareSolverr: POST {xreal_url}")
-            sol3 = await fs_request("request.post", xreal_url, post_data=form_data2, req_timeout=30000)
+            sol3 = await fs_request("request.post", xreal_url, post_data=form_data2, req_timeout=120000)
 
             if sol3:
                 final_url3 = sol3.get("url", "")
@@ -485,10 +486,11 @@ async def _resolve_with_playwright(ouo_url: str) -> Optional[str]:
 class OUOResolver:
     """Resolver para enlaces de OUO.io / OUO.press"""
 
-    async def resolve(self, ouo_url: str, timeout: int = 300000) -> Dict:
+    async def resolve(self, ouo_url: str, timeout: int = 600000) -> Dict:
         """
         Resuelve un enlace OUO.
-        timeout=300000ms (5 min): FlareSolverr GET ~60s + curl_cffi POSTs ~10s.
+        timeout=600000ms (10 min): 3 CF challenges vía FlareSolverr × ~120s c/u = ~360s.
+        ouo.press dispara CF challenge independiente en cada path (/id, /go/id, /xreallcygo/id).
         """
         key = _ouo_key(ouo_url)
 
@@ -510,7 +512,7 @@ class OUOResolver:
             logger.info(f"OUO: resolución en curso para {key}, esperando resultado...")
             try:
                 result_url = await asyncio.wait_for(
-                    asyncio.shield(existing_future), timeout=280
+                    asyncio.shield(existing_future), timeout=570
                 )
                 if result_url:
                     return self._make_ok(result_url)
