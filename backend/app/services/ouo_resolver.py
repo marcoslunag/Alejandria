@@ -313,7 +313,16 @@ async def _resolve_with_flaresolverr(ouo_url: str, flaresolverr_url: str) -> Opt
         # Extraer _token del formulario
         _token = _extract_token_from_html(html)
         if not _token:
-            logger.warning("OUO FlareSolverr: no _token — challenge no resuelto?")
+            # A veces FlareSolverr retorna el HTML antes de que el JS de ouo.press
+            # termine de renderizar el form. Reintentamos el GET una vez.
+            logger.warning(f"OUO FlareSolverr: no _token en GET (html[:200]={html[:200]!r}), reintentando GET...")
+            sol = await fs_request("request.get", press_url, req_timeout=120000)
+            if sol:
+                html = sol.get("response", "")
+                _token = _extract_token_from_html(html)
+
+        if not _token:
+            logger.warning(f"OUO FlareSolverr: no _token tras retry (html[:200]={html[:200]!r})")
             extracted = _extract_url_from_html(html)
             return extracted
 
