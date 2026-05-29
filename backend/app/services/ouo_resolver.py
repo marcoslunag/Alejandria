@@ -155,25 +155,36 @@ def _resolve_curl_cffi_sync(ouo_url: str) -> Optional[str]:
     io_url = re.sub(r'https?://ouo\.(io|press)/', 'https://ouo.io/', ouo_url)
     ouo_id = io_url.rstrip('/').split('/')[-1]
 
-    session = cffi_requests.Session(impersonate="chrome120")
-    session.headers.update({
-        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'accept-language': 'en-US,en;q=0.9',
-        'upgrade-insecure-requests': '1',
-    })
+    # Intentar múltiples fingerprints en orden (el WAF de ouo.io bloquea
+    # versiones específicas; chrome124/131/safari funcionan desde Docker)
+    fingerprints = ["chrome124", "chrome131", "safari15_5", "safari17_0", "chrome120"]
+    r0 = None
+    used_fingerprint = None
 
-    # ── GET ouo.io/{id} ────────────────────────────────────────────────────────
-    logger.info(f"OUO curl_cffi: GET {io_url}")
-    try:
-        r0 = session.get(io_url, timeout=30, allow_redirects=True)
-    except Exception as e:
-        logger.warning(f"OUO curl_cffi: GET error: {e}")
-        return None
+    for fp in fingerprints:
+        try:
+            session = cffi_requests.Session(impersonate=fp)
+            session.headers.update({
+                'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'accept-language': 'en-US,en;q=0.9',
+                'upgrade-insecure-requests': '1',
+            })
+            logger.info(f"OUO curl_cffi: GET {io_url} (impersonate={fp})")
+            r0 = session.get(io_url, timeout=15, allow_redirects=True)
+            logger.info(f"OUO curl_cffi: status={r0.status_code} fingerprint={fp}")
+            if r0.status_code == 200 and '_token' in r0.text:
+                used_fingerprint = fp
+                break
+            elif r0.status_code == 200 and 'just a moment' not in r0.text.lower():
+                used_fingerprint = fp
+                break
+        except Exception as e:
+            logger.warning(f"OUO curl_cffi: fingerprint {fp} error: {e}")
+            r0 = None
+            continue
 
-    logger.info(f"OUO curl_cffi: GET status={r0.status_code} url={r0.url[:80]}")
-
-    if r0.status_code != 200:
-        logger.warning(f"OUO curl_cffi: GET bloqueado (status={r0.status_code}), chrome120 ya no funciona")
+    if r0 is None or r0.status_code != 200:
+        logger.warning(f"OUO curl_cffi: todos los fingerprints bloqueados")
         return None
 
     # Si el GET ya redirigió a la URL final
@@ -202,6 +213,12 @@ def _resolve_curl_cffi_sync(ouo_url: str) -> Optional[str]:
         x_token = ""
 
     # ── POST 1: ouo.io/go/{id} ─────────────────────────────────────────────────
+    # Re-crear session con el fingerprint que funcionó para los POSTs
+    if used_fingerprint:
+        session = cffi_requests.Session(impersonate=used_fingerprint)
+        # Copiar cookies del GET para mantener la sesión
+        for cookie in r0.cookies.jar:
+            session.cookies.set(cookie.name, cookie.value, domain=cookie.domain)
     go_url = f'https://ouo.io/go/{ouo_id}'
     session.headers.update({
         'content-type': 'application/x-www-form-urlencoded',
@@ -231,6 +248,10 @@ def _resolve_curl_cffi_sync(ouo_url: str) -> Optional[str]:
         return extracted1
 
     # ── POST 2: ouo.io/xreallcygo/{id} ────────────────────────────────────────
+    # Propagar cookies del POST1 al POST2
+    if used_fingerprint:
+        for cookie in r1.cookies.jar:
+            session.cookies.set(cookie.name, cookie.value, domain=cookie.domain)
     _token2 = _extract_token_from_html(r1.text) or _token
     try:
         x_token2 = _get_recaptcha_v3_sync()
