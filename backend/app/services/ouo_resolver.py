@@ -3,15 +3,17 @@ OUO.io / OUO.press Link Resolver
 =================================
 Resuelve enlaces acortados de OUO.io para obtener el enlace final.
 
-Estrategia:
-  1. FlareSolverr GET → obtiene página + cookies cf_clearance (bypass Cloudflare)
-  2. curl_cffi POST  → usa cf_clearance para los 2 POSTs directamente (rápido)
-  3. Playwright      → fallback si FlareSolverr no está disponible
+Estrategia (en orden):
+  1. curl_cffi chrome120 puro   → GET ouo.io/{id} + 2 POSTs (sin browser, ~10s)
+                                   chrome120 bypasses Cloudflare WAF en ouo.io
+                                   (chrome110 = bloqueado; chrome120/124 = OK)
+  2. FlareSolverr               → fallback si curl_cffi falla (~120s por CF challenge)
+  3. Playwright                 → fallback si FlareSolverr no disponible
 
-Flujo de ouo.press (2 pasos):
-  Paso 1: GET  ouo.press/{id}              → form con _token + cf_clearance
-          POST ouo.press/go/{id}           → redirect a /xreallcygo/{id}
-  Paso 2: POST ouo.press/xreallcygo/{id}  → URL final (Location header)
+Flujo de ouo.io (2 pasos):
+  GET  ouo.io/{id}              → form con _token (sin CF con chrome120)
+  POST ouo.io/go/{id}           → {_token, x-token=reCAPTCHA, v-token=bx}
+  POST ouo.io/xreallcygo/{id}   → Location header = URL final
 """
 
 import asyncio
@@ -130,49 +132,84 @@ def _extract_token_from_html(html: str) -> Optional[str]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# POST con curl_cffi usando cookies de FlareSolverr (sin nuevo CF challenge)
+# Estrategia 1: curl_cffi chrome120 puro (sin browser)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _do_ouo_posts_sync(
-    ouo_id: str,
-    _token: str,
-    x_token: str,
-    cookies: Dict[str, str],
-    user_agent: str,
-) -> Optional[str]:
+def _resolve_curl_cffi_sync(ouo_url: str) -> Optional[str]:
     """
-    Realiza los 2 POSTs de ouo.press usando curl_cffi con las cookies cf_clearance
-    ya obtenidas por FlareSolverr. Con cf_clearance válido no hay nuevo CF challenge.
+    Bypass puro HTTP con curl_cffi chrome120.
+
+    Usa ouo.io (no ouo.press) — confirmado que chrome120 retorna 200 con formulario.
+    chrome110 (bypass_ouo lib) → bloqueado 403.
+    chrome120 / chrome124      → bypass OK (status 200, form visible).
+
+    Flujo completo en ~10s sin necesidad de browser.
     """
     try:
         from curl_cffi import requests as cffi_requests
     except ImportError:
-        logger.warning("OUO curl_cffi: no disponible")
+        logger.warning("OUO curl_cffi: librería no disponible, saltando")
         return None
 
-    ua = user_agent or (
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) '
-        'Chrome/120.0.0.0 Safari/537.36'
-    )
+    # Siempre usar ouo.io (chrome120 bypassa su WAF; ouo.press tiene WAF más agresivo)
+    io_url = re.sub(r'https?://ouo\.(io|press)/', 'https://ouo.io/', ouo_url)
+    ouo_id = io_url.rstrip('/').split('/')[-1]
 
     session = cffi_requests.Session(impersonate="chrome120")
     session.headers.update({
-        'user-agent': ua,
-        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'accept-language': 'en-US,en;q=0.9',
-        'content-type': 'application/x-www-form-urlencoded',
-        'origin': 'https://ouo.press',
-        'referer': f'https://ouo.press/{ouo_id}',
+        'upgrade-insecure-requests': '1',
     })
 
-    # Inyectar cookies de FlareSolverr (incluyendo cf_clearance)
-    for name, value in cookies.items():
-        session.cookies.set(name, value, domain='.ouo.press')
+    # ── GET ouo.io/{id} ────────────────────────────────────────────────────────
+    logger.info(f"OUO curl_cffi: GET {io_url}")
+    try:
+        r0 = session.get(io_url, timeout=30, allow_redirects=True)
+    except Exception as e:
+        logger.warning(f"OUO curl_cffi: GET error: {e}")
+        return None
 
-    # ── POST 1: ouo.press/go/{id} ─────────────────────────────────────────────
-    go_url = f'https://ouo.press/go/{ouo_id}'
+    logger.info(f"OUO curl_cffi: GET status={r0.status_code} url={r0.url[:80]}")
+
+    if r0.status_code != 200:
+        logger.warning(f"OUO curl_cffi: GET bloqueado (status={r0.status_code}), chrome120 ya no funciona")
+        return None
+
+    # Si el GET ya redirigió a la URL final
+    if _is_final_url(r0.url):
+        logger.info(f"OUO curl_cffi: redirect directo en GET → {r0.url[:80]}")
+        return r0.url
+
+    extracted_get = _extract_url_from_html(r0.text)
+    if extracted_get:
+        return extracted_get
+
+    # Extraer _token del formulario
+    _token = _extract_token_from_html(r0.text)
+    if not _token:
+        logger.warning(f"OUO curl_cffi: no _token en GET response (html[:300]={r0.text[:300]!r})")
+        return None
+
+    logger.info(f"OUO curl_cffi: _token extraído ({len(_token)} chars)")
+
+    # reCAPTCHA v3 para x-token
+    try:
+        x_token = _get_recaptcha_v3_sync()
+        logger.info(f"OUO curl_cffi: reCAPTCHA v3 obtenido ({len(x_token)} chars)")
+    except Exception as e:
+        logger.warning(f"OUO curl_cffi: reCAPTCHA falló ({e}), usando vacío")
+        x_token = ""
+
+    # ── POST 1: ouo.io/go/{id} ─────────────────────────────────────────────────
+    go_url = f'https://ouo.io/go/{ouo_id}'
+    session.headers.update({
+        'content-type': 'application/x-www-form-urlencoded',
+        'origin': 'https://ouo.io',
+        'referer': io_url,
+    })
     form_data = {'_token': _token, 'x-token': x_token, 'v-token': 'bx'}
+
     logger.info(f"OUO curl_cffi: POST {go_url}")
     try:
         r1 = session.post(go_url, data=form_data, allow_redirects=False, timeout=30)
@@ -180,30 +217,30 @@ def _do_ouo_posts_sync(
         logger.warning(f"OUO curl_cffi: POST1 error: {e}")
         return None
 
-    logger.info(f"OUO curl_cffi: POST1 status={r1.status_code} location={r1.headers.get('Location', '')[:80]}")
+    logger.info(f"OUO curl_cffi: POST1 status={r1.status_code} loc={r1.headers.get('Location','')[:80]}")
 
     loc1 = r1.headers.get('Location', '')
-    if loc1 and _is_final_url(loc1):
-        return loc1
-    if loc1 and 'ouo' not in loc1.lower():
-        return loc1
+    if loc1:
+        if _is_final_url(loc1):
+            return loc1
+        if 'ouo' not in loc1.lower():
+            return loc1
 
-    # Extraer URL final del body si la hay
-    extracted = _extract_url_from_html(r1.text)
-    if extracted:
-        return extracted
+    extracted1 = _extract_url_from_html(r1.text)
+    if extracted1:
+        return extracted1
 
-    # ── POST 2: ouo.press/xreallcygo/{id} ─────────────────────────────────────
+    # ── POST 2: ouo.io/xreallcygo/{id} ────────────────────────────────────────
     _token2 = _extract_token_from_html(r1.text) or _token
-
     try:
         x_token2 = _get_recaptcha_v3_sync()
     except Exception:
         x_token2 = x_token
 
-    xreal_url = f'https://ouo.press/xreallcygo/{ouo_id}'
-    form_data2 = {'_token': _token2, 'x-token': x_token2, 'v-token': 'bx'}
+    xreal_url = f'https://ouo.io/xreallcygo/{ouo_id}'
     session.headers['referer'] = go_url
+    form_data2 = {'_token': _token2, 'x-token': x_token2, 'v-token': 'bx'}
+
     logger.info(f"OUO curl_cffi: POST {xreal_url}")
     try:
         r2 = session.post(xreal_url, data=form_data2, allow_redirects=False, timeout=30)
@@ -211,19 +248,20 @@ def _do_ouo_posts_sync(
         logger.warning(f"OUO curl_cffi: POST2 error: {e}")
         return None
 
-    logger.info(f"OUO curl_cffi: POST2 status={r2.status_code} location={r2.headers.get('Location', '')[:80]}")
+    logger.info(f"OUO curl_cffi: POST2 status={r2.status_code} loc={r2.headers.get('Location','')[:80]}")
 
     loc2 = r2.headers.get('Location', '')
-    if loc2 and _is_final_url(loc2):
-        return loc2
-    if loc2 and 'ouo' not in loc2.lower():
-        return loc2
+    if loc2:
+        if _is_final_url(loc2):
+            return loc2
+        if 'ouo' not in loc2.lower():
+            return loc2
 
     extracted2 = _extract_url_from_html(r2.text)
     if extracted2:
         return extracted2
 
-    logger.warning(f"OUO curl_cffi: no se encontró URL final. POST2 body[:200]={r2.text[:200]}")
+    logger.warning(f"OUO curl_cffi: no URL final. POST2 body[:300]={r2.text[:300]!r}")
     return None
 
 
@@ -497,9 +535,10 @@ class OUOResolver:
 
     async def resolve(self, ouo_url: str, timeout: int = 600000) -> Dict:
         """
-        Resuelve un enlace OUO.
-        timeout=600000ms (10 min): 3 CF challenges vía FlareSolverr × ~120s c/u = ~360s.
-        ouo.press dispara CF challenge independiente en cada path (/id, /go/id, /xreallcygo/id).
+        Resuelve un enlace OUO con 3 estrategias en cascada:
+          1. curl_cffi chrome120 (~10s) — puro HTTP, sin browser
+          2. FlareSolverr (~120s)       — si curl_cffi falla
+          3. Playwright fallback        — último recurso
         """
         key = _ouo_key(ouo_url)
 
@@ -543,21 +582,49 @@ class OUOResolver:
             except Exception:
                 flaresolverr_url = None
 
-            if flaresolverr_url:
-                logger.info(f"OUO: usando FlareSolverr+curl_cffi ({flaresolverr_url})")
-                resolver_coro = _resolve_with_flaresolverr(ouo_url, flaresolverr_url)
-            else:
-                logger.info("OUO: FlareSolverr no configurado, usando Playwright")
-                resolver_coro = _resolve_with_playwright(ouo_url)
-
+            # ── Estrategia 1: curl_cffi chrome120 (puro HTTP, ~10s, sin browser) ──────
+            result = None
             try:
-                result = await asyncio.wait_for(resolver_coro, timeout=timeout / 1000)
-            except asyncio.TimeoutError:
-                logger.error(f"OUO: timeout global ({timeout}ms) resolviendo {ouo_url}")
-                result = None
+                logger.info(f"OUO: estrategia 1 — curl_cffi chrome120")
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None, _resolve_curl_cffi_sync, ouo_url
+                )
+                if result:
+                    logger.info(f"OUO: curl_cffi resolvió → {result[:80]}")
             except Exception as e:
-                logger.error(f"OUO: error inesperado: {e}")
+                logger.warning(f"OUO: curl_cffi falló: {e}")
                 result = None
+
+            # ── Estrategia 2: FlareSolverr (fallback, ~120s) ─────────────────────
+            if not result and flaresolverr_url:
+                logger.info(f"OUO: estrategia 2 — FlareSolverr ({flaresolverr_url})")
+                try:
+                    result = await asyncio.wait_for(
+                        _resolve_with_flaresolverr(ouo_url, flaresolverr_url),
+                        timeout=min(timeout / 1000, 400)
+                    )
+                    if result:
+                        logger.info(f"OUO: FlareSolverr resolvió → {result[:80]}")
+                except asyncio.TimeoutError:
+                    logger.error(f"OUO: FlareSolverr timeout")
+                except Exception as e:
+                    logger.error(f"OUO: FlareSolverr error: {e}")
+
+            # ── Estrategia 3: Playwright (fallback final) ────────────────────────
+            if not result:
+                logger.info("OUO: estrategia 3 — Playwright fallback")
+                try:
+                    result = await asyncio.wait_for(
+                        _resolve_with_playwright(ouo_url),
+                        timeout=min(timeout / 1000, 120)
+                    )
+                    if result:
+                        logger.info(f"OUO: Playwright resolvió → {result[:80]}")
+                except asyncio.TimeoutError:
+                    logger.error(f"OUO: Playwright timeout")
+                except Exception as e:
+                    logger.error(f"OUO: Playwright error: {e}")
+                    result = None
 
             # Guardar en cache
             _resolution_cache[key] = (time.time(), result)
