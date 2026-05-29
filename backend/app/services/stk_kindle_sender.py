@@ -20,22 +20,31 @@ DISEÑO DE SESIÓN PERSISTENTE:
 
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import stkclient
 
 logger = logging.getLogger(__name__)
 
-# Número de fallos consecutivos antes de considerar el token definitivamente muerto.
-# Se usa 5 (no 3) porque "deviceinfotoken" puede ser una respuesta temporal de Amazon
-# (rate-limit, mantenimiento), y perder la sesión es muy molesto para el usuario.
+# Número de operaciones de envío fallidas (no ficheros individuales) antes de borrar sesión.
+# Con burst detection, 9 ficheros fallando en el mismo envío = 1 fallo de operación, no 9.
 MAX_CONSECUTIVE_FAILURES = 5
+
+# Ventana en segundos: fallos dentro de esta ventana = mismo burst = 1 solo fallo de operación.
+# Protege contra el caso de enviar N EPUBs en bucle: si todos fallan en <120s, cuenta como 1.
+BURST_WINDOW_SECONDS = 120
+
+# Intervalo mínimo entre refrescos proactivos del token (segundos). 6h = 21600s.
+TOKEN_REFRESH_INTERVAL = 6 * 3600
 
 # Palabras clave que Amazon devuelve cuando el ADP token está DEFINITIVAMENTE revocado.
 # '403' y 'forbidden' NO están aquí porque son demasiado genéricos (rate limit, etc.)
+# NOTA: 'deviceinfotoken' puede ser transitorio (rate-limit, mantenimiento) — ahora
+# protegido por burst detection para no borrar la sesión por un único envío fallido.
 _DEFINITIVE_EXPIRY_SIGNALS = [
-    'deviceinfotoken',       # Amazon: ADP token inválido/revocado (puede ser transitorio)
-    'device not registered', # Dispositivo eliminado de la cuenta
+    'deviceinfotoken',       # ADP token inválido o transitoriamente rechazado
+    'device not registered', # Dispositivo eliminado de la cuenta Amazon
     'invalid adp token',
     'adp_token is invalid',
     'device_registration',
@@ -74,7 +83,9 @@ class STKKindleSender:
         self.user_id = user_id
         self.client: Optional[stkclient.Client] = None
         self.oauth: Optional[stkclient.OAuth2] = None
-        self._consecutive_failures: int = 0  # fallos confirmados; sesión se borra solo al llegar a MAX
+        self._consecutive_failures: int = 0      # operaciones fallidas (no ficheros individuales)
+        self._last_definitive_failure_at: float = 0.0  # timestamp del último fallo de operación
+        self._last_token_refresh_at: float = 0.0       # timestamp del último refresco proactivo
         self._load_client()
 
     def _load_client(self) -> bool:
@@ -122,6 +133,8 @@ class STKKindleSender:
 
         self._save_client()
         self._consecutive_failures = 0
+        self._last_definitive_failure_at = 0.0
+        self._last_token_refresh_at = time.time()  # recién logueado = token fresco
         logger.info(f"STK authorization completed for user {self.user_id}")
         return True
 
@@ -146,19 +159,38 @@ class STKKindleSender:
         """
         Registra un fallo y decide si la sesión debe borrarse.
         Retorna True si la sesión debe eliminarse (fallo definitivo confirmado).
+
+        BURST DETECTION: múltiples fallos dentro de BURST_WINDOW_SECONDS (ej: 9 EPUBs
+        enviados en bucle, todos fallando) cuentan como UNA sola operación fallida,
+        no como N fallos independientes. Esto evita que un único envío múltiple
+        borre la sesión aunque Amazon devuelva 403 transitorios en cada fichero.
         """
         if self._is_definitive_expiry(error_message):
-            self._consecutive_failures += 1
-            logger.warning(
-                f"STK fallo definitivo #{self._consecutive_failures}/{MAX_CONSECUTIVE_FAILURES} "
-                f"para user {self.user_id}: {error_message}"
-            )
-            if self._consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-                logger.error(
-                    f"STK sesión usuario {self.user_id} revocada tras "
-                    f"{MAX_CONSECUTIVE_FAILURES} fallos consecutivos — requiere re-auth"
+            now = time.time()
+            time_since_last = now - self._last_definitive_failure_at
+
+            if time_since_last < BURST_WINDOW_SECONDS:
+                # Mismo burst (misma operación de envío) — no incrementar el contador
+                logger.warning(
+                    f"STK fallo definitivo (burst, {time_since_last:.0f}s desde anterior) "
+                    f"para user {self.user_id} — sesión intacta: {error_message}"
                 )
-                return True
+            else:
+                # Nueva operación fallida (fuera de burst) — incrementar
+                self._consecutive_failures += 1
+                self._last_definitive_failure_at = now
+                logger.warning(
+                    f"STK fallo definitivo #{self._consecutive_failures}/{MAX_CONSECUTIVE_FAILURES} "
+                    f"para user {self.user_id}: {error_message}"
+                )
+
+                if self._consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    logger.error(
+                        f"STK sesión usuario {self.user_id} revocada tras "
+                        f"{MAX_CONSECUTIVE_FAILURES} operaciones fallidas — requiere re-auth"
+                    )
+                    return True
+
         elif self._is_temporary_error(error_message):
             logger.warning(f"STK error temporal (no borra sesión) user {self.user_id}: {error_message}")
         else:
@@ -174,6 +206,7 @@ class STKKindleSender:
         if self._consecutive_failures > 0:
             logger.info(f"STK user {self.user_id}: operación exitosa, reseteando contador de fallos.")
         self._consecutive_failures = 0
+        self._last_definitive_failure_at = 0.0
 
     def get_devices(self) -> List[Dict[str, Any]]:
         if not self.client:
@@ -227,6 +260,27 @@ class STKKindleSender:
         logger.warning(f"STK session unhealthy for user {self.user_id} — needs re-auth")
         return False
 
+    def _proactive_refresh(self):
+        """
+        Refresca proactivamente el token de sesión llamando a get_owned_devices().
+        El cliente stkclient renueva el access token internamente; _save_client()
+        persiste los tokens refrescados al disco.
+        Solo actúa si han pasado más de TOKEN_REFRESH_INTERVAL segundos desde el
+        último refresco (evita llamadas extra en envíos múltiples del mismo batch).
+        """
+        if not self.client:
+            return
+        now = time.time()
+        if now - self._last_token_refresh_at < TOKEN_REFRESH_INTERVAL:
+            return
+        try:
+            self.client.get_owned_devices()
+            self._save_client()
+            self._last_token_refresh_at = now
+            logger.debug(f"STK token refreshed proactively for user {self.user_id}")
+        except Exception as e:
+            logger.warning(f"STK proactive refresh failed for user {self.user_id}: {e} — proceeding anyway")
+
     def send_file(
         self,
         file_path: Path,
@@ -239,6 +293,11 @@ class STKKindleSender:
 
         if not file_path.exists():
             return {'success': False, 'message': f'File not found: {file_path}'}
+
+        # Refresco proactivo: si el token tiene >6h sin refrescarse, llamamos a
+        # get_owned_devices() primero para que stkclient renueve el access token.
+        # Así evitamos los 403 "deviceinfotoken" por token de sesión caducado.
+        self._proactive_refresh()
 
         try:
             if not device_serials:

@@ -1439,15 +1439,16 @@ class ContentScheduler:
             db.close()
 
     async def _stk_health_check(self):
-        """Verifica y renueva sesiones STK para usuarios con auto_send activo.
-        Llama get_devices() que persiste tokens auto-refrescados al disco."""
+        """Verifica y renueva sesiones STK para todos los usuarios con STK configurado.
+        Llama get_devices() que persiste tokens auto-refrescados al disco.
+        NOTA: corre para todos los usuarios con stk_device_serial, independientemente
+        de auto_send_to_kindle — evita que los tokens expiren entre envíos manuales."""
         logger.debug("Running STK health check...")
         from app.models.user import User
         db: Session = SessionLocal()
         try:
             users = db.query(User).filter(
-                User.auto_send_to_kindle == True,
-                User.stk_device_serial.isnot(None)
+                User.stk_device_serial.isnot(None)  # Todos los usuarios con Kindle, no solo auto_send
             ).all()
 
             for user in users:
