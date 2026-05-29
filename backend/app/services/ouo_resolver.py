@@ -301,6 +301,35 @@ async def _resolve_with_flaresolverr(ouo_url: str, flaresolverr_url: str) -> Opt
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# bypass-ouo library (pure HTTP — no browser needed)
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def _resolve_with_bypass_lib(ouo_url: str) -> Optional[str]:
+    """
+    Usa la librería bypass-ouo (HTTP puro con curl_cffi TLS fingerprint).
+    No necesita Playwright ni FlareSolverr — es la estrategia más ligera.
+    Requiere: bypass-ouo==0.1.1 + curl_cffi>=0.5.10 (ya en requirements.txt).
+    """
+    def _do_bypass():
+        try:
+            import bypass_ouo  # noqa
+            result = bypass_ouo.bypass(ouo_url)
+            return result
+        except Exception as e:
+            logger.warning(f"OUO bypass-ouo lib error: {e}")
+            return None
+
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _do_bypass)
+        if result:
+            logger.info(f"OUO bypass-ouo lib: resolved → {str(result)[:80]}")
+        return result
+    except Exception as e:
+        logger.warning(f"OUO bypass-ouo lib wrapper error: {e}")
+        return None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Playwright fallback
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -360,8 +389,17 @@ async def _resolve_with_playwright(ouo_url: str) -> Optional[str]:
             await page.wait_for_selector('input[name="_token"]', timeout=20000)
             logger.info("OUO Playwright: form _token detectado en DOM")
         except Exception:
-            logger.warning("OUO Playwright: wait_for_selector timeout — esperando 5s fallback")
-            await asyncio.sleep(5)
+            # Diagnóstico: qué hay en la página cuando el form no aparece
+            try:
+                title = await page.title()
+                curr_url = page.url
+                logger.warning(
+                    f"OUO Playwright: wait_for_selector timeout — "
+                    f"url={curr_url[:60]} title={title[:60]!r} — esperando 12s fallback"
+                )
+            except Exception:
+                logger.warning("OUO Playwright: wait_for_selector timeout — esperando 12s fallback")
+            await asyncio.sleep(12)
 
         # ¿Redirigió ya a URL final?
         if _is_final_url(page.url):
@@ -542,8 +580,22 @@ class OUOResolver:
         result = None
 
         try:
-            # Intentar FlareSolverr primero (si está configurado)
-            if flaresolverr_url:
+            # ── Estrategia 1: bypass-ouo library (HTTP puro, sin browser) ─────
+            logger.info("OUO: Trying bypass-ouo library (HTTP, no browser)")
+            try:
+                result = await asyncio.wait_for(
+                    _resolve_with_bypass_lib(ouo_url),
+                    timeout=30
+                )
+                if result:
+                    logger.info(f"OUO: bypass-ouo lib succeeded → {result[:60]}")
+            except asyncio.TimeoutError:
+                logger.warning("OUO: bypass-ouo lib timeout (30s)")
+            except Exception as e:
+                logger.warning(f"OUO: bypass-ouo lib error: {e}")
+
+            # ── Estrategia 2: FlareSolverr (si está configurado) ──────────────
+            if not result and flaresolverr_url:
                 logger.info(f"OUO: Trying FlareSolverr ({flaresolverr_url})")
                 try:
                     result = await asyncio.wait_for(
@@ -555,13 +607,10 @@ class OUOResolver:
                 except Exception as e:
                     logger.warning(f"OUO: FlareSolverr error ({e}) — intentando Playwright como fallback")
 
-            # Playwright: si FlareSolverr no está, o si falló/no resolvió.
+            # ── Estrategia 3: Playwright (último recurso, necesita browser) ───
             # Semáforo de 1: solo 1 Playwright ouo a la vez para no agotar RAM.
             if not result:
-                if flaresolverr_url:
-                    logger.info("OUO: FlareSolverr no resolvió el enlace, usando Playwright como fallback")
-                else:
-                    logger.info("OUO: FlareSolverr no configurado — usando Playwright")
+                logger.info("OUO: bypass-ouo + FlareSolverr fallaron, usando Playwright como último recurso")
                 try:
                     async with _playwright_ouo_sem:
                         result = await asyncio.wait_for(
