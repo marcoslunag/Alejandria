@@ -312,8 +312,8 @@ async def _resolve_with_bypass_lib(ouo_url: str) -> Optional[str]:
     """
     def _do_bypass():
         try:
-            import bypass_ouo  # noqa
-            result = bypass_ouo.bypass(ouo_url)
+            from bypass_ouo import bypass_ouo as _bypass_fn
+            result = _bypass_fn(ouo_url)
             return result
         except Exception as e:
             logger.warning(f"OUO bypass-ouo lib error: {e}")
