@@ -490,7 +490,8 @@ class ContentScheduler:
                 db.commit()
 
     def _mark_bundled_chapters_downloaded(
-        self, db: Session, manga_id: int, download_url: str, file_path: str, exclude_chapter_id: int
+        self, db: Session, manga_id: int, download_url: str, file_path: str, exclude_chapter_id: int,
+        resolved_url: str = None
     ):
         """
         Marca todos los capítulos que comparten el mismo download_url como descargados.
@@ -499,9 +500,11 @@ class ContentScheduler:
         Args:
             db: Database session
             manga_id: ID del manga
-            download_url: URL de descarga compartida
+            download_url: URL de descarga original (puede ser ouo.io u otro acortador)
             file_path: Path al archivo descargado
             exclude_chapter_id: ID del capítulo que ya fue marcado (para evitar duplicar)
+            resolved_url: URL final resuelta (si hubo acortador). Se aplica a los capítulos
+                          del bundle para que no vuelvan a encolarse con la URL antigua.
         """
         try:
             # Buscar otros capítulos del mismo manga con el mismo download_url
@@ -521,6 +524,11 @@ class ContentScheduler:
                     ch.status = 'downloaded'
                     ch.file_path = file_path  # Mismo archivo para todos
                     ch.downloaded_at = datetime.utcnow()
+                    # Actualizar también la URL resuelta en los miembros del bundle,
+                    # para que no vuelvan a aparecer con la URL de acortador en próximos ciclos.
+                    if resolved_url:
+                        ch.download_url = resolved_url
+                        ch.link_status = 'resolved'
 
                     # Eliminar de la cola de descargas si estaba pendiente
                     db.query(DownloadQueue).filter(
@@ -711,6 +719,9 @@ class ContentScheduler:
             chapter.downloaded_at = datetime.utcnow()
 
             # Si la URL original era un acortador, guardar la URL final resuelta
+            # IMPORTANTE: guardar la URL original ANTES de actualizar, porque los
+            # capítulos del bundle todavía tienen la URL original (ouo.io) en DB.
+            original_url = chapter.download_url
             resolved = self.downloader._resolved_urls.get(chapter.download_url)
             if resolved:
                 chapter.download_url = resolved
@@ -720,10 +731,13 @@ class ContentScheduler:
             # Guardar metadatos para ComicInfo.xml
             self._save_manga_metadata(manga, chapter, file_path)
 
-            # Si este capítulo está en un paquete con otros tomos, marcarlos también
-            if chapter.is_bundled and chapter.download_url:
+            # Si este capítulo está en un paquete con otros tomos, marcarlos también.
+            # Usamos original_url para buscar los capítulos del bundle (aún tienen la URL
+            # original / ouo.io). Pasamos resolved_url para actualizar también su download_url.
+            if chapter.is_bundled and original_url:
                 self._mark_bundled_chapters_downloaded(
-                    db, manga.id, chapter.download_url, str(file_path), chapter.id
+                    db, manga.id, original_url, str(file_path), chapter.id,
+                    resolved_url=resolved
                 )
 
             logger.info(f"Download completed: {filename}")
