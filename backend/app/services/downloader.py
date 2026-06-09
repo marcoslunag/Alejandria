@@ -263,7 +263,10 @@ class MangaDownloader:
             logger.info(f"Created lock file: {lock_file.name}")
 
             async with aiohttp.ClientSession(headers=self.headers) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=7200), allow_redirects=True) as response:
+                # No total timeout — grandes archivos (>500MB) desde CDNs lentos pueden
+                # tardar horas. sock_read=300 corta si no llegan datos en 5 minutos
+                # (detecta conexiones muertas sin matar descargas activas lentas).
+                async with session.get(url, timeout=aiohttp.ClientTimeout(connect=30, sock_read=300), allow_redirects=True) as response:
                     if response.status != 200:
                         logger.error(f"HTTP {response.status} for {url}")
                         lock_file.unlink(missing_ok=True)
