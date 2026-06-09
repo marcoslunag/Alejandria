@@ -263,7 +263,7 @@ class MangaDownloader:
             logger.info(f"Created lock file: {lock_file.name}")
 
             async with aiohttp.ClientSession(headers=self.headers) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=3600), allow_redirects=True) as response:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=7200), allow_redirects=True) as response:
                     if response.status != 200:
                         logger.error(f"HTTP {response.status} for {url}")
                         lock_file.unlink(missing_ok=True)
@@ -322,9 +322,13 @@ class MangaDownloader:
 
         except asyncio.TimeoutError:
             logger.error(f"Download timeout for {url}")
+            output_path.unlink(missing_ok=True)
+            lock_file.unlink(missing_ok=True)
             return None
         except Exception as e:
             logger.error(f"Direct download error: {e}")
+            output_path.unlink(missing_ok=True)
+            lock_file.unlink(missing_ok=True)
             return None
 
     async def _download_mega(
