@@ -1538,34 +1538,38 @@ class ContentScheduler:
             # Archivos de más de 7 días
             cutoff_date = datetime.utcnow() - timedelta(days=7)
 
+            # NOTA: usar .isnot(None) para filtro SQL correcto.
+            # "Chapter.sent_at is not None" es comparación Python sobre el descriptor
+            # SQLAlchemy (siempre True) y SQLAlchemy lo ignora → devolvía 0 filas.
             old_chapters = db.query(Chapter).filter(
                 and_(
-                    Chapter.sent_at is not None,
+                    Chapter.sent_at.isnot(None),
                     Chapter.sent_at < cutoff_date
                 )
             ).all()
 
             cleaned_count = 0
             for chapter in old_chapters:
-                # Eliminar archivos físicos
+                # Eliminar CBZ/RAR descargado
                 if chapter.file_path:
                     file_path = Path(chapter.file_path)
                     if file_path.exists():
                         file_path.unlink()
                         cleaned_count += 1
 
+                # converted_path puede ser pipe-separated para EPUBs multi-parte
                 if chapter.converted_path:
-                    converted_path = Path(chapter.converted_path)
-                    if converted_path.exists():
-                        converted_path.unlink()
-                        cleaned_count += 1
+                    epub_paths = [Path(p.strip()) for p in chapter.converted_path.split('|') if p.strip()]
+                    for epub_path in epub_paths:
+                        if epub_path.exists():
+                            epub_path.unlink()
+                            cleaned_count += 1
 
-                # Actualizar DB (opcional: eliminar registros o solo paths)
                 chapter.file_path = None
                 chapter.converted_path = None
 
             db.commit()
-            logger.info(f"Cleaned up {cleaned_count} old files")
+            logger.info(f"Cleaned up {cleaned_count} old files from {len(old_chapters)} sent chapters")
 
         except Exception as e:
             logger.error(f"Error in cleanup_old_files: {e}")
