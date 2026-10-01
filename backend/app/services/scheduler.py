@@ -1453,10 +1453,18 @@ class ContentScheduler:
             db.close()
 
     async def _stk_health_check(self):
-        """Verifica y renueva sesiones STK para todos los usuarios con STK configurado.
-        Llama get_devices() que persiste tokens auto-refrescados al disco.
+        """Verifica sesiones STK para todos los usuarios con STK configurado.
+
+        Usa heartbeat(), que es NO-DESTRUCTIVO: llama get_owned_devices() para
+        confirmar que la sesión sigue viva y persistir la credencial al disco, pero
+        NUNCA borra la sesión ni acumula fallos hacia logout().
+
+        La credencial STK (adp_token + RSA) es de larga duración y no expira por
+        calendario, así que este check solo sirve para detectar (con log) si Amazon
+        empieza a rechazar la sesión — sin riesgo de destruir la credencial.
+
         NOTA: corre para todos los usuarios con stk_device_serial, independientemente
-        de auto_send_to_kindle — evita que los tokens expiren entre envíos manuales."""
+        de auto_send_to_kindle."""
         logger.debug("Running STK health check...")
         from app.models.user import User
         db: Session = SessionLocal()
@@ -1469,9 +1477,10 @@ class ContentScheduler:
                 try:
                     sender = get_stk_sender(user.id)
                     if sender.is_authenticated():
-                        ok = sender.ensure_healthy()
+                        ok = sender.heartbeat()
                         if not ok:
-                            logger.warning(f"STK session unhealthy for user {user.id} — needs re-auth")
+                            # Logueado pero NUNCA destruye: la credencial no expira.
+                            logger.warning(f"STK heartbeat no respondió para user {user.id} (transitorio, sesión intacta)")
                 except Exception as e:
                     logger.error(f"STK health check failed for user {user.id}: {e}")
         except Exception as e:
