@@ -186,6 +186,13 @@ async def search_books(
                 seen_titles.add(title_key)
                 unique_results.append(result)
 
+        # Priorizar resultados con EPUB descargable (badge "✓ EPUB disponible")
+        # sobre los de solo metadatos: sin esto, 20 resultados de Google Books
+        # llenan el limit y las cards exclusivas de scraper (Lectulandia/Libronera)
+        # se quedan truncadas. Sort estable: conserva el orden relativo dentro
+        # de cada grupo (GB anotados primero, luego cards de scraper).
+        unique_results.sort(key=lambda r: 0 if r.get('scraper_url') else 1)
+
         # Limit results
         unique_results = unique_results[:limit]
 
