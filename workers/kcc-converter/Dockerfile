@@ -60,8 +60,10 @@ ENV KCC_FORMAT=EPUB
 ENV KCC_QUALITY=95
 ENV PYTHONUNBUFFERED=1
 
-# Health check: verificar que el proceso converter sigue activo
+# Health check: heartbeat file refreshed every 10s by the converter loop
+# (pgrep no existe en python:3.11-slim; además solo comprobaría que el
+# proceso vive, no que el loop de watchdog sigue corriendo)
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-    CMD pgrep -f "converter.py" > /dev/null || exit 1
+    CMD python -c "import os, time; assert time.time() - os.path.getmtime('/tmp/converter_heartbeat') < 300, 'stale heartbeat'"
 
 CMD ["python", "-u", "converter.py"]

@@ -57,8 +57,10 @@ RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser && \
 
 USER appuser
 
-# Health check: verify the scheduler process is running
-HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-    CMD pgrep -f "scheduler/main.py" > /dev/null || exit 1
+# Health check: heartbeat file refreshed every minute by the scheduler
+# (pgrep no existe en python:3.11-slim; además solo comprobaría que el
+# proceso vive, no que APScheduler está trabajando)
+HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import os, time; assert time.time() - os.path.getmtime('/tmp/scheduler_heartbeat') < 300, 'stale heartbeat'"
 
 CMD ["python", "/app/workers/scheduler/main.py"]

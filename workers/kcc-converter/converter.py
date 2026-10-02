@@ -1344,6 +1344,13 @@ def main():
 
     try:
         while True:
+            # Heartbeat para el healthcheck de Docker (pgrep no existe en
+            # python:3.11-slim): el healthcheck comprueba mtime < 5min
+            try:
+                with open("/tmp/converter_heartbeat", "w") as f:
+                    f.write(str(time.time()))
+            except Exception:
+                pass
             time.sleep(10)
     except KeyboardInterrupt:
         observer.stop()

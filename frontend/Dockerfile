@@ -30,7 +30,9 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 
 # Health check
+# NB: 127.0.0.1 (no localhost) — BusyBox wget resuelve localhost→::1 y nginx
+# solo escucha IPv4 → el check fallaba siempre.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
+    CMD wget --quiet --tries=1 --spider http://127.0.0.1/ || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

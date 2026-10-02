@@ -33,9 +33,17 @@ class EpuberaScraper(BookScraperBase):
 
     name = "epubera"
     base_url = "https://epubera.com"
+    # 2026-10-02: SITIO CAÍDO. epubera.com hace 301 → epubera1.com y este
+    # resetea la conexión desde CUALQUIER IP (verificado con curl desde
+    # servidor y local: HTTP=000 en <0.1s). Poner ENABLED=True cuando el
+    # sitio vuelva (y revisar si cambió de nuevo de dominio).
+    ENABLED = False
 
     async def search(self, query: str, page: int = 1) -> List[Dict]:
         """Search for books on epubera.com"""
+        if not self.ENABLED:
+            logger.info("Epubera desactivado (sitio caído); omitiendo búsqueda")
+            return []
         try:
             search_url = f"{self.base_url}/page/{page}/" if page > 1 else self.base_url
             params = {"s": query}
@@ -119,6 +127,14 @@ class EpuberaScraper(BookScraperBase):
         Epubera usa un formulario POST clásico protegido con contraseña.
         Al enviar el formulario la página se recarga mostrando los links directamente.
         """
+        if not self.ENABLED:
+            return BookScraperResult(
+                title="Unknown",
+                source=self.name,
+                source_url=url,
+                success=False,
+                error="Epubera desactivado: sitio caído (epubera1.com resetea conexiones)",
+            )
         page = None
         try:
             from .playwright_scraper import get_playwright_scraper

@@ -110,7 +110,7 @@ async def search_books(
         scraper_tasks = []
         if source in ["all", "scrapers", "lectulandia"]:
             scraper_tasks.append(("lectulandia", asyncio.wait_for(LectulandiaScraper().search(q, page=page), timeout=45.0)))
-        if source in ["all", "scrapers", "epubera"]:
+        if source in ["all", "scrapers", "epubera"] and EpuberaScraper.ENABLED:
             scraper_tasks.append(("epubera", asyncio.wait_for(EpuberaScraper().search(q, page=page), timeout=30.0)))
 
         if scraper_tasks:
@@ -859,7 +859,7 @@ async def _search_scrapers_for_book(book_id: int, title: str):
         if not book:
             return
 
-        scrapers = [LectulandiaScraper(), EpuberaScraper()]
+        scrapers = [LectulandiaScraper()] + ([EpuberaScraper()] if EpuberaScraper.ENABLED else [])
         title_lower = title.lower().strip()
         title_keywords = set(w for w in title_lower.split() if len(w) > 2)
 

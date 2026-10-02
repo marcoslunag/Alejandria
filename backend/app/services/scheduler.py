@@ -25,6 +25,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import logging
 import asyncio
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,16 @@ class ContentScheduler:
             max_instances=1
         )
 
+        # Recuperar zombies: items 'downloading' >2h (el worker murió a mitad
+        # de descargar y nunca más se actualizarán). Cada hora.
+        self.scheduler.add_job(
+            self.recover_stuck_downloads,
+            IntervalTrigger(hours=1),
+            id='recover_zombies',
+            replace_existing=True,
+            max_instances=1
+        )
+
         # Procesar carpeta /imports cada 5 minutos (Feature 5)
         self.scheduler.add_job(
             self.process_import_folder,
@@ -176,9 +187,31 @@ class ContentScheduler:
             max_instances=1
         )
 
+        # Heartbeat para el healthcheck de Docker: refresca un archivo cada
+        # minuto. El healthcheck comprueba mtime < 5min → detecta APScheduler
+        # colgado (pgrep solo confirmaría que el proceso vive, no que trabaja).
+        self.scheduler.add_job(
+            self._heartbeat,
+            IntervalTrigger(minutes=1),
+            id='heartbeat',
+            replace_existing=True,
+            max_instances=1
+        )
+        self._heartbeat()  # toque inmediato al arrancar
+
         self.scheduler.start()
         self.is_running = True
         logger.info(f"Scheduler started (check interval: {self.check_interval_hours}h)")
+
+    HEARTBEAT_FILE = "/tmp/scheduler_heartbeat"
+
+    def _heartbeat(self):
+        """Refresca el archivo de heartbeat (lo lee el healthcheck de Docker)"""
+        try:
+            with open(self.HEARTBEAT_FILE, "w") as f:
+                f.write(str(time.time()))
+        except Exception as e:
+            logger.debug(f"Heartbeat write failed: {e}")
 
     def stop(self):
         """Detiene el scheduler"""
@@ -1516,6 +1549,57 @@ class ContentScheduler:
 
         except Exception as e:
             logger.error(f"Error in retry_failed_downloads: {e}")
+        finally:
+            db.close()
+
+    async def recover_stuck_downloads(self):
+        """
+        Marca como 'failed' los items atascados en 'downloading' (zombies).
+
+        Un item en 'downloading' con started_at (o created_at, si started_at
+        es NULL) más antigua que 2h es un zombie: el proceso murió a mitad de
+        la descarga (restart del contenedor, OOM, excepción sin catch) y la
+        fila nunca más se actualizará — el frontend lo mostraría como
+        "descargando" para siempre.
+
+        Al marcarlo 'failed', retry_failed_downloads lo reencola con backoff
+        exponencial en la siguiente pasada (si aún tiene reintentos).
+        """
+        db: Session = SessionLocal()
+        try:
+            now = datetime.utcnow()
+            cutoff = now - timedelta(hours=2)
+
+            zombies = db.query(DownloadQueue).filter(
+                DownloadQueue.status == 'downloading',
+                (
+                    DownloadQueue.started_at < cutoff
+                ) | (
+                    and_(
+                        DownloadQueue.started_at.is_(None),
+                        DownloadQueue.created_at < cutoff
+                    )
+                )
+            ).all()
+
+            if not zombies:
+                return
+
+            logger.warning(
+                f"Recovering {len(zombies)} zombie download(s) stuck in 'downloading' >2h: "
+                f"{[z.id for z in zombies]}"
+            )
+            for item in zombies:
+                item.status = 'failed'
+                item.error_message = (
+                    "Zombie recovery: atascado en 'downloading' >2h "
+                    "(el worker murió a mitad de la descarga)"
+                )
+            db.commit()
+
+        except Exception as e:
+            logger.error(f"Error in recover_stuck_downloads: {e}")
+            db.rollback()
         finally:
             db.close()
 

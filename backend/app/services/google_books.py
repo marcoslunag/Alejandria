@@ -144,29 +144,60 @@ class GoogleBooksService:
             logger.error(f"Error fetching book by ISBN {isbn}: {e}")
             return None
 
-    async def _make_request(self, endpoint: str, params: dict) -> Optional[Dict]:
-        """Make API request to Google Books"""
-        try:
-            url = f"{self.API_URL}{endpoint}"
+    async def _make_request(self, endpoint: str, params: dict, max_retries: int = 2) -> Optional[Dict]:
+        """
+        Make API request to Google Books.
 
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url,
-                    params=params,
-                    timeout=aiohttp.ClientTimeout(total=15)
-                ) as response:
-                    if response.status != 200:
-                        logger.error(f"Google Books API error: HTTP {response.status}")
-                        return None
+        Google hace rate-limit agresivo por IP (HTTP 503/429) cuando varias
+        búsquedas salen en corto tiempo. En vez de devolver None a la primera,
+        reintenta con backoff exponencial + jitter (y respeta Retry-After,
+        con cap de 30s para no bloquear la búsqueda de libros).
+        """
+        import random
 
-                    return await response.json()
+        for attempt in range(max_retries + 1):
+            try:
+                url = f"{self.API_URL}{endpoint}"
 
-        except asyncio.TimeoutError:
-            logger.error("Google Books API timeout")
-            return None
-        except Exception as e:
-            logger.error(f"Google Books request error: {e}")
-            return None
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        url,
+                        params=params,
+                        timeout=aiohttp.ClientTimeout(total=15)
+                    ) as response:
+                        if response.status in (429, 503):
+                            retry_after = response.headers.get("Retry-After", "")
+                            if retry_after.isdigit():
+                                wait_time = min(int(retry_after) + random.uniform(0, 1), 30)
+                            else:
+                                wait_time = min((2 ** attempt) + random.uniform(0, 1), 30)
+                            if attempt < max_retries:
+                                logger.warning(
+                                    f"Google Books rate limit (HTTP {response.status}); "
+                                    f"retry {attempt + 1}/{max_retries} in {wait_time:.1f}s"
+                                )
+                                await asyncio.sleep(wait_time)
+                                continue
+                            logger.error(
+                                f"Google Books rate limit (HTTP {response.status}) "
+                                f"después de {max_retries + 1} intentos"
+                            )
+                            return None
+
+                        if response.status != 200:
+                            logger.error(f"Google Books API error: HTTP {response.status}")
+                            return None
+
+                        return await response.json()
+
+            except asyncio.TimeoutError:
+                logger.error("Google Books API timeout")
+                return None
+            except Exception as e:
+                logger.error(f"Google Books request error: {e}")
+                return None
+
+        return None
 
     def _transform_volume(self, volume: Dict, detailed: bool = False) -> Dict:
         """Transform Google Books volume to our format"""
