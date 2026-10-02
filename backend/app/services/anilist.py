@@ -450,7 +450,11 @@ class AnilistService:
                 return []
 
             media_list = result['data']['Page']['media']
-            return [self._transform_media(media) for media in media_list]
+            # translate_description=False (igual que búsqueda): deep-translator es
+            # síncrono y bloquea el event loop; 24 descripciones con 429 de Google
+            # = ~3.5 min de API congelada. Las cards solo muestran description[:200].
+            return [self._transform_media(media, translate_description=False)
+                    for media in media_list]
 
         except Exception as e:
             logger.error(f"Error fetching trending manga: {e}")
@@ -505,7 +509,11 @@ class AnilistService:
                 return []
 
             media_list = result['data']['Page']['media']
-            return [self._transform_media(media) for media in media_list]
+            # translate_description=False (igual que búsqueda): deep-translator es
+            # síncrono y bloquea el event loop; 24 descripciones con 429 de Google
+            # = ~3.5 min de API congelada. Las cards solo muestran description[:200].
+            return [self._transform_media(media, translate_description=False)
+                    for media in media_list]
 
         except Exception as e:
             logger.error(f"Error fetching popular manga: {e}")
