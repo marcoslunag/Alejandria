@@ -1,11 +1,18 @@
 """
-Epubera.com EPUB Scraper
-Scrapes books from epubera.com
+Libronera EPUB Scraper (antes Epubera.com)
+Scrapes books from libronera.com — el sitio cambió de dominio epubera.com →
+libronera.com (verificado 2026-10-02). Se mantiene el nombre interno "epubera"
+por consistencia con la DB (source='epubera') y el frontend.
 
-Mecanismo de desbloqueo:
+Mecanismo de desbloqueo (2026-10-02):
 - La página tiene un formulario POST (action=misma URL) con <input id="epubera_pass">
-- Al enviar el formulario con la contraseña "epubera.com", la página se recarga
-  mostrando los enlaces de descarga directamente en el DOM.
+- La contraseña se muestra en la propia página: <p class="dl-pass">Contraseña:
+  <strong>libronera.com</strong></p> — se lee dinámicamente, con fallback al
+  constante EPUBERA_PASSWORD.
+- IMPORTANTE: el formulario incluye un nonce por página (<input id="epubera_unlock_nonce">)
+  que el navegador POSTea automáticamente al enviar el form. Por eso el flujo
+  Playwright (fill + click submit) funciona sin extraer el nonce a mano; un POST
+  HTTP plano SÍ necesita leerlo del DOM primero.
 - NO es AJAX — es un POST HTML clásico que recarga la página.
 """
 
@@ -19,7 +26,9 @@ from .base import BookScraperBase, BookScraperResult, DownloadLink
 
 logger = logging.getLogger(__name__)
 
-EPUBERA_PASSWORD = "epubera.com"
+# Fallback — la contraseña real se lee de la página (p.dl-pass strong).
+# 2026-10-02: cambió de "epubera.com" a "libronera.com" con el rename.
+EPUBERA_PASSWORD = "libronera.com"
 
 KNOWN_HOSTS = [
     "mega.nz", "mega.io", "mediafire.com", "drive.google.com",
@@ -32,17 +41,16 @@ class EpuberaScraper(BookScraperBase):
     """Scraper for epubera.com"""
 
     name = "epubera"
-    base_url = "https://epubera.com"
-    # 2026-10-02: SITIO CAÍDO. epubera.com hace 301 → epubera1.com y este
-    # resetea la conexión desde CUALQUIER IP (verificado con curl desde
-    # servidor y local: HTTP=000 en <0.1s). Poner ENABLED=True cuando el
-    # sitio vuelva (y revisar si cambió de nuevo de dominio).
-    ENABLED = False
+    # 2026-10-02: el sitio se renombró de epubera.com a libronera.com
+    # (epubera.com 301 → epubera1.com caído). Nuevo dominio verificado:
+    # HTTP 200 con User-Agent de navegador (Cloudflare bloquea curl sin UA).
+    base_url = "https://libronera.com"
+    ENABLED = True
 
     async def search(self, query: str, page: int = 1) -> List[Dict]:
-        """Search for books on epubera.com"""
+        """Search for books on libronera.com (antes epubera.com)"""
         if not self.ENABLED:
-            logger.info("Epubera desactivado (sitio caído); omitiendo búsqueda")
+            logger.info("Epubera/Libronera desactivado; omitiendo búsqueda")
             return []
         try:
             search_url = f"{self.base_url}/page/{page}/" if page > 1 else self.base_url
@@ -133,7 +141,7 @@ class EpuberaScraper(BookScraperBase):
                 source=self.name,
                 source_url=url,
                 success=False,
-                error="Epubera desactivado: sitio caído (epubera1.com resetea conexiones)",
+                error="Epubera/Libronera desactivado (ENABLED=False en epubera.py)",
             )
         page = None
         try:
@@ -162,7 +170,19 @@ class EpuberaScraper(BookScraperBase):
 
             if password_input:
                 logger.info("Epubera: Found password field, unlocking links...")
-                await password_input.fill(EPUBERA_PASSWORD)
+                # La contraseña se muestra en la página (p.dl-pass strong) —
+                # leerla dinámicamente por si la cambian; fallback al constante.
+                password = EPUBERA_PASSWORD
+                try:
+                    pass_elem = await page.query_selector("p.dl-pass strong")
+                    if pass_elem:
+                        dyn = (await pass_elem.inner_text()).strip()
+                        if dyn:
+                            password = dyn
+                            logger.info(f"Epubera: password from page: {password}")
+                except Exception:
+                    pass
+                await password_input.fill(password)
 
                 # Obtener el botón submit del formulario correcto (no del de comentarios)
                 submit_btn = await page.evaluate_handle(

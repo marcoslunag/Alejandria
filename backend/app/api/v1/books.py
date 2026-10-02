@@ -422,7 +422,8 @@ async def add_book_from_url(
     # Detect scraper from URL
     scraper_name = data.scraper_name
     if not scraper_name:
-        if 'epubera.com' in data.source_url:
+        # Libronera es el nuevo dominio de Epubera (2026-10-02)
+        if 'epubera.com' in data.source_url or 'libronera.com' in data.source_url:
             scraper_name = 'epubera'
         elif 'lectulandia' in data.source_url:
             scraper_name = 'lectulandia'
