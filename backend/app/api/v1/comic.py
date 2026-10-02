@@ -143,6 +143,12 @@ async def search_comics(
             ))
             for result, item in checkable
         ]
+        # Búsqueda directa en scrapers (títulos en español) EN PARALELO con el
+        # check de disponibilidad: ambas fases son independientes (la directa
+        # solo usa 'q' y se inserta después en la posición 0) y cada una tiene
+        # su cap interno de ~30s. Antes eran secuenciales: 30+30 = 60-90s.
+        # Ahora el total = max(avail, direct) ≈ 30-35s.
+        direct_task = asyncio.create_task(search_scrapers_directly(q))
         done, pending = await asyncio.wait(avail_tasks, timeout=AVAIL_TIMEOUT)
         for t in pending:
             t.cancel()
@@ -170,8 +176,9 @@ async def search_comics(
         # ALWAYS try direct scraper search to find Spanish titles
         # This helps when users search in Spanish but ComicVine returns English results
         if True:  # Always search for better Spanish matches
-            logger.info(f"Searching scrapers directly for Spanish results: '{q}'")
-            direct_volumes = await search_scrapers_directly(q)
+            logger.info(f"Collecting direct scraper results for Spanish matches: '{q}'")
+            # Ya corriendo en paralelo desde el inicio del check de disponibilidad
+            direct_volumes = await direct_task
 
             if direct_volumes:
                 # Create a virtual "Search Results" comic with these volumes

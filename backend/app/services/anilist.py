@@ -181,8 +181,12 @@ class AnilistService:
             page_data = result['data']['Page']
             media_list = page_data['media']
 
-            # Transform to our format
-            results = [self._transform_media(media) for media in media_list]
+            # Transform to our format.
+            # translate_description=False: la traducción de deep-translator es
+            # síncrona y bloquea el event loop; en búsqueda (20 resultados) con
+            # rate-limit de Google = ~170s de API completamente congelada.
+            results = [self._transform_media(media, translate_description=False)
+                       for media in media_list]
 
             return {
                 'results': results,
@@ -212,7 +216,10 @@ class AnilistService:
                 return None
 
             media = result['data']['Media']
-            return self._transform_media(media, detailed=True)
+            # to_thread: _transform_media traduce la descripción vía HTTP
+            # (deep-translator, síncrono) — fuera del event loop para no
+            # congelar la API si Google rate-lmite (~8.5s por llamada).
+            return await asyncio.to_thread(self._transform_media, media, True)
 
         except Exception as e:
             logger.error(f"Error fetching manga {anilist_id}: {e}")
@@ -256,7 +263,8 @@ class AnilistService:
             logger.error(f"Error executing Anilist query: {e}")
             return None
 
-    def _transform_media(self, media: Dict, detailed: bool = False) -> Dict:
+    def _transform_media(self, media: Dict, detailed: bool = False,
+                         translate_description: bool = True) -> Dict:
         """
         Transform Anilist media object to our format
         Con traducción automática al español
@@ -264,6 +272,11 @@ class AnilistService:
         Args:
             media: Anilist media object
             detailed: Include detailed information
+            translate_description: Traducir la descripción vía HTTP (Google).
+                En búsquedas (20 resultados) se desactiva: deep-translator es
+                BLOQUEANTE (síncrono) y con rate-limit 429 cada llamada tarda
+                ~8.5s → 20 llamadas = ~170s bloqueando el event loop de toda
+                la API. Las cards de búsqueda solo muestran description[:200].
 
         Returns:
             Transformed manga data (traducido al español)
@@ -285,13 +298,14 @@ class AnilistService:
             description = description.replace('<i>', '').replace('</i>', '')
             description = description.replace('<b>', '').replace('</b>', '')
 
-            # Traducir descripción al español
-            try:
-                translator = get_translator()
-                description_es = translator.translate_description(description)
-            except Exception as e:
-                logger.warning(f"Translation failed: {e}")
-                description_es = description
+            # Traducir descripción al español (solo si está habilitado — ver docstring)
+            if translate_description:
+                try:
+                    translator = get_translator()
+                    description_es = translator.translate_description(description)
+                except Exception as e:
+                    logger.warning(f"Translation failed: {e}")
+                    description_es = description
 
         # Get cover image (prefer extraLarge, fallback to large)
         cover_image = media['coverImage'].get('extraLarge') or media['coverImage'].get('large')
