@@ -696,15 +696,21 @@ async def send_book_to_kindle(
     if not chapter:
         raise HTTPException(status_code=404, detail="Book chapter not found")
 
-    if not chapter.file_path or not chapter.file_path.endswith('.epub'):
-        raise HTTPException(status_code=400, detail="Book has not been downloaded in EPUB format")
+    # STK acepta varios formatos (Amazon convierte PDF/MOBI en el dispositivo).
+    # El Uploader permite subir PDF, así que no limitarse a EPUB.
+    allowed_exts = ('.epub', '.pdf', '.mobi', '.azw', '.azw3')
+    if not chapter.file_path or not chapter.file_path.lower().endswith(allowed_exts):
+        raise HTTPException(
+            status_code=400,
+            detail="Book has no Kindle-compatible file (EPUB, PDF or MOBI). Download or upload it first."
+        )
 
     # Verify file exists
     file_path = Path(chapter.file_path)
     if not file_path.exists():
         raise HTTPException(
             status_code=400,
-            detail=f"EPUB file not found: {chapter.file_path}"
+            detail=f"File not found: {chapter.file_path}"
         )
 
     # Get book info

@@ -319,8 +319,17 @@ class STKKindleSender:
             file_size_mb = file_path.stat().st_size / (1024 * 1024)
             logger.info(f"Sending {file_path.name} ({file_size_mb:.0f}MB) to {len(device_serials)} device(s) for user {self.user_id}")
 
+            # Declarar el formato REAL al API de STK: Amazon convierte PDF/MOBI
+            # en el dispositivo. Declarar PDF como EPUB corrupte el envío.
             file_ext = file_path.suffix.lower()
-            file_format = 'EPUB' if file_ext == '.epub' else ('MOBI' if file_ext in ['.mobi', '.azw', '.azw3'] else 'EPUB')
+            if file_ext == '.epub':
+                file_format = 'EPUB'
+            elif file_ext == '.pdf':
+                file_format = 'PDF'
+            elif file_ext in ['.mobi', '.azw', '.azw3']:
+                file_format = 'MOBI'
+            else:
+                file_format = 'EPUB'
 
             self.client.send_file(
                 file_path,
