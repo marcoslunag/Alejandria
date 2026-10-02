@@ -445,10 +445,22 @@ async def add_book_from_url(
     if not result.success:
         raise HTTPException(status_code=400, detail=f"Scraping failed: {result.error}")
 
+    # Anti-duplicados: si el libro ya existe para este usuario, 409 (misma
+    # semántica que el content matching de la búsqueda)
+    slug = slugify(result.title)
+    existing = db.query(Book).filter(
+        Book.user_id == current_user.id, Book.slug == slug
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Book already in library: {existing.title}"
+        )
+
     # Create book
     book = Book(
         title=result.title,
-        slug=slugify(result.title),
+        slug=slug,
         description=result.description,
         cover_image=result.cover_image,
         language="es",
