@@ -3,7 +3,7 @@ Book Pydantic Schemas
 Integration with Google Books and Open Library
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 
@@ -150,6 +150,13 @@ class BookResponse(BaseModel):
     # Computed fields
     total_chapters: Optional[int] = None
     downloaded_chapters: Optional[int] = None
+
+    # Las columnas JSON de authors/categories pueden ser NULL en la DB
+    # (libros añadidos sin enrich); from_orm no aplica los defaults a None.
+    @field_validator('authors', 'categories', mode='before')
+    @classmethod
+    def _none_to_empty_list(cls, v):
+        return [] if v is None else v
 
     class Config:
         from_attributes = True

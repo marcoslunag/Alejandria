@@ -456,7 +456,9 @@ async def add_book_from_url(
         auto_download=data.auto_download,
         user_id=current_user.id,
         source_urls={scraper_name: data.source_url},
-        preferred_source=scraper_name
+        preferred_source=scraper_name,
+        authors=[],
+        categories=[]
     )
 
     # Try to enrich with Google Books metadata if provided
