@@ -1,6 +1,8 @@
-# SESIÓN 2026-10-01 — Remediación scrapers (3 fases)
+# SESIÓN 2026-10-01/02 — Remediación scrapers (3 fases)
 
 > **Documento de recuperación.** Si se pierde la sesión, leer esto primero. Contiene: diagnóstico completo con evidencia verificada, diseño de las 3 fases, estado del trabajo, y el procedimiento operativo exacto (SSH/expect, deploy, verificación).
+>
+> **ESTADO (2026-10-02): FASES 1 y 2 COMPLETADAS y verificadas en producción. Fase 3 pendiente.**
 
 ---
 
@@ -23,11 +25,12 @@ Logs del backend (15:51–15:57 UTC, vía Cloudflare desde `alejandria.undiamagi
 | Repo local | `/Users/kitos/Desktop/Alejandria`, branch `main`, HEAD `1166521`, clean |
 | Remote | `origin git@github.com:marcoslunag/Alejandria` |
 | Servidor | `192.168.1.112`, `root` / `primos`, repo en `/root/Alejandria` (mismo commit) |
-| Contenedores | `alejandria-backend` (puerto **7878**, `/health` OK), `alejandria-frontend` (nginx :8888), `alejandria-scheduler`, `alejandria-converter`, `alejandria-db` |
+| Contenedores | `alejandria-backend` (host: **9878** → contenedor 7878; `/health` OK), `alejandria-frontend` (nginx :8888), `alejandria-scheduler`, `alejandria-converter`, `alejandria-db` |
 | DB (legacy .env) | `docker exec alejandria-db psql -U manga manga_arr -c '...'` (usuario `manga`, db `manga_arr`) |
-| Cloudflare | delante de `alejandria.undiamagico.es` (IP real usuario 79.148.33.207). Cadena: browser→CF→nginx(180s)→backend(SCRAPER_TIMEOUT 150s) |
+| Cloudflare | delante de `alejandria.undiamagico.es` (IP real usuario 79.148.33.207). Cadena: browser→CF→nginx(180s)→backend |
 | CPU contenedor | `os.cpu_count()`=8 pero `nproc`=2 (cgroup) |
-| Token de prueba | JWT usuario 2/kitos, exp ~2026-10-31: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwiZXhwIjoxNzkzNDU2NTI0fQ.kYIOifYKwxymifNIS41EPHsksrleYF92toQIFTM_wf8` |
+| Token de prueba | **El JWT de la tabla anterior está caducado/invalido** (SECRET_KEY era aleatoria por arranque hasta el fix `f3fe761`). Generar siempre en contenedor: `TOKEN=$(docker exec alejandria-backend python -c "from datetime import timedelta; from app.core.security import create_access_token; print(create_access_token({'sub': '2'}, timedelta(days=7)))" \| tr -d '[:space:]')` |
+| Deploy código | Backend bind-mounted `./backend:/app` → `git pull` + `docker compose restart backend` (SIN rebuild). Solo `docker compose build` cuando cambian Dockerfile/requirements/compose. **`git push` SIEMPRE desde local** (el server no tiene credenciales GitHub). |
 | Tests | `docker exec alejandria-backend python -m pytest tests/ -v` (201 tests, 17 ficheros; `test_scrapers.py` es integración real) |
 
 ### SSH con expect (NO hay sshpass)
@@ -51,10 +54,14 @@ EXP_EOF
 - `grep -E` en vez de BRE `\|` (la backslash se pierde al pasar por Tcl).
 - No volcar HTML grande a stdout (budget de contexto 24KB/tool result): usar `grep -o`, `head -c`, extracciones puntuales.
 - Escribir en `/tmp` local o dirs externos está bloqueado (`external_directory`): usar workspace o stdin.
+- **`tr -d '[:space:]'` y comparaciones `[ "$code" = "200" ]`**: dentro de las comillas de `spawn ssh "..."` el `[:space:]` se interpreta como comando Tcl → `invalid command name`. Escapar los corchetes: `tr -d '\[:space:\]'` y `\[ "\$code" = "200" \]`.
+- **NO ejecutar `git push` en el servidor**: `fatal: could not read Username for 'https://github.com'` (no hay credenciales). Push **desde local**, luego `git pull` en server.
 
 ---
 
-## 2. FASE 1 (P0) — Añadir libro por URL (Lectulandia) ✅ DIAGNOSTICADO, FIX DISEÑADO
+## 2. FASE 1 (P0) — Añadir libro por URL (Lectulandia) ✅ COMPLETADA y verificada en producción
+
+> **Resultado:** `POST /books/from-url` (Lectulandia) → **200** con `download_url` en `antupload.com/file/<code>`. Verificado con "Dune" (nuevo → 200 en 8.4s; duplicado → 409) y "El hobbit" local. Commits: `96d3c9f` (fix HTTP), `9f166aa` (NULL authors/categories), `12726b6` (409 duplicados), `f3fe761` (SECRET_KEY).
 
 ### Causa raíz (TODA la cadena verificada en el servidor)
 1. La página del libro (`https://ww3.lectulandia.com/book/el-hobbit/`) tiene:
@@ -108,10 +115,20 @@ En `backend/app/services/book_scrapers/lectulandia.py`, método nuevo `_resolve_
 
 ---
 
-## 3. FASE 2 (P1) — Búsqueda rápida (manga/libros/cómics)
+## 3. FASE 2 (P1) — Búsqueda rápida (manga/libros/cómics) ✅ COMPLETADA y verificada en producción
 
-### Diagnóstico (verificado)
-`manga.py:133 search_manga`: hasta **20 resultados AniList × 2 scrapers** (TomosManga + MangayComics) = 40 peticiones HTTP vía `asyncio.wait` con `SCRAPER_TIMEOUT=150s`. Los sitios hacen **throttle** al paralelo (burst de 6 → 6.5s cada una; luego ~1-2 en paralelo) → 30-90s+. Executor ThreadPool **compartido entre todos los endpoints** → starvación (la búsqueda de libros se estancó detrás de la de manga). Test: `manga/search?q=one piece` → 499 a los 60s.
+> **Resultado final (production, 2026-10-02):** manga search **29.4s** (antes 185s), comic search **34.4s** (antes 62s). Commits: `4cd48ae` (caps + executor dedicado) y `90f685f` (causa raíz real + paralelización).
+
+### Diagnóstico REAL (verificado con logs con timestamp, 2026-10-02)
+Dos problemas superpuestos:
+1. **`anilist.py:_transform_media()` (LA CAUSA del 185s):** método **síncrono** que llamaba a `deep-translator` (HTTP **bloqueante** a Google) **por cada resultado de la búsqueda** (20). Con rate-limit 429 de Google, cada llamada tarda ~8.5s (retries internos) → **~170s bloqueando el event loop de TODA la API** (health, cola, SSE...). Los checks de scrapers en realidad solo tardaban **24s** (semáforo + executor + cap 30s funcionaban). Evidencia: fallos de translator a intervalos exactos de 8.5s en los logs durante el "hueco".
+2. **`comic.py search_comics`:** dos fases secuenciales con cap ~30s c/u (check de disponibilidad + búsqueda directa en scrapers) = 60-90s. Son **independientes** (la directa solo usa `q` y se inserta en posición 0) → paralelizables.
+
+### Fijos aplicados
+- `manga.py`: `CHECK_LIMIT=8`, `Semaphore(4)`, `ThreadPoolExecutor(max_workers=8)` dedicado, `SCRAPER_TIMEOUT=30s` (commit `4cd48ae`).
+- `anilist.py` (commit `90f685f`): `_transform_media(translate_description=...)`; `search_manga` → `False` (las cards solo muestran `description[:200]`); `get_manga_by_id` → `asyncio.to_thread` (1 llamada no congela el loop).
+- `comic.py` (commit `90f685f`): `search_scrapers_directly(q)` corre **en paralelo** con el check de disponibilidad → `max(30,30)` ≈ 35s.
+- Nota UX: descripciones de búsqueda de manga en inglés (se traduce en la página de detalle). Trade-off aceptado vs 170s de API congelada.
 
 ### Plan
 1. `CHECK_LIMIT` 20 → **8**.
@@ -143,16 +160,17 @@ En `backend/app/services/book_scrapers/lectulandia.py`, método nuevo `_resolve_
 
 ---
 
-## 5. Estado del trabajo (2026-10-01, cierre de sesión)
+## 5. Estado del trabajo (2026-10-02, en curso)
 
 - [x] Diagnóstico completo P0 (cadena completa verificada con curl en el servidor).
-- [x] Diagnóstico P1 (throttle + 150s cap + executor compartido).
+- [x] Diagnóstico P1 (throttle + 150s cap + executor compartido + **deep-translator bloqueando el loop**).
 - [x] Plan 3 fases acordado con el usuario.
 - [x] Documento de recuperación escrito (este archivo).
-- [ ] **Fase 1: implementar `_resolve_download_links_http` en `lectulandia.py` + commit + deploy + verificar.**
-- [ ] Fase 2: implementar + commit + deploy + verificar.
-- [ ] Fase 3: implementar + commit + deploy + verificar.
+- [x] **Fase 1 COMPLETADA** — `_resolve_download_links_http` en `lectulandia.py`; verificado en production (Dune 200/8.4s, duplicado 409, datos de test limpiados).
+- [x] **Fase 2 COMPLETADA** — caps + executor + traducción fuera del path de búsqueda + paralelización cómics; verificado en production (manga 29.4s, cómics 34.4s).
+- [ ] **Fase 3 EN CURSO** — robustez (ver §4).
 - Pendientes DB (Fase 3): marcar zombies `downloading` (168, 161, 160).
+- Commits de la remediación (orden): `96d3c9f` → `f3fe761` → `9f166aa` → `12726b6` → `4cd48ae` → `90f685f`.
 
 ---
 
@@ -161,19 +179,19 @@ En `backend/app/services/book_scrapers/lectulandia.py`, método nuevo `_resolve_
 ```bash
 # LOCAL
 cd /Users/kitos/Desktop/Alejandria
-docker exec alejandria-backend python -m pytest tests/ -v   # tests locales si hay
-git add -A && git commit -m "<fix(...) mensaje claro>"
-git push origin main
+python3 -c "import ast; ast.parse(open('<archivo>').read())"   # syntax check (sin venv local)
+git add <ficheros> && git commit -m "<fix(...) mensaje claro>"
+git push origin main          # SIEMPRE desde local (el server no tiene credenciales)
 
 # SERVIDOR (expect heredoc, ver §1)
-cd /root/Alejandria && git pull
-docker compose build backend        # o los servicios afectados
-docker compose up -d
-docker compose logs backend --tail 100   # sin errores
-docker compose ps                     # estados
+git -C /root/Alejandria pull
+docker compose -f /root/Alejandria/docker-compose.yml restart backend   # código: bind mount, NO hace falta build
+docker compose -f /root/Alejandria/docker-compose.yml ps                # estados
+curl -s http://localhost:9878/health                                    # 200 antes de probar
 ```
 - Un commit **por fase** (mensajes descriptivos en español, estilo del repo: `fix(lectulandia): ...`, `perf(manga): ...`, `chore(docker): ...`).
 - Tras cada deploy: verificar logs + test funcional de la fase + **limpiar datos de prueba**.
+- `docker compose build` solo cuando cambien Dockerfile/requirements/compose (Fase 3 healthchecks → rebuild scheduler+converter+frontend).
 
 ---
 
