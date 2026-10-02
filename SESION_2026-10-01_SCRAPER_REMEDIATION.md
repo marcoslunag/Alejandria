@@ -166,9 +166,14 @@ Dos problemas superpuestos:
 ### Nota: healthchecks requieren rebuild
 Los 3 Dockerfiles cambiados (frontend, scheduler, kcc-converter) → `docker compose build scheduler kcc-converter frontend && docker compose up -d scheduler kcc-converter frontend` (el scheduler además monta `./backend` en vivo, pero el healthcheck vive en la imagen).
 
-### Follow-ups 2026-10-02 (post-fase 3)
-- **Libronera**: ver item 1 (rename Epubera→Libronera, reactivado y verificado end-to-end, commit `d63f6fb`).
-- **Ranking de búsqueda de libros** (commit `6bf6441`): `search_books` ahora hace **sort estable por `scraper_url` antes del `limit`** → las cards con EPUB descargable (GB anotados + exclusivas de scraper) ya no quedan truncadas cuando Google Books llena los 20 slots. Verificado en production: `?q=dune` → posiciones 0-16 GB con badge EPUB + posiciones 17-19 cards exclusivas de Lectulandia ("Dune: La saga completa", ed. ilustradas) que **antes se perdían por el truncado**.
+ ### Follow-ups 2026-10-02 (post-fase 3)
+ - **Libronera**: ver item 1 (rename Epubera→Libronera, reactivado y verificado end-to-end, commit `d63f6fb`).
+ - **Ranking de búsqueda de libros** (commit `6bf6441`): `search_books` ahora hace **sort estable por `scraper_url` antes del `limit`** → las cards con EPUB descargable (GB anotados + exclusivas de scraper) ya no quedan truncadas cuando Google Books llena los 20 slots. Verificado en production: `?q=dune` → posiciones 0-16 GB con badge EPUB + posiciones 17-19 cards exclusivas de Lectulandia ("Dune: La saga completa", ed. ilustradas) que **antes se perdían por el truncado**.
+ - **STK: PDF en send-to-kindle + token Amazon muerto** (commit `8db2be5` + re-auth manual):
+   - **Formato**: `send_book_to_kindle` solo aceptaba `.epub` → 400 con PDFs subidos vía `/upload`. Ahora acepta `.epub/.pdf/.mobi/.azw/.azw3` y `stk_kindle_sender.send_file` declara el formato real a Amazon (antes un PDF se enviaba declarado como EPUB).
+   - **`Failed to validate DeviceInfoToken` (403)**: la sesión ADP registrada el 01/10 14:28 **nunca tuvo una llamada exitosa** (el mtime de `stk_2.json` no cambió tras el auth; cada llamada exitosa re-scribe el archivo). Descartado reloj (contenedor vs `Date` header de Amazon: 5s) y drift de librerías (`stkclient` 0.1.1 único, `rsa` 4.9.1 con `encrypt_int`=`pow(m,d,n)` fijo). Conclusión: Amazon rechazó el `adp_token` → **el usuario reconectó por Ajustes (OAuth completo)** a las 16:09 y todo funciona: `/kindle/stk/devices` devuelve 5 Kindles y el PDF de book 26 / chapter 19 se envió OK (200, 14.5s, "Successfully sent ... to Kindle").
+   - **Lección**: `deviceinfotoken` sigue clasificado como error transitorio por diseño (umbral 20 fallos + logout manual), pero si persiste >24h es token muerto → reconectar.
+ - **Discover (trending) congelaba la API 3.5 min** (commit `e5c5e85`): `get_trending_manga` y `get_popular_manga` llamaban `_transform_media(media)` **inline con `translate_description=True`** (default) → 24 descripciones × ~8.5s (Google 429) = ~3.5 min bloqueando el event loop de toda la API. El usuario percibía la app "pensando y no avanza" (RAM/CPU OK: backend 6%, health 1ms). Fix idéntico al de búsqueda: `translate_description=False` en ambas (las cards solo muestran `description[:200]`; Discover usa `reason_label`; ComicDetails traduce en el cliente). Verificado: trending 200 en **5.1s** con 24 items (antes 3.3 min).
 
 ---
 
@@ -182,7 +187,9 @@ Los 3 Dockerfiles cambiados (frontend, scheduler, kcc-converter) → `docker com
 - [x] **Fase 2 COMPLETADA** — caps + executor + traducción fuera del path de búsqueda + paralelización cómics; verificado en production (manga 29.4s, cómics 34.4s).
 - [x] **Fase 3 COMPLETADA** — epubera desactivado, Google Books backoff, translator rate-limit + caché, healthchecks heartbeat (6/6 healthy), zombies de cola recuperados (168/161/160 → failed). Ver §4 para evidencia.
 - **RENDIMIENTOS FINALES (production):** manga search **29.4s** (antes 185s) · comic search **34.4s** (antes 62s) · book search ~18s · `from-url` Lectulandia 8.4s · 6/6 contenedores healthy.
-- Commits de la remediación (orden): `96d3c9f` → `f3fe761` → `9f166aa` → `12726b6` → `4cd48ae` → `90f685f` → `bbf0c7a` (docs) → `10ea735` → `1061cda` → `e687e1e` (docs) → `d63f6fb` (Libronera) → `90d9c6b` (docs) → `6bf6441` (ranking EPUB).
+- [x] **STK**: PDF aceptado en send-to-kindle + token Amazon muerto resuelto con re-auth manual; PDF de book 26 enviado OK (ver follow-ups).
+- [x] **Discover**: trending/popular sin traducción inline — API deja de congelarse 3.5 min (ver follow-ups).
+ - Commits de la remediación (orden): `96d3c9f` → `f3fe761` → `9f166aa` → `12726b6` → `4cd48ae` → `90f685f` → `bbf0c7a` (docs) → `10ea735` → `1061cda` → `e687e1e` (docs) → `d63f6fb` (Libronera) → `90d9c6b` (docs) → `6bf6441` (ranking EPUB) → `8d40ee7` (docs) → `8db2be5` (STK PDF) → `e5c5e85` (trending sin traducir inline).
 
 ---
 
