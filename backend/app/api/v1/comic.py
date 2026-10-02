@@ -120,29 +120,47 @@ async def search_comics(
 
     # Check availability if requested
     if check_availability:
-        logger.info(f"Checking availability for {len(results)} comic results...")
-        availability_tasks = []
-        for result, item in results:
-            task = quick_check_availability(
-                title=item['title'],
-                publisher=item.get('publisher', ''),
-                count_of_issues=result.count_of_issues or 0
-            )
-            availability_tasks.append(task)
+        # Cap: solo los primeros N resultados llevan check de fuentes. Antes:
+        # 20 resultados × hasta 6 peticiones scraper cada uno = ~120 HTTP en
+        # paralelo → los sitios throttlean y la respuesta tardaba 60-90s.
+        # Los resultados sin check quedan has_sources=False.
+        AVAIL_CHECK_LIMIT = 8
+        AVAIL_TIMEOUT = 30.0
+        checkable = results[:AVAIL_CHECK_LIMIT]
+        logger.info(f"Checking availability for {len(checkable)}/{len(results)} comic results...")
 
-        # Wait for all availability checks
-        availability_results = await asyncio.gather(*availability_tasks, return_exceptions=True)
+        avail_semaphore = asyncio.Semaphore(4)
 
-        # Update results with availability info
-        for i, avail in enumerate(availability_results):
-            if isinstance(avail, Exception):
-                logger.warning(f"Availability check failed: {avail}")
-                continue
+        async def _limited_avail(title, publisher, count):
+            async with avail_semaphore:
+                return await quick_check_availability(
+                    title=title, publisher=publisher, count_of_issues=count
+                )
 
-            results[i][0].has_sources = avail['has_sources']
-            results[i][0].available_sources = avail['sources']
-            results[i][0].relevance_score = avail['score']
-            results[i][0].volumes = [VolumeInfo(**v) for v in avail.get('volumes', [])]
+        avail_tasks = [
+            asyncio.create_task(_limited_avail(
+                item['title'], item.get('publisher', ''), result.count_of_issues or 0
+            ))
+            for result, item in checkable
+        ]
+        done, pending = await asyncio.wait(avail_tasks, timeout=AVAIL_TIMEOUT)
+        for t in pending:
+            t.cancel()
+            logger.warning(f"Availability check sin terminar tras {AVAIL_TIMEOUT}s — cancelado")
+
+        # Update results with availability info (solo los que completaron)
+        for (result, item), task in zip(checkable, avail_tasks):
+            if task in done and not task.cancelled():
+                try:
+                    avail = task.result()
+                except Exception as exc:
+                    logger.warning(f"Availability check failed: {exc}")
+                    continue
+
+                result.has_sources = avail['has_sources']
+                result.available_sources = avail['sources']
+                result.relevance_score = avail['score']
+                result.volumes = [VolumeInfo(**v) for v in avail.get('volumes', [])]
 
         # Sort by relevance score (highest first)
         results.sort(key=lambda x: x[0].relevance_score, reverse=True)

@@ -6,6 +6,7 @@ Kaizoku-inspired approach to manga library management
 import asyncio
 import gc
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
@@ -40,6 +41,11 @@ from pydantic import BaseModel
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+# Executor dedicado para checks de scrapers en búsquedas: no compite con el
+# ThreadPoolExecutor por defecto que usan los demás endpoints (run_in_executor
+# con None). 8 workers = 4 checks concurrentes × 2 scrapers por check.
+_SCRAPER_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="manga-scraper")
 
 router = APIRouter(prefix="/manga", tags=["manga"])
 
@@ -168,14 +174,20 @@ async def search_manga(
     except Exception as e:
         logger.error(f"AniList search error: {e}")
 
-    # Scraper availability checks — hard 8s cap via asyncio.wait (no wait_for).
+    # Scraper availability checks — cap duro de 30s vía asyncio.wait (no wait_for).
     # asyncio.wait_for usa _cancel_and_wait internamente que bloquea esperando
     # a que el thread termine; asyncio.wait devuelve inmediatamente al timeout
     # y deja los tasks pendientes en background sin bloquear la respuesta.
-    CHECK_LIMIT = 20
-    SCRAPER_TIMEOUT = 150.0
+    #
+    # CHECK_LIMIT=8: solo los 8 primeros resultados AniList llevan badge de
+    # fuentes (antes 20 → 40 peticiones HTTP concurrentes a los scrapers, que
+    # throttlean y estrellaban la respuesta a 150s+).
+    # Semaphore(4): máximo 4 checks concurrentes (8 peticiones en vuelo).
+    CHECK_LIMIT = 8
+    SCRAPER_TIMEOUT = 30.0
     if results:
         loop = asyncio.get_running_loop()
+        check_semaphore = asyncio.Semaphore(4)
         stop_words = {'the', 'a', 'an', 'of', 'and', 'or', 'el', 'la', 'de', 'los', 'las', 'en', 'y'}
 
         import re as _re
@@ -206,7 +218,7 @@ async def search_manga(
                 logger.debug(f"CircuitBreaker [{name}]: skipping (circuit open)")
                 return None  # None = skipped, not an error
             try:
-                result = await loop.run_in_executor(None, scraper_fn, *args)
+                result = await loop.run_in_executor(_SCRAPER_EXECUTOR, scraper_fn, *args)
                 cb.record_success(name)
                 return result
             except Exception as exc:
@@ -262,8 +274,13 @@ async def search_manga(
             except Exception:
                 return {"sources": [], "tomo_count": 0, "url": None}
 
+        # Máximo 4 checks concurrentes (los scrapers throttlean el paralelismo)
+        async def _limited_check(title: str):
+            async with check_semaphore:
+                return await check_manga_in_scraper(title)
+
         # asyncio.wait con timeout: devuelve inmediatamente al expirar sin bloquear
-        tasks = [asyncio.create_task(check_manga_in_scraper(r.title))
+        tasks = [asyncio.create_task(_limited_check(r.title))
                  for r in results[:CHECK_LIMIT]]
         done, pending = await asyncio.wait(tasks, timeout=SCRAPER_TIMEOUT)
         for t in pending:
