@@ -151,13 +151,15 @@ class ContentScheduler:
         )
 
         # Recuperar zombies: items 'downloading' >2h (el worker murió a mitad
-        # de descargar y nunca más se actualizarán). Cada hora.
+        # de descargar y nunca más se actualizarán). Cada hora + una pasada
+        # inmediata al arrancar (next_run_time=now) para no esperar 1h.
         self.scheduler.add_job(
             self.recover_stuck_downloads,
             IntervalTrigger(hours=1),
             id='recover_zombies',
             replace_existing=True,
-            max_instances=1
+            max_instances=1,
+            next_run_time=datetime.utcnow()
         )
 
         # Procesar carpeta /imports cada 5 minutos (Feature 5)
