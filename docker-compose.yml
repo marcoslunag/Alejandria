@@ -29,6 +29,7 @@ services:
       - DOWNLOAD_DIR=/downloads
       - LIBRARY_DIR=/library
       - CHECK_INTERVAL_HOURS=${CHECK_INTERVAL_HOURS:-6}
+      - SECRET_KEY=${SECRET_KEY:-}
       - KCC_PROFILE=${KCC_PROFILE:-KPW5}
       - KCC_FORMAT=${KCC_FORMAT:-EPUB}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
