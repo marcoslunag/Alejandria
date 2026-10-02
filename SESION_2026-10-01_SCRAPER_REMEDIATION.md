@@ -2,7 +2,7 @@
 
 > **Documento de recuperación.** Si se pierde la sesión, leer esto primero. Contiene: diagnóstico completo con evidencia verificada, diseño de las 3 fases, estado del trabajo, y el procedimiento operativo exacto (SSH/expect, deploy, verificación).
 >
-> **ESTADO (2026-10-02): FASES 1 y 2 COMPLETADAS y verificadas en producción. Fase 3 pendiente.**
+> **ESTADO (2026-10-02): LAS 3 FASES COMPLETADAS y verificadas en producción. Remediación terminada.**
 
 ---
 
@@ -145,18 +145,26 @@ Dos problemas superpuestos:
 
 ---
 
-## 4. FASE 3 (P2-P3) — Robustez
+## 4. FASE 3 (P2-P3) — Robustez ✅ COMPLETADA y verificada en producción
 
-| # | Item | Detalle |
+> **Commits:** `10ea735` (los 5 items) + `1061cda` (pasada inmediata de zombies al arrancar). **Deploy 2026-10-02 11:07 UTC.**
+
+| # | Item | Solución |
 |---|---|---|
-| 1 | **Epubera muerta** | `Cannot connect to host epubera1.com:443 [Connection reset by peer]`. Buscar dominio vigente; si no hay, desactivar con mensaje claro (no 500). |
-| 2 | **Google Books 503** | Rate-limit desde la IP del servidor en CADA búsqueda de libros. Backoff (tenacity) + reintentos con espera. |
-| 3 | **Translator spam** | `Translation failed: ... too many requests` (>5 req/s). Token bucket / rate limiter (máx ~5 req/s). |
-| 4 | **Healthchecks rotos** | `frontend/Dockerfile`: `wget --spider http://localhost/` → BusyBox wget resuelve `localhost`→`::1`, nginx solo IPv4 → usar `127.0.0.1`. `scheduler/Dockerfile` + `kcc-converter/Dockerfile`: usan `pgrep` (no existe en slim) → healthcheck Python/curl. Objetivo: los 4 contenedores healthy. |
-| 5 | **Zombies de cola** | `download_queue`: 3 items `downloading` desde mayo (ids 168, 161, 160) + 1 `failed` (id 178). Job en scheduler: items `downloading` con `started_at` > 2h → `failed` (o re-encolar). |
+| 1 | **Epubera muerta** | Verificado: `epubera.com` 301→`epubera1.com`, y este **resetea conexiones desde cualquier IP** (curl local y server: HTTP=000 <0.1s). Sin dominio vigente → `EpuberaScraper.ENABLED = False` (guard en `search` y `get_download_links` con mensaje claro); `books.py` omite el scraper desactivado en `search` y `_search_scrapers_for_book`. Re-activar pidiendo `ENABLED=True`. |
+| 2 | **Google Books 503** | `google_books._make_request`: reintenta 429/503 (máx 2) con backoff exponencial + jitter, respeta `Retry-After` (cap 30s). |
+| 3 | **Translator spam** | `translator.py`: `_TranslateRateLimiter` (thread-safe, slots, máx ~5 req/s) + caché de traducciones (cap 1000) → el enricher semanal y la página de detalle no re-traducen el mismo texto ni saturan a Google. |
+| 4 | **Healthchecks rotos** | `frontend/Dockerfile`: `localhost`→`127.0.0.1` (BusyBox wget resolvía ::1). `scheduler` + `kcc-converter`: `pgrep` (no existe en slim) → **heartbeat files**: scheduler refresca `/tmp/scheduler_heartbeat` cada 1min (job APScheduler), converter cada 10s (loop watchdog); healthcheck Python comprueba `mtime < 300s`. Detectan worker **colgado**, no solo proceso vivo. |
+| 5 | **Zombies de cola** | Nuevo job `recover_stuck_downloads` (cada hora + `next_run_time=now` al arrancar): items `downloading` con `started_at` >2h (o `created_at` si `started_at` NULL) → `failed` + `error_message` "Zombie recovery...". `retry_failed_downloads` los reencola con backoff si les quedan reintentos. |
 
-### Verificación Fase 3
-`docker compose ps` → 4/4 healthy. Logs sin spam de translator/503. Zombies marcados.
+### Verificación Fase 3 (evidencia, 2026-10-02)
+- `docker compose ps` → **6/6 healthy** (backend, converter, db, flaresolverr, frontend, scheduler).
+- Log scheduler: `Recovering 3 zombie download(s) stuck in 'downloading' >2h: [168, 160, 161]` → DB confirma 168/161/160 = `failed` con "Zombie recovery: atascado en 'downloading' >2h".
+- `GET /books/search?q=dune` → 200 en 18.5s, resultados `google_books` + `lectulandia`, **0 menciones a epubera** (omitido como diseñado).
+- Logs backend/scheduler/converter (10 min post-deploy): sin spam de translator/503/epubera. Únicos errores: `kcc-c2e command not found` al arrancar el scheduler — **esperado e inofensivo** (es el fallback local de conversión; el worker kcc-converter, que tiene KCC instalado, es el que convierte de verdad; cola 182-189 completada).
+
+### Nota: healthchecks requieren rebuild
+Los 3 Dockerfiles cambiados (frontend, scheduler, kcc-converter) → `docker compose build scheduler kcc-converter frontend && docker compose up -d scheduler kcc-converter frontend` (el scheduler además monta `./backend` en vivo, pero el healthcheck vive en la imagen).
 
 ---
 
@@ -168,9 +176,9 @@ Dos problemas superpuestos:
 - [x] Documento de recuperación escrito (este archivo).
 - [x] **Fase 1 COMPLETADA** — `_resolve_download_links_http` en `lectulandia.py`; verificado en production (Dune 200/8.4s, duplicado 409, datos de test limpiados).
 - [x] **Fase 2 COMPLETADA** — caps + executor + traducción fuera del path de búsqueda + paralelización cómics; verificado en production (manga 29.4s, cómics 34.4s).
-- [ ] **Fase 3 EN CURSO** — robustez (ver §4).
-- Pendientes DB (Fase 3): marcar zombies `downloading` (168, 161, 160).
-- Commits de la remediación (orden): `96d3c9f` → `f3fe761` → `9f166aa` → `12726b6` → `4cd48ae` → `90f685f`.
+- [x] **Fase 3 COMPLETADA** — epubera desactivado, Google Books backoff, translator rate-limit + caché, healthchecks heartbeat (6/6 healthy), zombies de cola recuperados (168/161/160 → failed). Ver §4 para evidencia.
+- **RENDIMIENTOS FINALES (production):** manga search **29.4s** (antes 185s) · comic search **34.4s** (antes 62s) · book search ~18s · `from-url` Lectulandia 8.4s · 6/6 contenedores healthy.
+- Commits de la remediación (orden): `96d3c9f` → `f3fe761` → `9f166aa` → `12726b6` → `4cd48ae` → `90f685f` → `bbf0c7a` (docs) → `10ea735` → `1061cda`.
 
 ---
 
