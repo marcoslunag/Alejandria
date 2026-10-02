@@ -166,6 +166,10 @@ Dos problemas superpuestos:
 ### Nota: healthchecks requieren rebuild
 Los 3 Dockerfiles cambiados (frontend, scheduler, kcc-converter) → `docker compose build scheduler kcc-converter frontend && docker compose up -d scheduler kcc-converter frontend` (el scheduler además monta `./backend` en vivo, pero el healthcheck vive en la imagen).
 
+### Follow-ups 2026-10-02 (post-fase 3)
+- **Libronera**: ver item 1 (rename Epubera→Libronera, reactivado y verificado end-to-end, commit `d63f6fb`).
+- **Ranking de búsqueda de libros** (commit `6bf6441`): `search_books` ahora hace **sort estable por `scraper_url` antes del `limit`** → las cards con EPUB descargable (GB anotados + exclusivas de scraper) ya no quedan truncadas cuando Google Books llena los 20 slots. Verificado en production: `?q=dune` → posiciones 0-16 GB con badge EPUB + posiciones 17-19 cards exclusivas de Lectulandia ("Dune: La saga completa", ed. ilustradas) que **antes se perdían por el truncado**.
+
 ---
 
 ## 5. Estado del trabajo (2026-10-02, en curso)
@@ -178,7 +182,7 @@ Los 3 Dockerfiles cambiados (frontend, scheduler, kcc-converter) → `docker com
 - [x] **Fase 2 COMPLETADA** — caps + executor + traducción fuera del path de búsqueda + paralelización cómics; verificado en production (manga 29.4s, cómics 34.4s).
 - [x] **Fase 3 COMPLETADA** — epubera desactivado, Google Books backoff, translator rate-limit + caché, healthchecks heartbeat (6/6 healthy), zombies de cola recuperados (168/161/160 → failed). Ver §4 para evidencia.
 - **RENDIMIENTOS FINALES (production):** manga search **29.4s** (antes 185s) · comic search **34.4s** (antes 62s) · book search ~18s · `from-url` Lectulandia 8.4s · 6/6 contenedores healthy.
-- Commits de la remediación (orden): `96d3c9f` → `f3fe761` → `9f166aa` → `12726b6` → `4cd48ae` → `90f685f` → `bbf0c7a` (docs) → `10ea735` → `1061cda`.
+- Commits de la remediación (orden): `96d3c9f` → `f3fe761` → `9f166aa` → `12726b6` → `4cd48ae` → `90f685f` → `bbf0c7a` (docs) → `10ea735` → `1061cda` → `e687e1e` (docs) → `d63f6fb` (Libronera) → `90d9c6b` (docs) → `6bf6441` (ranking EPUB).
 
 ---
 
