@@ -216,6 +216,11 @@ class SearchResponse(BaseModel):
     total: int
     sources: List[str]  # Which sources were searched
 
+    # Búsqueda progresiva: si hay job pendiente, el frontend hace polling
+    # a GET /manga/search/{search_id} hasta status == "complete"
+    search_id: Optional[str] = None
+    status: Optional[str] = None  # "in_progress" | "complete" | None
+
 
 # ============================================================================
 # Statistics and Analytics

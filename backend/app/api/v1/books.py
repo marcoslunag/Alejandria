@@ -32,6 +32,7 @@ import logging
 from slugify import slugify
 from app.models.user import User
 from app.core.deps import get_current_user
+from app.services.search_jobs import create_job, get_job, complete_job
 
 logger = logging.getLogger(__name__)
 
@@ -103,16 +104,64 @@ async def search_books(
                     'source': 'openlibrary'
                 })
 
-        # Search in scrapers (parallel)
-        scraper_results = []
-        scraper_title_index: dict = {}
+        # Búsqueda progresiva: la fase de scrapers (Lectulandia + Epubera, hasta
+        # 45s) se ejecuta en background. El endpoint devuelve YA los resultados
+        # de Google Books / Open Library; el frontend hace polling a
+        # /books/search/{search_id} para obtener los resultados enriquecidos.
+        job = None
+        if source in ["all", "scrapers", "lectulandia", "epubera"]:
+            job = create_job(
+                query=q,
+                user_id=current_user.id,
+                initial_results=list(results),
+                total=len(results),
+                meta={"page": page, "per_page": limit, "source": source},
+            )
+            asyncio.create_task(_finish_book_search_job(
+                job.job_id, results, q, page, limit, current_user.id, source
+            ))
 
-        scraper_tasks = []
-        if source in ["all", "scrapers", "lectulandia"]:
-            scraper_tasks.append(("lectulandia", asyncio.wait_for(LectulandiaScraper().search(q, page=page), timeout=45.0)))
-        if source in ["all", "scrapers", "epubera"] and EpuberaScraper.ENABLED:
-            scraper_tasks.append(("epubera", asyncio.wait_for(EpuberaScraper().search(q, page=page), timeout=30.0)))
+        return BookSearchResponse(
+            results=results,
+            total=len(results),
+            page=page,
+            per_page=limit,
+            search_id=job.job_id if job else None,
+            status=job.status if job else None,
+        )
 
+    except Exception as e:
+        logger.error(f"Error searching books: {e}")
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+async def _enrich_book_search_results(
+    results: List[dict],
+    q: str,
+    page: int,
+    limit: int,
+    user_id: int,
+    source: str,
+) -> List[dict]:
+    """
+    Fase de scrapers de la búsqueda de libros (Lectulandia + Epubera en paralelo).
+    Corre en background (búsqueda progresiva). Modifica `results` (cross-reference
+    + cards de scraper) y devuelve la lista final (deduplicada, ordenada, limitada).
+    Usa su propia sesión de BD (el task no comparte la sesión del request).
+    """
+    from app.database import SessionLocal
+
+    scraper_results = []
+    scraper_title_index: dict = {}
+
+    scraper_tasks = []
+    if source in ["all", "scrapers", "lectulandia"]:
+        scraper_tasks.append(("lectulandia", asyncio.wait_for(LectulandiaScraper().search(q, page=page), timeout=45.0)))
+    if source in ["all", "scrapers", "epubera"] and EpuberaScraper.ENABLED:
+        scraper_tasks.append(("epubera", asyncio.wait_for(EpuberaScraper().search(q, page=page), timeout=30.0)))
+
+    db = SessionLocal()
+    try:
         if scraper_tasks:
             gathered = await asyncio.gather(
                 *[task for _, task in scraper_tasks],
@@ -141,7 +190,7 @@ async def search_books(
 
                     in_library = db.query(Book).filter(
                         Book.title.ilike(f"%{item['title'][:40]}%"),
-                        Book.user_id == current_user.id
+                        Book.user_id == user_id
                     ).first()
 
                     scraper_results.append({
@@ -161,7 +210,7 @@ async def search_books(
                         'publisher': None,
                     })
 
-        # Cross-reference: annotate Google Books results with scraper availability
+        # Cross-reference: annotate metadata results with scraper availability
         for result in results:
             title_key = result['title'].lower().strip()
             matched_sources = []
@@ -190,22 +239,56 @@ async def search_books(
         # sobre los de solo metadatos: sin esto, 20 resultados de Google Books
         # llenan el limit y las cards exclusivas de scraper (Lectulandia/Libronera)
         # se quedan truncadas. Sort estable: conserva el orden relativo dentro
-        # de cada grupo (GB anotados primero, luego cards de scraper).
+        # de cada grupo (metadata anotados primero, luego cards de scraper).
         unique_results.sort(key=lambda r: 0 if r.get('scraper_url') else 1)
 
         # Limit results
-        unique_results = unique_results[:limit]
+        return unique_results[:limit]
+    finally:
+        db.close()
 
-        return BookSearchResponse(
-            results=unique_results,
-            total=len(unique_results),
-            page=page,
-            per_page=limit
-        )
 
+async def _finish_book_search_job(
+    job_id: str,
+    results: List[dict],
+    q: str,
+    page: int,
+    limit: int,
+    user_id: int,
+    source: str,
+) -> None:
+    """Background: ejecuta la fase de scrapers y completa el job."""
+    try:
+        final = await _enrich_book_search_results(results, q, page, limit, user_id, source)
     except Exception as e:
-        logger.error(f"Error searching books: {e}")
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+        logger.error(f"Book search job {job_id[:8]}: error en fase de scrapers: {e}")
+        final = results  # Al menos conservamos los resultados de metadata
+    finally:
+        # Complete incluso en error: el frontend deja de hacer polling
+        complete_job(job_id, final, len(final))
+
+
+@router.get("/search/{job_id}", response_model=BookSearchResponse)
+async def get_book_search_status(
+    job_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Estado de la búsqueda progresiva de libros (polling del frontend).
+    Devuelve los resultados enriquecidos cuando status == "complete".
+    """
+    job = get_job(job_id, user_id=current_user.id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Búsqueda no encontrada o expirada")
+    meta = job.meta
+    return BookSearchResponse(
+        results=job.results,
+        total=job.total,
+        page=meta.get("page", 1),
+        per_page=meta.get("per_page", 20),
+        search_id=job.job_id,
+        status=job.status,
+    )
 
 
 # ============================================================================

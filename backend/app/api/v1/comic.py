@@ -45,6 +45,7 @@ from app.services.comic_service import (
 )
 from app.models.user import User
 from app.core.deps import get_current_user
+from app.services.search_jobs import create_job, get_job, complete_job
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +119,12 @@ async def search_comics(
         )
         results.append((result, item))  # Keep original item for availability check
 
-    # Check availability if requested
-    if check_availability:
+    # Búsqueda progresiva: la fase de disponibilidad + búsqueda directa en
+    # scrapers (hasta ~35s) se ejecuta en background. El endpoint devuelve YA
+    # los resultados de ComicVine; el frontend hace polling a
+    # /comics/search/{search_id} para obtener los enriquecidos (orden por
+    # relevancia + virtual comic de resultados directos en español).
+    async def run_availability_phase():
         # Cap: solo los primeros N resultados llevan check de fuentes. Antes:
         # 20 resultados × hasta 6 peticiones scraper cada uno = ~120 HTTP en
         # paralelo → los sitios throttlean y la respuesta tardaba 60-90s.
@@ -201,6 +206,20 @@ async def search_comics(
                 results.insert(0, (virtual_comic, {}))
                 logger.info(f"Added virtual comic with {len(direct_volumes)} direct volumes")
 
+    # Búsqueda progresiva: crear job y lanzar la fase de disponibilidad en background
+    job = None
+    if check_availability and results:
+        job = create_job(
+            query=q,
+            user_id=current_user.id,
+            initial_results=[r[0].dict() for r in results],
+            total=search_result.get('total', 0),
+            meta={"page": page, "per_page": limit},
+        )
+        asyncio.create_task(_finish_comic_search_job(
+            job.job_id, results, run_availability_phase
+        ))
+
     # Extract just the results (without original items)
     final_results = [r[0] for r in results]
 
@@ -208,7 +227,43 @@ async def search_comics(
         results=final_results,
         total=search_result.get('total', 0),
         page=page,
-        per_page=limit
+        per_page=limit,
+        search_id=job.job_id if job else None,
+        status=job.status if job else None,
+    )
+
+
+async def _finish_comic_search_job(job_id: str, results: List, run_availability_phase) -> None:
+    """Background: check de disponibilidad + búsqueda directa y completa el job."""
+    try:
+        await run_availability_phase()
+    except Exception as e:
+        logger.error(f"Comic search job {job_id[:8]}: error en fase de disponibilidad: {e}")
+    finally:
+        # Complete incluso en error: el frontend deja de hacer polling
+        complete_job(job_id, [r[0].dict() for r in results], len(results))
+
+
+@router.get("/search/{job_id}", response_model=ComicSearchResponse)
+async def get_comic_search_status(
+    job_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Estado de la búsqueda progresiva de cómics (polling del frontend).
+    Devuelve los resultados enriquecidos cuando status == "complete".
+    """
+    job = get_job(job_id, user_id=current_user.id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Búsqueda no encontrada o expirada")
+    meta = job.meta
+    return ComicSearchResponse(
+        results=[ComicSearchResult(**r) for r in job.results],
+        total=job.total,
+        page=meta.get("page", 1),
+        per_page=meta.get("per_page", 20),
+        search_id=job.job_id,
+        status=job.status,
     )
 
 

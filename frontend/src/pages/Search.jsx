@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { mangaApi, comicApi, bookApi } from '../services/api';
@@ -47,32 +47,90 @@ const Search = () => {
   const [lastQuery, setLastQuery] = useState(initialQuery);
   const [duplicateModal, setDuplicateModal] = useState(null);
   const [markedAsRead, setMarkedAsRead] = useState(new Set());
+  // Búsqueda progresiva: true mientras el backend sigue comprobando fuentes
+  const [searchingSources, setSearchingSources] = useState(false);
+  const pollTimerRef = useRef(null);
+  const searchSeqRef = useRef(0);
+
+  // Búsqueda progresiva: cancelar el polling activo (nueva búsqueda, cambio
+  // de tab, unmount).
+  const cancelSearchPolling = () => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    setSearchingSources(false);
+  };
+
+  // Búsqueda progresiva: polling del job cada 2s hasta complete/404.
+  // `seq` evita que un polling de una búsqueda anterior sobreescriba los
+  // resultados de una búsqueda nueva.
+  const pollSearchStatus = (api, jobId, seq) => {
+    const startedAt = Date.now();
+    pollTimerRef.current = setTimeout(async () => {
+      if (searchSeqRef.current !== seq) return; // obsoleto: hay búsqueda nueva
+      let response;
+      try {
+        response = await api.getSearchStatus(jobId);
+      } catch (error) {
+        if (error.response?.status !== 404) {
+          console.error('Error consultando la búsqueda:', error);
+        }
+        // 404 = job expirado (TTL 10 min): nos quedamos con lo que hay
+        cancelSearchPolling();
+        return;
+      }
+      if (searchSeqRef.current !== seq) return;
+      if (response.data.status === 'complete') {
+        setResults(response.data.results || []);
+        cancelSearchPolling();
+      } else if (Date.now() - startedAt > 90000) {
+        // Cap de seguridad: los scrapers tardan como máximo ~45s
+        cancelSearchPolling();
+      } else {
+        pollSearchStatus(api, jobId, seq);
+      }
+    }, 2000);
+  };
 
   useEffect(() => {
     if (initialQuery) {
       handleSearch(initialQuery);
     }
+    return cancelSearchPolling;
   }, []);
 
   const handleSearch = async (query, tabOverride) => {
     if (!query.trim()) return;
     const tab = tabOverride || activeTab;
+    const seq = ++searchSeqRef.current;
+    cancelSearchPolling(); // invalida el polling de la búsqueda anterior
     setLastQuery(query);
     try {
       setLoading(true);
       setHasSearched(true);
+      let api;
       let response;
       if (tab === 'manga') {
+        api = mangaApi;
         response = await mangaApi.search(query);
-        setResults(response.data.results || []);
       } else if (tab === 'comics') {
+        api = comicApi;
         response = await comicApi.search(query);
-        setResults(response.data.results || []);
       } else if (tab === 'books') {
+        api = bookApi;
         response = await bookApi.searchGoogleBooks(query);
-        setResults(response.data.results || []);
+      }
+      if (seq !== searchSeqRef.current) return; // una búsqueda nueva lo invalidó
+      setResults(response.data.results || []);
+      // Búsqueda progresiva: ya se ven los resultados de metadata; si el
+      // backend sigue comprobando fuentes, hacer polling hasta complete.
+      if (response.data.search_id && response.data.status === 'in_progress') {
+        setSearchingSources(true);
+        pollSearchStatus(api, response.data.search_id, seq);
       }
     } catch (error) {
+      if (seq !== searchSeqRef.current) return;
       console.error('Error buscando:', error);
       setResults([]);
       const isTimeout = error.code === 'ECONNABORTED' || error.message?.toLowerCase().includes('timeout');
@@ -85,7 +143,7 @@ const Search = () => {
         toast.error('No se pudo conectar con el servidor.');
       }
     } finally {
-      setLoading(false);
+      if (seq === searchSeqRef.current) setLoading(false);
     }
   };
 
@@ -279,8 +337,16 @@ const Search = () => {
         </div>
       )}
 
+      {/* Comprobando fuentes (búsqueda progresiva) — sin resultados aún */}
+      {!loading && searchingSources && hasSearched && results.length === 0 && (
+        <div className="text-center py-20">
+          <div className="w-10 h-10 border-2 border-gold border-t-transparent rounded-full mx-auto mb-4 animate-spin" />
+          <p className="text-gray-500">Comprobando fuentes en los scrapers...</p>
+        </div>
+      )}
+
       {/* No results */}
-      {!loading && hasSearched && results.length === 0 && (
+      {!loading && !searchingSources && hasSearched && results.length === 0 && (
         <div className="text-center py-20">
           <FaSearch className="text-5xl text-gray-700 mx-auto mb-4" />
           <h3 className="text-xl font-serif font-bold mb-2">Sin resultados</h3>
@@ -291,7 +357,15 @@ const Search = () => {
       {/* Results */}
       {!loading && results.length > 0 && (
         <div>
-          <p className="text-sm text-gray-500 mb-6">{results.length} resultado(s)</p>
+          <div className="flex items-center justify-between gap-4 mb-6">
+            <p className="text-sm text-gray-500">{results.length} resultado(s)</p>
+            {searchingSources && (
+              <p className="flex items-center gap-2 text-xs text-gold/80">
+                <span className="w-3 h-3 border border-gold border-t-transparent rounded-full animate-spin" />
+                Comprobando fuentes en los scrapers...
+              </p>
+            )}
+          </div>
 
           {/* Manga — ContentCard unificada */}
           {activeTab === 'manga' && (

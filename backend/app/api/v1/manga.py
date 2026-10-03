@@ -35,6 +35,7 @@ from app.services.scraper import TomosMangaScraper
 from app.services.mangaycomics_scraper import MangayComicsScraper
 from app.models.user import User
 from app.core.deps import get_current_user
+from app.services.search_jobs import create_job, get_job, complete_job
 import logging
 from slugify import slugify
 from pydantic import BaseModel
@@ -174,18 +175,22 @@ async def search_manga(
     except Exception as e:
         logger.error(f"AniList search error: {e}")
 
-    # Scraper availability checks — cap duro de 30s vía asyncio.wait (no wait_for).
-    # asyncio.wait_for usa _cancel_and_wait internamente que bloquea esperando
-    # a que el thread termine; asyncio.wait devuelve inmediatamente al timeout
-    # y deja los tasks pendientes en background sin bloquear la respuesta.
-    #
-    # CHECK_LIMIT=8: solo los 8 primeros resultados AniList llevan badge de
-    # fuentes (antes 20 → 40 peticiones HTTP concurrentes a los scrapers, que
-    # throttlean y estrellaban la respuesta a 150s+).
-    # Semaphore(4): máximo 4 checks concurrentes (8 peticiones en vuelo).
-    CHECK_LIMIT = 8
-    SCRAPER_TIMEOUT = 30.0
-    if results:
+    # Búsqueda progresiva: la fase de scrapers se ejecuta en background.
+    # El endpoint devuelve YA los resultados de AniList y crea un job
+    # (search_jobs) que el frontend va completando vía polling.
+    async def run_scraper_phase():
+        # Cap duro de 30s vía asyncio.wait (no wait_for).
+        # asyncio.wait_for usa _cancel_and_wait internamente que bloquea
+        # esperando a que el thread termine; asyncio.wait devuelve
+        # inmediatamente al timeout y deja los tasks pendientes en background
+        # sin bloquear.
+        #
+        # CHECK_LIMIT=8: solo los 8 primeros resultados AniList llevan badge de
+        # fuentes (antes 20 → 40 peticiones HTTP concurrentes a los scrapers,
+        # que throttlean y estrellaban la respuesta a 150s+).
+        # Semaphore(4): máximo 4 checks concurrentes (8 peticiones en vuelo).
+        CHECK_LIMIT = 8
+        SCRAPER_TIMEOUT = 30.0
         loop = asyncio.get_running_loop()
         check_semaphore = asyncio.Semaphore(4)
         stop_words = {'the', 'a', 'an', 'of', 'and', 'or', 'el', 'la', 'de', 'los', 'las', 'en', 'y'}
@@ -298,11 +303,60 @@ async def search_manga(
             manga_result.scraper_tomo_count = check["tomo_count"]
             manga_result.scraper_url = check["url"]
 
+    # Búsqueda progresiva: crear job y lanzar la fase de scrapers en background
+    job = None
+    if results:
+        job = create_job(
+            query=q,
+            user_id=current_user.id,
+            initial_results=[r.dict() for r in results],
+            total=len(results),
+            meta={"sources": ["anilist"]},
+        )
+        asyncio.create_task(_finish_manga_search_job(
+            job.job_id, results, run_scraper_phase
+        ))
+
     return SearchResponse(
         query=q,
         results=results,
         total=len(results),
-        sources=['anilist']
+        sources=['anilist'],
+        search_id=job.job_id if job else None,
+        status=job.status if job else None,
+    )
+
+
+async def _finish_manga_search_job(job_id: str, results: List[MangaSearch], run_scraper_phase) -> None:
+    """Background: enriquece los resultados con scrapers y completa el job."""
+    try:
+        await run_scraper_phase()
+    except Exception as e:
+        logger.error(f"Manga search job {job_id[:8]}: error en fase de scrapers: {e}")
+    finally:
+        # Complete incluso en error: el frontend deja de hacer polling
+        complete_job(job_id, [r.dict() for r in results], len(results))
+
+
+@router.get("/search/{job_id}", response_model=SearchResponse)
+async def get_manga_search_status(
+    job_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Estado de la búsqueda progresiva (polling del frontend).
+    Devuelve los resultados enriquecidos cuando status == "complete".
+    """
+    job = get_job(job_id, user_id=current_user.id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Búsqueda no encontrada o expirada")
+    return SearchResponse(
+        query=job.query,
+        results=[MangaSearch(**r) for r in job.results],
+        total=job.total,
+        sources=job.meta.get("sources", ["anilist"]),
+        search_id=job.job_id,
+        status=job.status,
     )
 
 

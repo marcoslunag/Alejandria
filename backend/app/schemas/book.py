@@ -58,6 +58,11 @@ class BookSearchResponse(BaseModel):
     page: int
     per_page: int
 
+    # Búsqueda progresiva: si hay job pendiente, el frontend hace polling
+    # a GET /books/search/{search_id} hasta status == "complete"
+    search_id: Optional[str] = None
+    status: Optional[str] = None  # "in_progress" | "complete" | None
+
 
 # ============================================================================
 # Book Creation and Update Schemas

@@ -46,6 +46,10 @@ export const mangaApi = {
   search: (query, page = 1, limit = 20) =>
     api.get(`/manga/search`, { params: { q: query, page, limit } }),
 
+  // Progressive search: job status (polling hasta status === 'complete')
+  getSearchStatus: (jobId) =>
+    api.get(`/manga/search/${jobId}`),
+
   // Library
   getLibrary: (params = {}) =>
     api.get(`/manga/`, { params }),
@@ -177,6 +181,10 @@ export const comicApi = {
   search: (query, page = 1, limit = 20) =>
     api.get(`/comics/search`, { params: { q: query, page, limit, check_availability: true } }),
 
+  // Progressive search: job status (polling hasta status === 'complete')
+  getSearchStatus: (jobId) =>
+    api.get(`/comics/search/${jobId}`),
+
   // Preview from ComicVine
   getComicVineDetails: (comicvineId) =>
     api.get(`/comics/comicvine/${comicvineId}`),
@@ -263,6 +271,10 @@ export const bookApi = {
 
   searchOpenLibrary: (query, page = 1, limit = 20) =>
     api.get(`/books/search`, { params: { q: query, page, limit, source: 'openlibrary' } }),
+
+  // Progressive search: job status (polling hasta status === 'complete')
+  getSearchStatus: (jobId) =>
+    api.get(`/books/search/${jobId}`),
 
   // Library
   getLibrary: (params = {}) =>
