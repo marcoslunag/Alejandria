@@ -11,5 +11,6 @@ from app.models.settings import AppSettings
 from app.models.translation import Translation
 from app.models.search_cache import SearchCache
 from app.models.push_subscription import PushSubscription
+from app.models.scraper_stat import ScraperStat
 
-__all__ = ["User", "Manga", "Chapter", "Comic", "ComicIssue", "Book", "BookChapter", "DownloadQueue", "AppSettings", "Translation", "SearchCache", "PushSubscription"]
+__all__ = ["User", "Manga", "Chapter", "Comic", "ComicIssue", "Book", "BookChapter", "DownloadQueue", "AppSettings", "Translation", "SearchCache", "PushSubscription", "ScraperStat"]

@@ -76,35 +76,64 @@ class MangaDownloader:
         if backup_urls:
             urls_to_try.extend(backup_urls)
 
-        # Importar host manager para priorizar
+        # Priorizar: telemetría dinámica (estática + éxitos/fallos observados) con fallback estático
         try:
-            from app.services.host_manager import sort_download_links, identify_host, get_host_priority, HostPriority
+            from app.services import scraper_telemetry
+            from app.services.host_manager import identify_host
 
-            # Convertir a formato de links y ordenar por prioridad
             links = [{'url': u} for u in urls_to_try]
-            sorted_links = sort_download_links(links)
+            sorted_links = scraper_telemetry.sort_links_dynamically(links)
             urls_to_try = [link['url'] for link in sorted_links]
 
-            logger.info(f"Download order for {filename}:")
+            logger.info(f"Download order for {filename} (dynamic):")
             for i, u in enumerate(urls_to_try):
                 host = identify_host(u) or 'unknown'
-                priority = get_host_priority(u)
-                logger.info(f"  {i+1}. [{priority}] {host}: {u[:60]}...")
-        except ImportError:
-            logger.warning("Host manager not available, using original order")
+                logger.info(f"  {i+1}. {host}: {u[:60]}...")
+        except Exception:
+            try:
+                from app.services.host_manager import sort_download_links, identify_host, get_host_priority
+                links = [{'url': u} for u in urls_to_try]
+                urls_to_try = [link['url'] for link in sort_download_links(links)]
+                logger.info(f"Download order for {filename} (static fallback):")
+            except Exception:
+                logger.warning("Host manager not available, using original order")
 
         last_error = None
 
         for attempt, current_url in enumerate(urls_to_try):
+            host_id = None
+            try:
+                from app.services.host_manager import identify_host
+                host_id = identify_host(current_url)
+            except Exception:
+                pass
             try:
                 logger.info(f"Download attempt {attempt + 1}/{len(urls_to_try)}: {filename}")
                 result = await self._download_single_url(current_url, filename, on_progress)
                 if result:
                     logger.info(f"Download successful from attempt {attempt + 1}")
+                    if host_id:
+                        try:
+                            from app.services import scraper_telemetry
+                            scraper_telemetry.record_success("host", host_id)
+                        except Exception:
+                            pass
                     return result
+                if host_id:
+                    try:
+                        from app.services import scraper_telemetry
+                        scraper_telemetry.record_failure("host", host_id, "no result")
+                    except Exception:
+                        pass
             except Exception as e:
                 last_error = e
                 logger.warning(f"Attempt {attempt + 1} failed: {e}")
+                if host_id:
+                    try:
+                        from app.services import scraper_telemetry
+                        scraper_telemetry.record_failure("host", host_id, str(e))
+                    except Exception:
+                        pass
                 continue
 
         # Todos los intentos fallaron

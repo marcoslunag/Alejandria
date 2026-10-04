@@ -220,6 +220,39 @@ def reset_scraper_circuit(scraper_name: str, current_user: User = Depends(requir
     return {"ok": True, "scraper": scraper_name, "status": "reset"}
 
 
+@router.get("/scraper-stats")
+def get_scraper_stats(current_user: User = Depends(require_admin)):
+    """
+    Telemetría PERSISTENTE de éxitos/fallos por host de descarga y por scraper
+    (roadmap #13). A diferencia de /scrapers-status (circuit breaker en RAM),
+    esto sobrevive reinicios y alimenta la priorización dinámica de fuentes.
+
+    Solo admin.
+    """
+    from app.services import scraper_telemetry
+    stats = scraper_telemetry.get_stats()
+    return {
+        "stats": stats,
+        "total": len(stats),
+        "with_penalty": sum(1 for s in stats if s["dynamic_penalty"] > 0),
+    }
+
+
+@router.post("/scraper-stats/reset/{kind}/{name}")
+def reset_scraper_stat(kind: str, name: str, current_user: User = Depends(require_admin)):
+    """
+    Reset manual de métricas persistentes de un host o scraper (admin only).
+    kind: 'host' | 'scraper'; name: p.ej. 'mediafire' o 'zonacomics'.
+    """
+    from app.services import scraper_telemetry
+    if kind not in ("host", "scraper"):
+        raise HTTPException(status_code=400, detail="kind debe ser 'host' o 'scraper'")
+    deleted = scraper_telemetry.reset(kind, name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"No hay métricas para {kind}:{name}")
+    return {"ok": True, "key": f"{kind}:{name}", "status": "reset"}
+
+
 @router.get("/stk-status")
 def get_stk_status(current_user: User = Depends(get_current_user)):
     """

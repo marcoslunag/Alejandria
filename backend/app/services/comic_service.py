@@ -291,6 +291,11 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
             if use_progressive else await scraper.get_download_links(volume_url)
 
         if scrape_result.success and scrape_result.download_links:
+            try:
+                from app.services import scraper_telemetry
+                scraper_telemetry.record_success("scraper", source)
+            except Exception:
+                pass
             issues = db.query(ComicIssue).filter(
                 ComicIssue.comic_id == comic_id
             ).order_by(ComicIssue.issue_number).all()
@@ -434,6 +439,11 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
                             logger.error(f"Phase 2 ouo resolution failed for {ouo_url[:60]}: {e}")
         else:
             logger.warning(f"No download links found for volume: {volume_url}")
+            try:
+                from app.services import scraper_telemetry
+                scraper_telemetry.record_failure("scraper", source, scrape_result.error or "no download links")
+            except Exception:
+                pass
 
         # Mark as searched (but DON'T auto-queue downloads — user decides when to download)
         comic = db.query(Comic).filter(Comic.id == comic_id).first()
@@ -443,6 +453,11 @@ async def fetch_volume_from_scraper(comic_id: int, volume_url: str, source: str,
 
     except Exception as e:
         logger.error(f"Error fetching volume from scraper: {e}")
+        try:
+            from app.services import scraper_telemetry
+            scraper_telemetry.record_failure("scraper", source, str(e))
+        except Exception:
+            pass
         import traceback
         traceback.print_exc()
     finally:
@@ -1344,6 +1359,14 @@ async def search_scrapers_directly(query: str) -> List[dict]:
         try:
             results = await asyncio.wait_for(task, timeout=30.0)
 
+            # Telemetría: búsqueda exitosa = devolvió resultados (vacío = neutro)
+            if results:
+                try:
+                    from app.services import scraper_telemetry
+                    scraper_telemetry.record_success("scraper", scraper_name)
+                except Exception:
+                    pass
+
             for result in results[:5]:  # First 5 results per scraper
                 url = result.get("url")
                 title = result.get("title", "")
@@ -1400,6 +1423,11 @@ async def search_scrapers_directly(query: str) -> List[dict]:
                         })
         except Exception as e:
             logger.debug(f"Direct scraper search error for {scraper_name}: {e}")
+            try:
+                from app.services import scraper_telemetry
+                scraper_telemetry.record_failure("scraper", scraper_name, str(e))
+            except Exception:
+                pass
             continue
 
     return found_volumes

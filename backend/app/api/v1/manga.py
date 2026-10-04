@@ -241,10 +241,20 @@ async def search_manga(
             try:
                 result = await loop.run_in_executor(_SCRAPER_EXECUTOR, scraper_fn, *args)
                 cb.record_success(name)
+                try:
+                    from app.services import scraper_telemetry
+                    scraper_telemetry.record_success("scraper", name)
+                except Exception:
+                    pass
                 return result
             except Exception as exc:
                 cb.record_failure(name)
                 logger.debug(f"CircuitBreaker [{name}]: recorded failure ({exc})")
+                try:
+                    from app.services import scraper_telemetry
+                    scraper_telemetry.record_failure("scraper", name, str(exc))
+                except Exception:
+                    pass
                 return exc  # Propagate as value so gather doesn't raise
 
         async def check_manga_in_scraper(title: str):
