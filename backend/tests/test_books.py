@@ -1,6 +1,6 @@
-"""Tests for book endpoints: CRUD, IDOR protection, reading status."""
+"""Tests for book endpoints: CRUD, IDOR protection, reading status, EPUB reader."""
 import pytest
-from .conftest import _make_book, _make_book_chapter, _auth
+from .conftest import _make_book, _make_book_chapter, _auth, _token
 
 
 def test_get_books_library_empty(client, auth_headers):
@@ -78,3 +78,75 @@ def test_completed_marks_all_chapters(client, db, regular_user, auth_headers):
     db.refresh(ch2)
     assert ch1.read_at is not None
     assert ch2.read_at is not None
+
+
+# ============================================================================
+# Web reader (roadmap #8) — streaming EPUB
+# ============================================================================
+
+def _make_epub_file(tmp_path, name="chapter.epub"):
+    p = tmp_path / name
+    p.write_bytes(b"PK\x03\x04 fake-epub-content")
+    return p
+
+
+def test_epub_endpoint_streams_file(client, db, regular_user, auth_headers, tmp_path):
+    book = _make_book(db, regular_user)
+    ch = _make_book_chapter(db, book, 1, status="downloaded")
+    ch.file_path = str(_make_epub_file(tmp_path))
+    db.commit()
+
+    r = client.get(f"/api/v1/books/{book.id}/chapters/{ch.id}/epub", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/epub+zip")
+    assert r.content == b"PK\x03\x04 fake-epub-content"
+
+
+def test_epub_endpoint_token_query_param(client, db, regular_user, tmp_path):
+    """El frontend usa header Bearer, pero el endpoint también acepta ?token= (estilo manga)."""
+    book = _make_book(db, regular_user)
+    ch = _make_book_chapter(db, book, 1, status="downloaded")
+    ch.file_path = str(_make_epub_file(tmp_path))
+    db.commit()
+
+    r = client.get(
+        f"/api/v1/books/{book.id}/chapters/{ch.id}/epub?token={_token(regular_user)}"
+    )
+    assert r.status_code == 200
+
+
+def test_epub_endpoint_requires_auth(client, db, regular_user, tmp_path):
+    book = _make_book(db, regular_user)
+    ch = _make_book_chapter(db, book, 1, status="downloaded")
+    ch.file_path = str(_make_epub_file(tmp_path))
+    db.commit()
+
+    r = client.get(f"/api/v1/books/{book.id}/chapters/{ch.id}/epub")
+    assert r.status_code == 401
+
+
+def test_epub_endpoint_idor(client, db, regular_user, second_user, tmp_path):
+    book = _make_book(db, second_user)
+    ch = _make_book_chapter(db, book, 1, status="downloaded")
+    ch.file_path = str(_make_epub_file(tmp_path))
+    db.commit()
+
+    r = client.get(f"/api/v1/books/{book.id}/chapters/{ch.id}/epub", headers=_auth(regular_user))
+    assert r.status_code == 404
+
+
+def test_epub_endpoint_not_downloaded(client, db, regular_user, auth_headers):
+    book = _make_book(db, regular_user)
+    ch = _make_book_chapter(db, book, 1, status="pending")
+    r = client.get(f"/api/v1/books/{book.id}/chapters/{ch.id}/epub", headers=auth_headers)
+    assert r.status_code == 404
+
+
+def test_epub_endpoint_file_missing_on_disk(client, db, regular_user, auth_headers):
+    book = _make_book(db, regular_user)
+    ch = _make_book_chapter(db, book, 1, status="downloaded")
+    ch.file_path = "/nonexistent/missing.epub"
+    db.commit()
+
+    r = client.get(f"/api/v1/books/{book.id}/chapters/{ch.id}/epub", headers=auth_headers)
+    assert r.status_code == 404

@@ -19,6 +19,7 @@ import ChangePassword from './pages/ChangePassword';
 import AdminUsers from './pages/AdminUsers';
 import Discover from './pages/Discover';
 import MangaReader from './pages/MangaReader';
+import EpubReader from './pages/EpubReader';
 import Upload from './pages/Upload';
 import DeviceSetup from './pages/DeviceSetup';
 
@@ -132,6 +133,11 @@ function App() {
             <Route path="/manga/:mangaId/chapters/:chapterId/read" element={
               <ProtectedRoute>
                 <MangaReader />
+              </ProtectedRoute>
+            } />
+            <Route path="/books/:id/read/:chapterId" element={
+              <ProtectedRoute>
+                <EpubReader />
               </ProtectedRoute>
             } />
 

@@ -5,7 +5,7 @@ Books API Endpoints - Integration with Google Books and EPUB Scrapers
 from datetime import datetime
 import asyncio
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func, cast, Text
@@ -968,6 +968,73 @@ async def update_book_reading_status(
 
     db.commit()
     return {"id": book_id, "reading_status": book.reading_status}
+
+
+# ============================================================================
+# WEB READER (roadmap #8) — streaming EPUB
+# ============================================================================
+
+def _auth_book_reader(request: Request, token: Optional[str], db: Session) -> User:
+    """Auth para el reader: Bearer header (fetch) o token en query param (estilo manga)."""
+    from app.core.security import decode_token
+
+    raw_token: Optional[str] = token
+    if not raw_token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            raw_token = auth_header[len("Bearer "):]
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Token required")
+    try:
+        payload = decode_token(raw_token)
+        user_id = int(payload.get("sub"))
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+@router.get("/{book_id}/chapters/{chapter_id}/epub")
+def get_book_chapter_epub(
+    book_id: int,
+    chapter_id: int,
+    request: Request,
+    token: Optional[str] = Query(None, description="JWT token (fallback si no hay header)"),
+    db: Session = Depends(get_db),
+):
+    """Sirve el EPUB descargado para el web reader.
+
+    Autenticación por header `Authorization: Bearer` o por query param `token`
+    (mismo patrón que el reader de manga). El frontend lo fetchea como
+    ArrayBuffer y se lo pasa a epub.js (sin necesidad de <embed>).
+    """
+    from fastapi.responses import FileResponse
+
+    current_user = _auth_book_reader(request, token, db)
+
+    chapter = db.query(BookChapter).join(Book).filter(
+        BookChapter.id == chapter_id,
+        BookChapter.book_id == book_id,
+        Book.user_id == current_user.id,
+    ).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    if not chapter.file_path:
+        raise HTTPException(status_code=404, detail="EPUB no disponible (no descargado)")
+
+    path = Path(chapter.file_path)
+    if not path.is_file() or path.suffix.lower() != ".epub":
+        raise HTTPException(status_code=404, detail="EPUB no disponible en disco")
+
+    return FileResponse(
+        path=str(path),
+        media_type="application/epub+zip",
+        filename=path.name,
+    )
 
 
 # ============================================================================

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { bookApi } from '../services/api';
 import { sanitizeUrl } from '../utils/sanitizeUrl';
@@ -12,6 +13,7 @@ import {
   FaCheckCircle,
   FaTimesCircle,
   FaBook,
+  FaBookOpen,
   FaExternalLinkAlt,
   FaCopy,
   FaExclamationTriangle,
@@ -359,6 +361,18 @@ const BookChapterList = ({ bookId }) => {
                 }`}>
                   {getStatusText(chapter.status)}
                 </span>
+
+                {/* Web reader (EPUB) - show when the file is on disk */}
+                {chapter.file_path && (
+                  <Link
+                    to={`/books/${bookId}/read/${chapter.id}`}
+                    title="Leer en el navegador"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 text-xs font-medium transition-colors"
+                  >
+                    <FaBookOpen />
+                    <span className="hidden sm:inline">Leer</span>
+                  </Link>
+                )}
 
                 {/* Send to Kindle button - show for downloaded/sent */}
                 {(chapter.status === 'downloaded' || chapter.status === 'sent' || chapter.file_path) && (
