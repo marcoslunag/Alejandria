@@ -27,6 +27,41 @@ class AnilistService:
 
     API_URL = "https://graphql.anilist.co"
 
+    def __init__(self):
+        # Sesión aiohttp compartida (roadmap #10): reutiliza conexiones TCP/TLS
+        # entre queries en vez de crear una ClientSession por petición.
+        # Se crea perezosamente; las sesiones de aiohttp van ligadas a un
+        # event loop, así que si el loop cambia (tests) se recrea.
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._session_loop = None
+
+    def _get_session(self) -> aiohttp.ClientSession:
+        """Devuelve la sesión compartida (pool de conexiones).
+
+        Sin awaits entre el check y la asignación ⇒ atómico dentro del
+        event loop (dos coroutinas no pueden interponerse).
+        """
+        loop = asyncio.get_running_loop()
+        if self._session is None or self._session.closed or self._session_loop is not loop:
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=15),
+                connector=aiohttp.TCPConnector(limit=10, ttl_dns_cache=300),
+                headers={"Accept": "application/json"},
+            )
+            self._session_loop = loop
+            logger.debug("Anilist: sesión aiohttp compartida creada (pool limit=10)")
+        return self._session
+
+    async def close(self):
+        """Cierra la sesión compartida (se llama en el shutdown de la app)."""
+        if self._session is not None and not self._session.closed:
+            try:
+                await self._session.close()
+            except Exception as e:
+                logger.debug(f"Anilist: error cerrando sesión: {e}")
+        self._session = None
+        self._session_loop = None
+
     # GraphQL Query for searching manga
     SEARCH_QUERY = """
     query ($search: String, $page: Int, $perPage: Int) {
@@ -237,24 +272,22 @@ class AnilistService:
             API response
         """
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.API_URL,
-                    json={
-                        'query': query,
-                        'variables': variables
-                    },
-                    headers={
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json',
-                    },
-                    timeout=aiohttp.ClientTimeout(total=15)
-                ) as response:
-                    if response.status != 200:
-                        logger.error(f"Anilist API error: HTTP {response.status}")
-                        return None
+            session = self._get_session()
+            async with session.post(
+                self.API_URL,
+                json={
+                    'query': query,
+                    'variables': variables
+                },
+                headers={
+                    'Content-Type': 'application/json',
+                },
+            ) as response:
+                if response.status != 200:
+                    logger.error(f"Anilist API error: HTTP {response.status}")
+                    return None
 
-                    return await response.json()
+                return await response.json()
 
         except asyncio.TimeoutError:
             logger.error("Anilist API timeout")

@@ -81,6 +81,12 @@ async def lifespan(app: FastAPI):
     if scheduler:
         scheduler.stop()
         logger.info("Scheduler stopped")
+    # Cerrar la sesión aiohttp compartida de Anilist (roadmap #10)
+    try:
+        from app.services.anilist import get_anilist_service
+        await get_anilist_service().close()
+    except Exception as e:
+        logger.debug(f"Anilist: no se pudo cerrar la sesión: {e}")
 
 
 # Create FastAPI app — disable interactive docs in production
@@ -94,7 +100,7 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
-# Configure CORS � use CORS_ORIGINS_STR env var in production (comma-separated)
+# Configure CORS � use CORS_ORIGINS_STR env var in production (comma-separated)
 cors_origins = (
     [o.strip() for o in settings.CORS_ORIGINS_STR.split(",") if o.strip()]
     if settings.CORS_ORIGINS_STR
