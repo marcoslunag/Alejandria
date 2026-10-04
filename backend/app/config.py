@@ -26,6 +26,9 @@ class Settings(BaseSettings):
 
     # Scheduler Settings
     CHECK_INTERVAL_HOURS: int = 6
+    # Retención de disco (roadmap #14): días para borrar archivos (CBZ + EPUB)
+    # de items YA ENVÍADOS a Kindle. 0 = limpieza inmediata tras el envío,
+    # valor negativo = limpieza desactivada.
     CLEANUP_DAYS: int = 7
 
     # Scraper Settings

@@ -253,6 +253,99 @@ def reset_scraper_stat(kind: str, name: str, current_user: User = Depends(requir
     return {"ok": True, "key": f"{kind}:{name}", "status": "reset"}
 
 
+@router.get("/disk-usage")
+def get_disk_usage(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    """
+    Dashboard de uso de disco (admin, roadmap #14).
+
+    Tamaño real por directorio (downloads / library / kindle) con breakdown por
+    extensión, más lo 'recuperable': items ya enviados a Kindle cuyo archivo aún
+    está en disco (la limpieza `CLEANUP_DAYS` lo borrará).
+    """
+    from pathlib import Path
+
+    def _dir_usage(path: str) -> dict:
+        root = Path(path)
+        total = 0
+        files = 0
+        by_ext = {}
+        if root.is_dir():
+            for p in root.rglob("*"):
+                try:
+                    if not p.is_file():
+                        continue
+                    size = p.stat().st_size
+                except OSError:
+                    continue
+                total += size
+                files += 1
+                ext = p.suffix.lower() or "(sin ext)"
+                by_ext[ext] = by_ext.get(ext, 0) + size
+        return {
+            "path": path,
+            "exists": root.is_dir(),
+            "bytes": total,
+            "mb": round(total / (1024 * 1024), 1),
+            "files": files,
+            "by_extension": dict(sorted(by_ext.items(), key=lambda kv: -kv[1])),
+        }
+
+    downloads = _dir_usage(settings.DOWNLOAD_DIR)
+    library = _dir_usage(settings.LIBRARY_DIR)
+    kindle = _dir_usage(settings.KINDLE_DIR)
+
+    def _reclaimable(rows) -> dict:
+        """Items con sent_at y archivo aún en disco (la limpieza lo borrará)."""
+        items = 0
+        total_bytes = 0
+        seen = set()
+        for row in rows:
+            has_file = False
+            for raw in row:
+                if not raw:
+                    continue
+                for p in raw.split('|'):
+                    p = p.strip()
+                    if not p or p in seen:
+                        continue
+                    seen.add(p)
+                    try:
+                        total_bytes += os.path.getsize(p)
+                        has_file = True
+                    except OSError:
+                        pass
+            if has_file:
+                items += 1
+        return {
+            "items": items,
+            "bytes": total_bytes,
+            "mb": round(total_bytes / (1024 * 1024), 1),
+        }
+
+    reclaimable = {
+        "manga": _reclaimable(
+            db.query(Chapter.file_path, Chapter.converted_path)
+            .filter(Chapter.sent_at.isnot(None)).all()
+        ),
+        "comics": _reclaimable(
+            db.query(ComicIssue.file_path, ComicIssue.converted_path)
+            .filter(ComicIssue.sent_at.isnot(None)).all()
+        ),
+        "books": _reclaimable(
+            db.query(BookChapter.file_path, BookChapter.converted_path)
+            .filter(BookChapter.sent_at.isnot(None)).all()
+        ),
+        "cleanup_days": settings.CLEANUP_DAYS,
+    }
+
+    return {
+        "downloads": downloads,
+        "library": library,
+        "kindle": kindle,
+        "reclaimable": reclaimable,
+    }
+
+
 @router.get("/stk-status")
 def get_stk_status(current_user: User = Depends(get_current_user)):
     """

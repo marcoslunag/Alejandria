@@ -8,6 +8,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from app.config import get_settings
 from app.database import SessionLocal
 from app.models.manga import Manga
 from app.models.chapter import Chapter
@@ -1727,48 +1728,91 @@ class ContentScheduler:
             logger.error(f"Weekly metadata enrichment error: {e}", exc_info=True)
 
     async def cleanup_old_files(self):
-        """Limpia archivos descargados de más de X días"""
-        logger.info("Cleaning up old files...")
+        """
+        Limpia archivos (CBZ/RAR original + EPUB convertido) de items YA ENVÍADOS
+        a Kindle, según `CLEANUP_DAYS` (roadmap #14):
 
+        - CLEANUP_DAYS > 0: borra lo enviado hace más de N días (default 7).
+        - CLEANUP_DAYS = 0: borra inmediatamente todo lo ya enviado.
+        - CLEANUP_DAYS < 0: limpieza desactivada.
+
+        Cubre los tres tipos de contenido (manga, cómics y libros) — antes solo
+        se limpiaba manga.
+        """
+        settings = get_settings()
+        cleanup_days = settings.CLEANUP_DAYS
+        if cleanup_days < 0:
+            logger.info("cleanup_old_files: desactivado (CLEANUP_DAYS < 0)")
+            return
+
+        logger.info(f"Cleaning up sent files older than {cleanup_days} days...")
         db: Session = SessionLocal()
         try:
-            # Archivos de más de 7 días
-            cutoff_date = datetime.utcnow() - timedelta(days=7)
-
             # NOTA: usar .isnot(None) para filtro SQL correcto.
-            # "Chapter.sent_at is not None" es comparación Python sobre el descriptor
+            # "X.sent_at is not None" es comparación Python sobre el descriptor
             # SQLAlchemy (siempre True) y SQLAlchemy lo ignora → devolvía 0 filas.
+            cutoff_date = datetime.utcnow() - timedelta(days=cleanup_days)
+
+            cleaned_files = 0
+
+            def _purge_paths(raw_paths: str) -> int:
+                """Borra archivos referenciados (converted_path puede ser pipe-separated)."""
+                removed = 0
+                if not raw_paths:
+                    return 0
+                for p in raw_paths.split('|'):
+                    p = p.strip()
+                    if not p:
+                        continue
+                    path = Path(p)
+                    if path.exists():
+                        try:
+                            path.unlink()
+                            removed += 1
+                        except OSError as e:
+                            logger.warning(f"cleanup_old_files: no se pudo borrar {p}: {e}")
+                return removed
+
+            # --- Manga: capítulos enviados ---
             old_chapters = db.query(Chapter).filter(
-                and_(
-                    Chapter.sent_at.isnot(None),
-                    Chapter.sent_at < cutoff_date
-                )
+                and_(Chapter.sent_at.isnot(None), Chapter.sent_at < cutoff_date)
             ).all()
-
-            cleaned_count = 0
             for chapter in old_chapters:
-                # Eliminar CBZ/RAR descargado
-                if chapter.file_path:
-                    file_path = Path(chapter.file_path)
-                    if file_path.exists():
-                        file_path.unlink()
-                        cleaned_count += 1
-
-                # converted_path puede ser pipe-separated para EPUBs multi-parte
-                if chapter.converted_path:
-                    epub_paths = [Path(p.strip()) for p in chapter.converted_path.split('|') if p.strip()]
-                    for epub_path in epub_paths:
-                        if epub_path.exists():
-                            epub_path.unlink()
-                            cleaned_count += 1
-
+                cleaned_files += _purge_paths(chapter.file_path)
+                cleaned_files += _purge_paths(chapter.converted_path)
                 chapter.file_path = None
                 chapter.converted_path = None
 
+            # --- Cómics: issues enviados ---
+            old_issues = db.query(ComicIssue).filter(
+                and_(ComicIssue.sent_at.isnot(None), ComicIssue.sent_at < cutoff_date)
+            ).all()
+            for issue in old_issues:
+                cleaned_files += _purge_paths(issue.file_path)
+                cleaned_files += _purge_paths(issue.converted_path)
+                issue.file_path = None
+                issue.converted_path = None
+
+            # --- Libros: capítulos enviados ---
+            old_book_chapters = db.query(BookChapter).filter(
+                and_(BookChapter.sent_at.isnot(None), BookChapter.sent_at < cutoff_date)
+            ).all()
+            for bc in old_book_chapters:
+                cleaned_files += _purge_paths(bc.file_path)
+                cleaned_files += _purge_paths(bc.converted_path)
+                bc.file_path = None
+                bc.converted_path = None
+
             db.commit()
-            logger.info(f"Cleaned up {cleaned_count} old files from {len(old_chapters)} sent chapters")
+            logger.info(
+                f"Cleaned up {cleaned_files} files from "
+                f"{len(old_chapters)} sent manga chapters, "
+                f"{len(old_issues)} sent comic issues, "
+                f"{len(old_book_chapters)} sent book chapters"
+            )
 
         except Exception as e:
+            db.rollback()
             logger.error(f"Error in cleanup_old_files: {e}")
         finally:
             db.close()
