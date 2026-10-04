@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/icon-192.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Tema (roadmap #6): aplica la clase antes del primer paint para evitar FOUC.
+         La app es dark-first: solo se añade `light` si el usuario lo eligió. -->
+    <script>
+      (function () {
+        try {
+          if (localStorage.getItem('alejandria-theme') === 'light') {
+            document.documentElement.classList.add('light');
+            var m = document.querySelector('meta[name="theme-color"]');
+            if (m) m.setAttribute('content', '#f3f0e9');
+          }
+        } catch (e) { /* noop */ }
+      })();
+    </script>
     <title>Alejandr�a - Tu biblioteca digital</title>
 
     <!-- PWA -->

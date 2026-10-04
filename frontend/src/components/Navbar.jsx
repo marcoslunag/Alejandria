@@ -1,6 +1,6 @@
 import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
-import { FaHome, FaBook, FaSearch, FaCog, FaDownload, FaMask, FaBookReader, FaSignOutAlt, FaUser, FaUserShield, FaBars, FaTimes, FaCompass, FaBell, FaUpload, FaChartBar } from 'react-icons/fa';
+import { FaHome, FaBook, FaSearch, FaCog, FaDownload, FaMask, FaBookReader, FaSignOutAlt, FaUser, FaUserShield, FaBars, FaTimes, FaCompass, FaBell, FaUpload, FaChartBar, FaSun, FaMoon } from 'react-icons/fa';
 import { useAuth } from '../contexts/AuthContext';
 import { notificationsApi } from '../services/api';
 
@@ -19,7 +19,21 @@ const Navbar = () => {
   const [notifItems, setNotifItems] = useState([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [stkAuthenticated, setStkAuthenticated] = useState(true); // assume OK until first check
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('alejandria-theme') === 'light' ? 'light' : 'dark'; } catch { return 'dark'; }
+  });
   const notifRef = useRef(null);
+
+  // Toggle modo claro/oscuro (roadmap #6): la clase `light` en <html> ya está
+  // aplicada antes del paint por el script inline de index.html
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    try { localStorage.setItem('alejandria-theme', next); } catch { /* noop */ }
+    document.documentElement.classList.toggle('light', next === 'light');
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', next === 'light' ? '#f3f0e9' : '#07070b');
+  };
 
   // SSE-based notification stream (replaces 60s polling)
   useEffect(() => {
@@ -183,6 +197,16 @@ const Navbar = () => {
               })
             )}
 
+            {/* Theme toggle (roadmap #6) */}
+            <button
+              onClick={toggleTheme}
+              className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-dark-lighter transition-colors"
+              title={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+              aria-label={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+            >
+              {theme === 'dark' ? <FaMoon /> : <FaSun />}
+            </button>
+
             {/* Notification bell (non-admin only) */}
             {!isAdmin && (
               <div className="relative" ref={notifRef}>
@@ -332,13 +356,22 @@ const Navbar = () => {
               <FaUser />
               {user?.username}
             </div>
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 text-gray-400 hover:text-red-400 transition-colors"
-            >
-              <FaSignOutAlt />
-              Salir
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleTheme}
+                className="p-2 text-gray-400 hover:text-white transition-colors"
+                title={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+              >
+                {theme === 'dark' ? <FaMoon /> : <FaSun />}
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 text-gray-400 hover:text-red-400 transition-colors"
+              >
+                <FaSignOutAlt />
+                Salir
+              </button>
+            </div>
           </div>
         </div>
       )}

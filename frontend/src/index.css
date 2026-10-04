@@ -60,3 +60,105 @@
 ::-webkit-scrollbar-track { background: #0d1117; }
 ::-webkit-scrollbar-thumb { background: #21262d; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #30363d; }
+
+/* ==========================================================================
+   LIGHT THEME (roadmap #6)
+   La app es dark-first (default). El modo claro se activa con la clase `light`
+   en <html> (toggle persistido en localStorage; ver index.html + Navbar).
+   Este bloque es UNLAYERED → gana a @layer utilities de Tailwind, y está
+   scoped a `html.light` → el modo oscuro queda intacto.
+
+    Nota de diseño: la escala `gray` es polimórfica (text-* debe OSCURECER para
+    leerse sobre fondo claro; bg y border grises deben ACLARARSE) y las clases
+    de componente (.card/.btn/.input) inlinean valores vía @apply. Por eso cada
+   token se sobrecarga POR UTILIDAD (no por variable), solo sobre las clases
+   que existen en el código. Acentos (gold/manga/comic/book) se conservan.
+   ========================================================================== */
+html.light { color-scheme: light; }
+html.light body { background-color: #f3f0e9; color: #26221c; }
+
+/* Superficies (dark.* → papel cálido) */
+html.light .bg-dark,
+html.light .bg-dark-base,
+html.light .bg-dark\/50,
+html.light .hover\:bg-dark:hover,
+html.light .hover\:bg-dark\/50:hover { background-color: #f3f0e9; }
+html.light .bg-dark-card,
+html.light .bg-dark-card\/95,
+html.light .hover\:bg-dark-card:hover { background-color: #ffffff; }
+html.light .bg-dark-lighter,
+html.light .bg-dark-lighter\/50,
+html.light .bg-dark-lighter\/70,
+html.light .bg-dark-lighter\/80,
+html.light .hover\:bg-dark-lighter:hover,
+html.light .hover\:bg-dark-lighter\/50:hover,
+html.light .hover\:bg-dark-lighter\/70:hover,
+html.light .hover\:bg-dark-lighter\/80:hover { background-color: #eceadf; }
+html.light .border-dark-lighter { border-color: #e0dbcf; }
+
+/* Banner hero (detalle): scrim claro sobre la portada (variables de gradiente) */
+html.light .from-dark { --tw-gradient-from: #f3f0e9; }
+html.light .from-dark-card { --tw-gradient-from: #ffffff; }
+html.light .from-dark-base\/30 { --tw-gradient-from: rgb(243 240 233 / 0.3); }
+html.light .via-dark\/60 { --tw-gradient-via: rgb(243 240 233 / 0.6); }
+html.light .to-dark { --tw-gradient-to: #f3f0e9; }
+
+/* Texto principal (white → casi-negro cálido) */
+html.light .text-white,
+html.light .text-white\/95,
+html.light .hover\:text-white:hover { color: #26221c; }
+
+/* Texto grises (oscurecer sobre fondo claro) */
+html.light .text-gray-200,
+html.light .hover\:text-gray-200:hover { color: #292524; }
+html.light .text-gray-300,
+html.light .hover\:text-gray-300:hover { color: #44403c; }
+html.light .text-gray-400,
+html.light .hover\:text-gray-400:hover { color: #57534e; }
+html.light .text-gray-500 { color: #6f6a5e; }
+html.light .text-gray-600 { color: #8a8578; }
+html.light .text-gray-700 { color: #a09a8c; }
+
+/* Fondos grises (aclarar) */
+html.light .bg-gray-400,
+html.light .hover\:bg-gray-400:hover { background-color: #d8d3c8; }
+html.light .bg-gray-500,
+html.light .hover\:bg-gray-500:hover { background-color: #c9c4b8; }
+html.light .bg-gray-600,
+html.light .hover\:bg-gray-600:hover { background-color: #c4beb2; }
+html.light .bg-gray-700,
+html.light .bg-gray-700\/30,
+html.light .bg-gray-700\/50,
+html.light .hover\:bg-gray-700\/30:hover,
+html.light .hover\:bg-gray-700\/50:hover { background-color: #d8d3c8; }
+html.light .bg-gray-800 { background-color: #e3dfd4; }
+html.light .bg-gray-900 { background-color: #efece4; }
+
+/* Bordes (aclarar) */
+html.light .border-gray-400,
+html.light .hover\:border-gray-400:hover { border-color: #c4beb2; }
+html.light .border-gray-500,
+html.light .border-gray-500\/30,
+html.light .hover\:border-gray-500:hover { border-color: #b5b0a4; }
+html.light .border-gray-600 { border-color: #c9c4b8; }
+html.light .border-gray-700,
+html.light .border-gray-700\/50 { border-color: #ddd8cc; }
+html.light .border-gray-800 { border-color: #e7e4db; }
+html.light .border-white,
+html.light .border-white\/5,
+html.light .border-white\/10,
+html.light .border-white\/20,
+html.light .hover\:border-white\/20:hover { border-color: #d8d3c8; }
+
+/* Clases de componente (@apply inlinea valores → se toca la clase) */
+html.light .card { background-color: #ffffff; }
+html.light .btn-secondary { background-color: #ffffff; border-color: #ddd8cc; color: #26221c; }
+html.light .input { background-color: #ffffff; border-color: #ddd8cc; color: #26221c; }
+html.light .skeleton-shimmer {
+  background: linear-gradient(90deg, #eceadf 0%, #f7f5f0 50%, #eceadf 100%);
+}
+
+/* Scrollbar (light) */
+html.light ::-webkit-scrollbar-track { background: #eceadf; }
+html.light ::-webkit-scrollbar-thumb { background: #c9c4b8; }
+html.light ::-webkit-scrollbar-thumb:hover { background: #b5b0a4; }

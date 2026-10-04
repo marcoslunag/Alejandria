@@ -81,7 +81,7 @@ Ver también `SESION_2026-10-01_SCRAPER_REMEDIATION.md` (contexto de rendimiento
 | # | Mejora | Estado |
 |---|--------|--------|
 | 5 | Auto-send de libros en scheduler (`auto_send_to_kindle` + EPUB) | ✅ 2026-10-04: `scheduler.py` bucle `BookChapter.status=='converted'` (limit 6, respeta `auto_send_to_kindle` + `stk_device_serial`) + `_send_book_chapter_to_kindle` (espejo de cómics: partes por `\|`, `is_authenticated()`, `title="{book.title}{vol}"`, `author=book.authors[0]`, marca `sent` solo si todas las partes OK) |
-| 6 | Modo oscuro (Tailwind `dark:` + toggle persistido) | ⬜ |
+| 6 | Modo claro/oscuro + toggle persistido | ✅ 2026-10-04: la app ya era **dark-first** (tokens `dark.*` hardcodeados), así que se añadió **modo claro** (papel cálido + dorado) con toggle ☀/☾ en navbar (desktop + móvil), persistido en `localStorage('alejandria-theme')`. Implementación: bloque CSS **unlayered** bajo `html.light` en `index.css` (76 reglas, por utilidad: `text-*` oscurece, `bg-*`/`border-*` aclaran; `.card/.btn-secondary/.input/.skeleton` tocados a la clase por `@apply`; scrim del hero en variables `--tw-gradient-*`; acentos gold/rojo/colores de tipo intactos). Script inline en `index.html` aplica la clase **antes del paint** (anti-FOUC) + `theme-color` meta. `darkMode:'class'` en `tailwind.config.js` (inerte, sin variantes `dark:` usadas). Default = oscuro (identidad de la app). `npm run build` OK |
 | 7 | Web Push en PWA (service worker existe; fin del polling 60s de badges) | ⬜ |
 | 8 | Web reader para EPUB (epub.js) + tamaño de fuente/tema | ⬜ |
 | 9 | Paginación/infinite scroll en grids grandes | ⬜ |
@@ -110,7 +110,7 @@ Ver también `SESION_2026-10-01_SCRAPER_REMEDIATION.md` (contexto de rendimiento
 1. **#1** búsqueda progresiva ✅ + **#2** caché persistente ✅ (2026-10-04)
 2. **#3** traducción persistente ✅ (2026-10-04)
 3. **#4 + #5** STK proactivo + auto-send libros ✅ (2026-10-04)
-4. Estilo: **#6** modo oscuro o **#7** push, según decisión (pendiente)
+4. Estilo: **#6** modo claro/oscuro ✅ (2026-10-04)
 
 **Verificación local (2026-10-04):** `pytest backend/tests/` → **197 passed, 4 failed**.
 Los 4 fallos son de **entorno local** (sin Playwright browser, Google Books 429 sin API key,
