@@ -96,7 +96,7 @@ Ver también `SESION_2026-10-01_SCRAPER_REMEDIATION.md` (contexto de rendimiento
 
 ## P3 — Calidad y ops
 
-- **15.** Tests pytest de lógica pura: scorer, bundles, clasificador fallos STK, rate-limiter traductor
+- **15.** Tests pytest de lógica pura: scorer, bundles, clasificador fallos STK, rate-limiter traductor ✅ IMPLEMENTADO (2026-10-04): `test_pure_logic.py` (30 tests, sin red/BD). **Scorer** (`TomosMangaSearch.find_best_match` con `search` mockeado): re-edición +25 gana, año 2023 > 2018, más tomos gana, guía -100, color -20, spin-off -80, 'completo' +30, vacío → None, 1 resultado → directo. **Bundles** (`detect_bundle`): `#1-30`, `#4-#12`, `[12/12]`, `[5 de 5]`, `[9 Tomos]`, `[80 números]`, rango invertido → None, 'Vol. 4' → None, 'collects #13-#15', 'collects issues #13 - #15' (lo captura el patrón de rango), 'Complete Collection' + `count_of_issues`, '#4' solo → None. **STK** (`STKKindleSender`): señales definitivas (adp_token/device not registered/customer not found), transitorios (403/503/timeout/connection) NO borran sesión, error no clasificado → intacta, burst <120s cuenta como 1 operación, `MAX_CONSECUTIVE_FAILURES` (20) → True en el 20º, `_reset_failure_count` a 0. **Rate-limiter** (`_TranslateRateLimiter`): 1ª llamada inmediata, 5 llamadas espaciadas ≥50ms, 6 hilos → slots estrictamente ordenados (thread-safe)
 - **16.** Backups automáticos: `pg_dump` + JSON semanal a `/backups` con retención
 - **17.** Rate-limit endpoints de búsqueda + latencia p95 en panel de logs
 - **18.** Discover 2.0: "Siguiendo", "Continuar leyendo", "Añadidos recientemente"
@@ -118,11 +118,12 @@ Ver también `SESION_2026-10-01_SCRAPER_REMEDIATION.md` (contexto de rendimiento
 10. **#12** Proxy de covers con caché + ETag ✅ (2026-10-04)
 11. **#13** Telemetría éxitos/fallos + priorización dinámica ✅ (2026-10-04)
 12. **#14** Retención de disco (CLEANUP_DAYS configurable, 3 tipos) + /system/disk-usage ✅ (2026-10-04)
+13. **#15** Tests de lógica pura (scorer, bundles, STK, rate-limiter) ✅ (2026-10-04)
 
-**Verificación local (2026-10-04):** `pytest backend/tests/` → **261 passed, 4-5 failed** (197 base + 9 push + 6 reader EPUB + 3 pagination + 4 sesión Anilist + 4 índices BD + 9 proxy covers + 19 telemetría + 10 retención disco). `npm run build` OK (warning de chunk >500 kB: epubjs).
+**Verificación local (2026-10-04):** `pytest backend/tests/` → **291 passed, 4-5 failed** (197 base + 9 push + 6 reader EPUB + 3 pagination + 4 sesión Anilist + 4 índices BD + 9 proxy covers + 19 telemetría + 10 retención disco + 30 lógica pura). `npm run build` OK (warning de chunk >500 kB: epubjs).
 Los fallos (4-5) son de **entorno local/red** (sin Playwright browser, Google Books 429 sin API key,
 `/downloads` read-only, contaminación de estado de queue, y 1 scraper de red intermitente —
-pasa al ejecutarlo aislado) — **ninguno toca el código de #2/#3/#4/#5/#7/#8/#9/#10/#11/#12/#13/#14**.
+pasa al ejecutarlo aislado) — **ninguno toca el código de #2/#3/#4/#5/#7/#8/#9/#10/#11/#12/#13/#14/#15**.
 Todos los tests de `search` pasan. Nota: `httpx` quedó sin pin (`>=0.25`) y con `0.28.x` rompía
 `TestClient` de starlette 0.27 (kwarg `app`); **pinado a `httpx==0.27.2`** en `requirements.txt`
 para que un rebuild de Docker no rompa la suite.
