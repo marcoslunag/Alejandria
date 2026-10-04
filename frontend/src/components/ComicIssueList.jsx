@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { comicApi } from '../services/api';
 import { sanitizeUrl } from '../utils/sanitizeUrl';
+import { proxyCover } from '../utils/coverUrl';
 import ComicSendToKindleButton from './ComicSendToKindleButton';
 import {
   FaDownload,
@@ -368,7 +369,7 @@ const ComicIssueList = ({ comicId, refreshKey = 0 }) => {
               {issue.cover_image && (
                 <div className="flex-shrink-0 w-10 h-14 overflow-hidden rounded">
                   <img
-                    src={issue.cover_image}
+                    src={proxyCover(issue.cover_image)}
                     alt={`Issue #${issue.issue_number}`}
                     className="w-full h-full object-cover"
                     loading="lazy"

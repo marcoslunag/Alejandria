@@ -5,6 +5,7 @@ import { comicApi } from '../services/api';
 import ContentGrid from '../components/ContentGrid';
 import LibraryTabs from '../components/LibraryTabs';
 import useInfiniteScroll from '../hooks/useInfiniteScroll';
+import { proxyCover } from '../utils/coverUrl';
 import {
   FaMask,
   FaFilter,
@@ -285,7 +286,7 @@ const Comics = () => {
                     <div className="w-16 h-24 flex-shrink-0">
                       {comic.cover_image ? (
                         <img
-                          src={comic.cover_image}
+                          src={proxyCover(comic.cover_image)}
                           alt={comic.title}
                           className="w-full h-full object-cover rounded"
                         />

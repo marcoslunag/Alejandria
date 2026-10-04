@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { FaStar, FaBook, FaCheck, FaPlus } from 'react-icons/fa';
 import { useState } from 'react';
 import clsx from 'clsx';
+import { proxyCover } from '../utils/coverUrl';
 
 const MangaCard = ({ manga, onAdd, showAddButton = false }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -31,7 +32,7 @@ const MangaCard = ({ manga, onAdd, showAddButton = false }) => {
       <div className="relative aspect-[2/3] overflow-hidden bg-gray-800">
         {manga.cover_image || manga.cover ? (
           <img
-            src={manga.cover_image || manga.cover}
+            src={proxyCover(manga.cover_image || manga.cover)}
             alt={manga.title}
             className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
             loading="lazy"

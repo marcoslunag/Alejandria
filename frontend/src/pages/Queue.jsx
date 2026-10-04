@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { mangaApi, bookApi, comicApi, activityApi } from '../services/api';
+import { proxyCover } from '../utils/coverUrl';
 import SendToKindleButton from '../components/SendToKindleButton';
 import BookSendToKindleButton from '../components/BookSendToKindleButton';
 import ConfirmModal from '../components/ConfirmModal';
@@ -494,7 +495,7 @@ const Queue = () => {
                   <div className="relative w-9 h-12 flex-shrink-0">
                     {info.cover ? (
                       <img
-                        src={info.cover}
+                        src={proxyCover(info.cover)}
                         alt={info.title}
                         className="w-full h-full object-cover rounded"
                         loading="lazy"

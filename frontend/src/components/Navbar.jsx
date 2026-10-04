@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { FaHome, FaBook, FaSearch, FaCog, FaDownload, FaMask, FaBookReader, FaSignOutAlt, FaUser, FaUserShield, FaBars, FaTimes, FaCompass, FaBell, FaUpload, FaChartBar, FaSun, FaMoon } from 'react-icons/fa';
 import { useAuth } from '../contexts/AuthContext';
 import { notificationsApi } from '../services/api';
+import { proxyCover } from '../utils/coverUrl';
 
 const TYPE_PATHS = { manga: '/manga', comic: '/comics', book: '/books' };
 const TYPE_LABELS = { manga: 'Manga', comic: 'Cómic', book: 'Libro' };
@@ -265,7 +266,7 @@ const Navbar = () => {
                             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-dark-lighter transition-colors text-left"
                           >
                             {item.cover ? (
-                              <img src={item.cover} alt="" className="w-8 h-10 object-cover rounded flex-shrink-0" />
+                              <img src={proxyCover(item.cover)} alt="" className="w-8 h-10 object-cover rounded flex-shrink-0" />
                             ) : (
                               <div className="w-8 h-10 bg-dark-lighter rounded flex-shrink-0" />
                             )}

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { FaMask, FaCheck, FaPlus, FaBuilding, FaCalendarAlt } from 'react-icons/fa';
 import { useState } from 'react';
+import { proxyCover } from '../utils/coverUrl';
 
 const ComicCard = ({ comic, onAdd, showAddButton = false }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -29,7 +30,7 @@ const ComicCard = ({ comic, onAdd, showAddButton = false }) => {
       <div className="relative aspect-[2/3] overflow-hidden bg-gray-800">
         {comic.cover_image ? (
           <img
-            src={comic.cover_image}
+            src={proxyCover(comic.cover_image)}
             alt={comic.title}
             className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
             loading="lazy"

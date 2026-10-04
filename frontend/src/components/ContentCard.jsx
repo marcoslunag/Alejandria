@@ -3,6 +3,7 @@ import { FaStar, FaBook, FaBookReader, FaMask, FaCheck, FaPlus, FaEye, FaEyeSlas
 import { useState, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { mangaApi, comicApi, bookApi } from '../services/api';
+import { proxyCover } from '../utils/coverUrl';
 
 /**
  * ContentCard - Tarjeta unificada para manga, cómics y libros.
@@ -170,7 +171,7 @@ const ContentCard = ({ item, type = 'manga', onAdd, showAddButton = false, onTog
   };
 
   const c = config[type];
-  const coverUrl = c.getCover();
+  const coverUrl = proxyCover(c.getCover());
   const link = c.getLink();
   const score = c.getScore();
   const subInfo = c.getSubInfo();

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { sanitizeUrl } from '../utils/sanitizeUrl';
+import { proxyCover } from '../utils/coverUrl';
 import {
   FaStar,
   FaSync,
@@ -102,13 +103,13 @@ const ContentDetailPage = ({
         {bannerImage ? (
           <div
             className="absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url(${sanitizeUrl(bannerImage)})` }}
+            style={{ backgroundImage: `url(${proxyCover(bannerImage)})` }}
           />
         ) : coverImage ? (
           <div
             className="absolute inset-0 bg-cover bg-center"
             style={{
-              backgroundImage: `url(${sanitizeUrl(coverImage)})`,
+              backgroundImage: `url(${proxyCover(coverImage)})`,
               filter: 'blur(12px)',
               transform: 'scale(1.15)',
             }}
@@ -128,7 +129,7 @@ const ContentDetailPage = ({
           <div className="flex-shrink-0">
             {coverImage ? (
               <img
-                src={coverImage}
+                src={proxyCover(coverImage)}
                 alt={title}
                 className="w-64 rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.6)]"
                 style={{ borderTop: `2px solid ${accentColor}` }}

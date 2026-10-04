@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { mangaApi, comicApi, bookApi } from '../services/api';
 import SearchBar from '../components/SearchBar';
 import ContentCard from '../components/ContentCard';
+import { proxyCover } from '../utils/coverUrl';
 import { FaSearch, FaBook, FaMask, FaBookReader, FaExclamationTriangle, FaCheck } from 'react-icons/fa';
 
 // Adapta un resultado de búsqueda al shape de ContentCard
@@ -438,7 +439,7 @@ const Search = () => {
                       <div key={`vol-${volume.url}`} className="card overflow-hidden" style={{ borderTop: '2px solid #c07a5a' }}>
                         <div className="relative aspect-[2/3] overflow-hidden bg-gray-800">
                           {volume.cover ? (
-                            <img src={volume.cover} alt={volume.title} className="w-full h-full object-cover" loading="lazy" />
+                            <img src={proxyCover(volume.cover)} alt={volume.title} className="w-full h-full object-cover" loading="lazy" />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center">
                               <FaMask className="text-6xl text-gray-600" />
@@ -473,7 +474,7 @@ const Search = () => {
                     <div key={comic.comicvine_id} className="card overflow-hidden" style={{ borderTop: '2px solid #c07a5a' }}>
                       <div className="relative aspect-[2/3] overflow-hidden bg-gray-800">
                         {comic.cover_image ? (
-                          <img src={comic.cover_image} alt={comic.title} className="w-full h-full object-cover" loading="lazy" />
+                          <img src={proxyCover(comic.cover_image)} alt={comic.title} className="w-full h-full object-cover" loading="lazy" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
                             <FaMask className="text-6xl text-gray-600" />
