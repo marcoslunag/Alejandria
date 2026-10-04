@@ -344,6 +344,10 @@ export const uploadApi = {
 export const recommendationsApi = {
   get: (params = {}) =>
     api.get('/recommendations', { params }),
+  // Discover 2.0 (roadmap #18): secciones de la biblioteca (siguiendo /
+  // continuar leyendo / añadidos recientemente)
+  getLibrarySections: (limit = 12) =>
+    api.get('/recommendations/library-sections', { params: { limit } }),
 };
 
 // System API

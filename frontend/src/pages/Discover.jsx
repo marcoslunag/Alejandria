@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { recommendationsApi, mangaApi, bookApi } from '../services/api';
-import { FaCompass, FaSync, FaFire } from 'react-icons/fa';
+import { FaCompass, FaSync, FaFire, FaRss, FaBookOpen, FaClock } from 'react-icons/fa';
 import ContentCard from '../components/ContentCard';
 
 // Adapta un objeto recommendation al shape que espera ContentCard
@@ -23,6 +23,27 @@ const adaptRecToItem = (rec) => ({
   google_books_id: rec.google_books_id,
 });
 
+// Discover 2.0 (roadmap #18): fila horizontal de items de la biblioteca
+const SectionRow = ({ title, icon, items }) => {
+  if (!items || items.length === 0) return null;
+  return (
+    <section className="mb-6">
+      <div className="flex items-center gap-2 mb-3">
+        {icon}
+        <h2 className="font-serif text-lg font-semibold text-white">{title}</h2>
+        <span className="text-xs text-gray-500 tabular-nums">{items.length}</span>
+      </div>
+      <div className="flex gap-4 overflow-x-auto pb-2 -mx-1 px-1">
+        {items.map((item, i) => (
+          <div key={`${item.content_type}-${item.library_id || i}`} className="w-40 sm:w-44 flex-shrink-0">
+            <ContentCard item={item} type={item.content_type} />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
+
 const Discover = () => {
   const navigate = useNavigate();
   const [recommendations, setRecommendations] = useState([]);
@@ -30,10 +51,26 @@ const Discover = () => {
   const [typeFilter, setTypeFilter] = useState('all');
   const [addedIds, setAddedIds] = useState(new Set());
   const [usingFallback, setUsingFallback] = useState(false);
+  // Discover 2.0 (roadmap #18): secciones de la biblioteca
+  const [sections, setSections] = useState(null);
 
   useEffect(() => {
     loadRecommendations();
   }, [typeFilter]);
+
+  useEffect(() => {
+    loadSections();
+  }, []);
+
+  const loadSections = async () => {
+    try {
+      const { data } = await recommendationsApi.getLibrarySections(12);
+      setSections(data);
+    } catch (err) {
+      if (err.response?.status === 401) return;
+      setSections(null);
+    }
+  };
 
   const loadRecommendations = async () => {
     setLoading(true);
@@ -140,6 +177,27 @@ const Discover = () => {
           </div>
         </div>
       </div>
+
+      {/* Discover 2.0 (roadmap #18): secciones de la biblioteca */}
+      {sections && (
+        <>
+          <SectionRow
+            title="Siguiendo"
+            icon={<FaRss className="text-green-400" />}
+            items={sections.following}
+          />
+          <SectionRow
+            title="Continuar leyendo"
+            icon={<FaBookOpen className="text-blue-400" />}
+            items={sections.continue_reading}
+          />
+          <SectionRow
+            title="Añadidos recientemente"
+            icon={<FaClock className="text-yellow-400" />}
+            items={sections.recently_added}
+          />
+        </>
+      )}
 
       {/* Fallback banner */}
       {!loading && usingFallback && (
