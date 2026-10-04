@@ -3,7 +3,7 @@ Chapter Model
 Represents individual manga chapters
 """
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float, Text, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -13,6 +13,12 @@ class Chapter(Base):
     """Chapter model for storing manga chapter information"""
 
     __tablename__ = "chapters"
+
+    # Índice compuesto (roadmap #11): cubre filter(manga_id=X) + order_by(number)
+    # en listados de capítulos sin paso de ordenación adicional.
+    __table_args__ = (
+        Index("ix_chapters_manga_id_number", "manga_id", "number"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     manga_id = Column(Integer, ForeignKey("manga.id"), nullable=False, index=True)

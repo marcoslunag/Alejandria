@@ -190,6 +190,21 @@ def _migrate_columns():
                         conn.execute(text(f"ALTER TABLE chapters ALTER COLUMN {col_name} TYPE TEXT"))
                         logger.info(f"Migrated chapters.{col_name} from VARCHAR to TEXT")
 
+        # Índices compuestos (roadmap #11): aceleran filter(parent_id=X) + order_by(número)
+        # en listados de capítulos/issues. IF NOT EXISTS ⇒ idempotente (PG y SQLite).
+        # Nota: download_queue(user_id, status) NO aplica — la tabla no tiene user_id
+        # (la cola se filtra por JOIN a Manga/Book/Comic.user_id) y status ya tiene índice.
+        if 'chapters' in tables:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_chapters_manga_id_number ON chapters (manga_id, number)"
+            ))
+            logger.info("Ensured index ix_chapters_manga_id_number")
+        if 'comic_issues' in tables:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_comic_issues_comic_id_issue_number ON comic_issues (comic_id, issue_number)"
+            ))
+            logger.info("Ensured index ix_comic_issues_comic_id_issue_number")
+
 
 def init_db():
     """Initialize database tables and create admin user if not exists"""

@@ -4,7 +4,7 @@ Represents a comic series (American comics) being monitored
 Integrated with ComicVine API for metadata
 """
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float, JSON, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float, JSON, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -97,6 +97,12 @@ class ComicIssue(Base):
     """Comic Issue model - represents a single issue of a comic series"""
 
     __tablename__ = "comic_issues"
+
+    # Índice compuesto (roadmap #11): cubre filter(comic_id=X) + order_by(issue_number)
+    # en listados de issues sin paso de ordenación adicional.
+    __table_args__ = (
+        Index("ix_comic_issues_comic_id_issue_number", "comic_id", "issue_number"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     comic_id = Column(Integer, ForeignKey("comics.id", ondelete="CASCADE"), nullable=False, index=True)

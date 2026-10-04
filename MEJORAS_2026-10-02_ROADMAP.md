@@ -89,8 +89,7 @@ Ver también `SESION_2026-10-01_SCRAPER_REMEDIATION.md` (contexto de rendimiento
 ## P2 — Rendimiento y datos
 
 - **10.** Sesión `aiohttp` compartida en `anilist.py` ✅ IMPLEMENTADA (2026-10-04): `_execute_query` ya no crea/cierra `ClientSession` por query. `AnilistService.__init__` + `_get_session()`: sesión perezosa con `TCPConnector(limit=10, ttl_dns_cache=300)` + `ClientTimeout(total=15)` + header `Accept` a nivel sesión; recreada solo si cambia el event loop (tests) — sin awaits entre check y asignación (atómico en el loop). `close()` idempotente al que se llama en el shutdown del `lifespan` (main.py). Tests `test_anilist_session.py` (4): misma sesión entre llamadas, recreación al cambiar de loop, `_execute_query` no cierra la sesión (pool persistente), `close()` idempotente
-- **11.** Índices DB: `comic_issues(comic_id, issue_number)`, `chapters(manga_id, number)`,
-  `download_queue(user_id, status)` — verificar con `EXPLAIN`
+- **11.** Índices DB ✅ IMPLEMENTADOS (2026-10-04): índices compuestos declarados en los models (`__table_args__` + `Index`) → `chapters(manga_id, number)` como `ix_chapters_manga_id_number` y `comic_issues(comic_id, issue_number)` como `ix_comic_issues_comic_id_issue_number`. Cobertura: `filter(parent_id=X).order_by(número)` en listados de capítulos/issues sin paso de orden. Migración `_migrate_columns()` (database.py) con `CREATE INDEX IF NOT EXISTS` (idempotente, PG+SQLite) para BDs existentes. **Adaptación**: `download_queue(user_id, status)` NO aplica — la tabla no tiene columna `user_id` (la cola se filtra por JOIN a `Manga/Book/Comic.user_id` + `status` del item) y `download_queue.status` ya tiene índice propio. Tests `test_db_indexes.py` (4): declaración en models, creación real vía `create_all`, `status` indexado
 - **12.** Proxy de covers con caché local + `ETag`/`Cache-Control`
 - **13.** Telemetría éxitos/fallos por scraper/host → priorización dinámica de fuentes
 - **14.** Retención de disco: borrar CBZ tras conversión+envío OK (configurable) + dashboard de uso
@@ -115,10 +114,11 @@ Ver también `SESION_2026-10-01_SCRAPER_REMEDIATION.md` (contexto de rendimiento
 6. **#8** Web reader EPUB (epub.js) ✅ (2026-10-04)
 7. **#9** Paginación/infinite scroll ✅ (2026-10-04)
 8. **#10** Sesión aiohttp compartida en Anilist ✅ (2026-10-04)
+9. **#11** Índices BD compuestos (chapters, comic_issues) ✅ (2026-10-04)
 
-**Verificación local (2026-10-04):** `pytest backend/tests/` → **219 passed, 4 failed** (197 base + 9 push + 6 reader EPUB + 3 pagination + 4 sesión Anilist). `npm run build` OK (warning de chunk >500 kB: epubjs).
+**Verificación local (2026-10-04):** `pytest backend/tests/` → **223 passed, 4 failed** (197 base + 9 push + 6 reader EPUB + 3 pagination + 4 sesión Anilist + 4 índices BD). `npm run build` OK (warning de chunk >500 kB: epubjs).
 Los 4 fallos son de **entorno local** (sin Playwright browser, Google Books 429 sin API key,
-`/downloads` read-only, contaminación de estado de queue) — **ninguno toca el código de #2/#3/#4/#5/#7/#8/#9/#10**.
+`/downloads` read-only, contaminación de estado de queue) — **ninguno toca el código de #2/#3/#4/#5/#7/#8/#9/#10/#11**.
 Todos los tests de `search` pasan. Nota: `httpx` quedó sin pin (`>=0.25`) y con `0.28.x` rompía
 `TestClient` de starlette 0.27 (kwarg `app`); **pinado a `httpx==0.27.2`** en `requirements.txt`
 para que un rebuild de Docker no rompa la suite.
