@@ -150,3 +150,14 @@ def test_epub_endpoint_file_missing_on_disk(client, db, regular_user, auth_heade
 
     r = client.get(f"/api/v1/books/{book.id}/chapters/{ch.id}/epub", headers=auth_headers)
     assert r.status_code == 404
+
+
+def test_books_library_total_count_header(client, db, regular_user, auth_headers):
+    """X-Total-Count para infinite scroll (roadmap #9)."""
+    for i in range(1, 4):
+        _make_book(db, regular_user, title=f"Pag Book {i}", google_books_id=f"pag{i}")
+
+    r = client.get("/api/v1/books/library", params={"limit": 2}, headers=auth_headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 2
+    assert r.headers.get("x-total-count") == "3"

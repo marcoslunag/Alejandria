@@ -93,3 +93,14 @@ def test_monitored_toggle(client, db, regular_user, auth_headers):
     assert r.status_code == 200
     db.refresh(comic)
     assert comic.monitored is False
+
+
+def test_comics_library_total_count_header(client, db, regular_user, auth_headers):
+    """X-Total-Count para infinite scroll (roadmap #9)."""
+    for i in range(1, 4):
+        _make_comic(db, regular_user, title=f"Pag Comic {i}", comicvine_id=8000 + i)
+
+    r = client.get("/api/v1/comics/", params={"limit": 2}, headers=auth_headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 2
+    assert r.headers.get("x-total-count") == "3"

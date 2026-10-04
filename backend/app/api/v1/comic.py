@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
@@ -336,11 +336,14 @@ async def get_library(
     order: str = Query("asc", regex="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
+    response: Response = Response(),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Get comics library with filters
+    Get comics library with filters.
+
+    Header `X-Total-Count` con el total (tras filtros) para infinite scroll (roadmap #9).
     """
     query = db.query(Comic).filter(Comic.user_id == current_user.id)
     
@@ -390,6 +393,7 @@ async def get_library(
             downloaded_issues=comic.downloaded_issues
         ))
     
+    response.headers["X-Total-Count"] = str(total)
     return result
 
 

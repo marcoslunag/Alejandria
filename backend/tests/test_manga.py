@@ -190,3 +190,20 @@ def test_add_manga_duplicate(client, db, regular_user, auth_headers):
                         json={"anilist_id": 555, "monitored": True},
                         headers=auth_headers)
     assert r.status_code in (400, 409)  # endpoint returns 400 for duplicates
+
+
+# ── Pagination header (roadmap #9) ────────────────────────────────────────────
+
+def test_list_manga_total_count_header(client, db, regular_user, auth_headers):
+    """X-Total-Count refleja el total tras filtros, con limit/skip."""
+    for i in range(1, 4):
+        _make_manga(db, regular_user, title=f"Pag Manga {i}", anilist_id=9000 + i)
+
+    r = client.get("/api/v1/manga/", params={"limit": 2}, headers=auth_headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 2
+    assert r.headers.get("x-total-count") == "3"
+
+    r2 = client.get("/api/v1/manga/", params={"limit": 2, "skip": 2}, headers=auth_headers)
+    assert len(r2.json()) == 1
+    assert r2.headers.get("x-total-count") == "3"

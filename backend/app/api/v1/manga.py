@@ -8,7 +8,7 @@ import gc
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func
@@ -397,11 +397,15 @@ def list_manga(
     monitored: Optional[bool] = None,
     status: Optional[str] = None,
     search: Optional[str] = None,
+    response: Response = Response(),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    List manga in library with filtering
+    List manga in library with filtering.
+
+    Devuelve el total de resultados (tras aplicar filtros) en el header
+    `X-Total-Count` para infinite scroll en el frontend (roadmap #9).
     """
     query = db.query(Manga).filter(Manga.user_id == current_user.id)
 
@@ -421,7 +425,9 @@ def list_manga(
             )
         )
 
+    total = query.count()
     manga_list = query.offset(skip).limit(limit).all()
+    response.headers["X-Total-Count"] = str(total)
     return manga_list
 
 

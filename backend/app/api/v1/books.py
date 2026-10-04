@@ -5,7 +5,7 @@ Books API Endpoints - Integration with Google Books and EPUB Scrapers
 from datetime import datetime
 import asyncio
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func, cast, Text
@@ -333,11 +333,14 @@ async def get_library(
     sort: str = Query("title", description="Sort by: title, rating, recent"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
+    response: Response = Response(),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Get books library with filtering and sorting
+    Get books library with filtering and sorting.
+
+    Header `X-Total-Count` con el total (tras filtros) para infinite scroll (roadmap #9).
     """
     query = db.query(Book).filter(Book.user_id == current_user.id)
 
@@ -364,6 +367,7 @@ async def get_library(
         query = query.order_by(Book.title.asc())
 
     # Pagination
+    total = query.count()
     offset = (page - 1) * limit
     books = query.offset(offset).limit(limit).all()
 
@@ -375,6 +379,7 @@ async def get_library(
         book_dict['downloaded_chapters'] = book.downloaded_chapters
         result.append(BookResponse(**book_dict))
 
+    response.headers["X-Total-Count"] = str(total)
     return result
 
 

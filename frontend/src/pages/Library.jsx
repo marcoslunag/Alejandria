@@ -1,15 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { mangaApi } from '../services/api';
 import ContentGrid from '../components/ContentGrid';
 import LibraryTabs from '../components/LibraryTabs';
-import { FaBook, FaFilter, FaSync, FaSortAmountDown, FaSearch, FaEye } from 'react-icons/fa';
+import useInfiniteScroll from '../hooks/useInfiniteScroll';
+import { FaBook, FaFilter, FaSync, FaSortAmountDown, FaSearch, FaEye, FaSpinner } from 'react-icons/fa';
+
+const PAGE_SIZE = 50;
 
 const Library = () => {
   const navigate = useNavigate();
   const [manga, setManga] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const inflightRef = useRef(false);
   const [stats, setStats] = useState(null);
   const [filter, setFilter] = useState({
     monitored: null,
@@ -24,22 +31,64 @@ const Library = () => {
     loadStats();
   }, [filter]);
 
+  const buildParams = (extra = {}) => {
+    const params = { ...extra };
+    if (filter.monitored !== null) params.monitored = filter.monitored;
+    if (filter.status) params.status = filter.status;
+    if (filter.search) params.search = filter.search;
+    return params;
+  };
+
+  // Lee el header X-Total-Count para saber si hay más páginas (roadmap #9)
+  const applyPagination = (response, currentLength) => {
+    const header = response.headers?.['x-total-count'];
+    if (header != null) {
+      const t = parseInt(header, 10) || 0;
+      setTotal(t);
+      setHasMore(currentLength + response.data.length < t);
+    } else {
+      // Fallback si el header no llega: página llena ⇒ probablemente haya más
+      setHasMore(response.data.length >= PAGE_SIZE);
+    }
+  };
+
   const loadLibrary = async () => {
     try {
       setLoading(true);
-      const params = {};
-      if (filter.monitored !== null) params.monitored = filter.monitored;
-      if (filter.status) params.status = filter.status;
-      if (filter.search) params.search = filter.search;
-
-      const response = await mangaApi.getLibrary(params);
+      const response = await mangaApi.getLibrary(buildParams({ limit: PAGE_SIZE }));
       setManga(response.data);
+      applyPagination(response, 0);
     } catch (error) {
       console.error('Error loading library:', error);
     } finally {
       setLoading(false);
     }
   };
+
+  const loadMore = useCallback(async () => {
+    if (inflightRef.current || loading) return;
+    inflightRef.current = true;
+    setLoadingMore(true);
+    try {
+      const response = await mangaApi.getLibrary(
+        buildParams({ skip: manga.length, limit: PAGE_SIZE })
+      );
+      setManga(prev => [...prev, ...response.data]);
+      applyPagination(response, manga.length);
+    } catch (error) {
+      console.error('Error loading more manga:', error);
+    } finally {
+      inflightRef.current = false;
+      setLoadingMore(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manga.length, loading, filter]);
+
+  const sentinelRef = useInfiniteScroll({
+    hasMore,
+    loading: loading || loadingMore,
+    loadMore,
+  });
 
   const loadStats = async () => {
     try {
@@ -254,6 +303,16 @@ const Library = () => {
         loading={loading}
         onToggleMonitor={handleToggleMonitor}
       />
+
+      {/* Infinite scroll (roadmap #9) */}
+      {hasMore && !loading && (
+        <div ref={sentinelRef} className="py-6 text-center">
+          <span className="inline-flex items-center gap-2 text-gray-400 text-sm">
+            {loadingMore && <FaSpinner className="animate-spin" />}
+            {loadingMore ? 'Cargando más...' : `${manga.length} de ${total}`}
+          </span>
+        </div>
+      )}
 
       {/* Empty state */}
       {!loading && manga.length === 0 && (
