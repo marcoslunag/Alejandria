@@ -26,6 +26,10 @@ class Settings(BaseSettings):
 
     # Scheduler Settings
     CHECK_INTERVAL_HOURS: int = 6
+
+    # Backups (roadmap #16): backup automático semanal (pg_dump + JSON)
+    BACKUP_DIR: str = "/backups"
+    BACKUP_RETENTION: int = 4  # nº de backups que se conservan (los más viejos se borran)
     # Retención de disco (roadmap #14): días para borrar archivos (CBZ + EPUB)
     # de items YA ENVÍADOS a Kindle. 0 = limpieza inmediata tras el envío,
     # valor negativo = limpieza desactivada.

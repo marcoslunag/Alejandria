@@ -181,6 +181,16 @@ class ContentScheduler:
             max_instances=1
         )
 
+        # Backup automático semanal (roadmap #16): pg_dump + JSON a /backups
+        # los domingos a las 4 AM, tras la limpieza (3 AM) y el metadata refresh.
+        self.scheduler.add_job(
+            self.run_backup,
+            CronTrigger(day_of_week='sun', hour=4, minute=0),
+            id='backup',
+            replace_existing=True,
+            max_instances=1
+        )
+
         # Salud STK: persistir tokens refrescados cada 8h para evitar expiración
         self.scheduler.add_job(
             self._stk_health_check,
@@ -1726,6 +1736,18 @@ class ContentScheduler:
             logger.info(f"Weekly metadata enrichment: {stats}")
         except Exception as e:
             logger.error(f"Weekly metadata enrichment error: {e}", exc_info=True)
+
+    def run_backup(self):
+        """
+        Roadmap #16: backup semanal automático (pg_dump + JSON) a /backups
+        con retención. Nunca lanza: un fallo de backup no puede romper el scheduler.
+        """
+        try:
+            from app.services import backup_service
+            summary = backup_service.run_backup()
+            logger.info(f"Weekly backup: {summary}")
+        except Exception as e:
+            logger.error(f"Weekly backup error: {e}", exc_info=True)
 
     async def cleanup_old_files(self):
         """

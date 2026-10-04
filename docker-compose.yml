@@ -49,11 +49,15 @@ services:
       - IMPORT_DIR=/imports
       # STK data directory (outside /app to survive bind mount)
       - STK_DATA_DIR=/stk-data
+      # Roadmap #16: backups (el endpoint admin POST /system/backup escribe aquí)
+      - BACKUP_DIR=/backups
+      - BACKUP_RETENTION=${BACKUP_RETENTION:-4}
     volumes:
       - downloads:/downloads
       - library:/library
       - imports:/imports
       - stk_data:/stk-data
+      - backups:/backups
       - ./backend:/app
     ports:
       - "9878:7878"
@@ -82,11 +86,15 @@ services:
       - IMPORT_DIR=/imports
       # STK data dir shared with backend so the scheduler can also send to Kindle
       - STK_DATA_DIR=/stk-data
+      # Roadmap #16: backups automáticos semanales
+      - BACKUP_DIR=/backups
+      - BACKUP_RETENTION=${BACKUP_RETENTION:-4}
     volumes:
       - downloads:/downloads
       - library:/library
       - imports:/imports
       - stk_data:/stk-data
+      - backups:/backups
       - ./backend:/app/backend   # Live source mount — same as backend, no rebuild needed on code changes
     depends_on:
       postgres:
@@ -158,6 +166,8 @@ volumes:
   imports:
     driver: local
   stk_data:
+    driver: local
+  backups:
     driver: local
 
 networks:

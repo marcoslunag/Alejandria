@@ -346,6 +346,42 @@ def get_disk_usage(db: Session = Depends(get_db), current_user: User = Depends(r
     }
 
 
+# ============================================================================
+# Backups (roadmap #16): pg_dump + JSON semanal con retención
+# ============================================================================
+
+@router.post("/backup")
+def trigger_backup(current_user: User = Depends(require_admin)):
+    """
+    Dispara un backup manual (pg_dump + JSON) a BACKUP_DIR y aplica la retención.
+    El scheduler ya lo hace los domingos a las 4 AM; esto es para backups bajo demanda.
+    """
+    from app.services import backup_service
+    summary = backup_service.run_backup()
+    if not summary.get("ok"):
+        raise HTTPException(status_code=500, detail=summary.get("error") or "Backup falló (ver logs)")
+    return summary
+
+
+@router.get("/backups")
+def list_backups(current_user: User = Depends(require_admin)):
+    """Lista los backups disponibles (JSON + pg_dump) con tamaño y fecha."""
+    from app.services import backup_service
+    return {"backups": backup_service.list_backups()}
+
+
+@router.delete("/backups/{name}")
+def delete_backup(name: str, current_user: User = Depends(require_admin)):
+    """
+    Borra un backup por timestamp (ej: '20261004-040000').
+    Solo acepta nombres del patrón <YYYYMMDD-HHMMSS>[.json|.dump] (anti path-traversal).
+    """
+    from app.services import backup_service
+    if not backup_service.delete_backup(name):
+        raise HTTPException(status_code=404, detail=f"Backup '{name}' no encontrado o nombre inválido")
+    return {"ok": True, "name": name}
+
+
 @router.get("/stk-status")
 def get_stk_status(current_user: User = Depends(get_current_user)):
     """

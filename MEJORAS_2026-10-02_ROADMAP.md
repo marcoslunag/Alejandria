@@ -97,7 +97,7 @@ Ver también `SESION_2026-10-01_SCRAPER_REMEDIATION.md` (contexto de rendimiento
 ## P3 — Calidad y ops
 
 - **15.** Tests pytest de lógica pura: scorer, bundles, clasificador fallos STK, rate-limiter traductor ✅ IMPLEMENTADO (2026-10-04): `test_pure_logic.py` (30 tests, sin red/BD). **Scorer** (`TomosMangaSearch.find_best_match` con `search` mockeado): re-edición +25 gana, año 2023 > 2018, más tomos gana, guía -100, color -20, spin-off -80, 'completo' +30, vacío → None, 1 resultado → directo. **Bundles** (`detect_bundle`): `#1-30`, `#4-#12`, `[12/12]`, `[5 de 5]`, `[9 Tomos]`, `[80 números]`, rango invertido → None, 'Vol. 4' → None, 'collects #13-#15', 'collects issues #13 - #15' (lo captura el patrón de rango), 'Complete Collection' + `count_of_issues`, '#4' solo → None. **STK** (`STKKindleSender`): señales definitivas (adp_token/device not registered/customer not found), transitorios (403/503/timeout/connection) NO borran sesión, error no clasificado → intacta, burst <120s cuenta como 1 operación, `MAX_CONSECUTIVE_FAILURES` (20) → True en el 20º, `_reset_failure_count` a 0. **Rate-limiter** (`_TranslateRateLimiter`): 1ª llamada inmediata, 5 llamadas espaciadas ≥50ms, 6 hilos → slots estrictamente ordenados (thread-safe)
-- **16.** Backups automáticos: `pg_dump` + JSON semanal a `/backups` con retención
+- **16.** Backups automáticos: `pg_dump` + JSON semanal a `/backups` con retención ✅ IMPLEMENTADO (2026-10-04): nuevo `backup_service.py` — **`run_backup()`**: (1) JSON portable de **toda la BD (todos los usuarios)** con contadores de chapters/issues, (2) **`pg_dump -Fc`** (custom format, restorable con `pg_restore`) usando credenciales de `DATABASE_URL` (el Dockerfile ya instala `postgresql-client`), (3) **retención** `BACKUP_RETENTION` (default 4): borra los timestamps más viejos (par `.json`+`.dump`). `run_backup` **nunca lanza** (fallo de backup no rompe el scheduler). Job APScheduler **domingos 4 AM** (tras cleanup 3 AM + metadata refresh). Endpoints admin: `POST /system/backup` (manual, 500 si falla), `GET /system/backups` (lista con bytes/MB/fecha), `DELETE /system/backups/{ts}` (anti path-traversal: solo `<YYYYMMDD-HHMMSS>[.json|.dump]`). `docker-compose`: volumen `backups` + `BACKUP_DIR`/`BACKUP_RETENTION` en backend y scheduler. Config: `BACKUP_DIR=/backups`, `BACKUP_RETENTION=4`. Tests `test_backups.py` (20): parse_database_url (passwords encoded), run_backup (JSON+dump, dump falla → JSON sigue válido, nunca lanza), retención (6→3, ignora archivos ajenos, -1 desactiva), delete_backup traversal, endpoints (200/403/500/404)
 - **17.** Rate-limit endpoints de búsqueda + latencia p95 en panel de logs
 - **18.** Discover 2.0: "Siguiendo", "Continuar leyendo", "Añadidos recientemente"
 - **19.** Unificar `MangaCard/ComicCard/BookCard` en `ContentCard`
@@ -119,11 +119,12 @@ Ver también `SESION_2026-10-01_SCRAPER_REMEDIATION.md` (contexto de rendimiento
 11. **#13** Telemetría éxitos/fallos + priorización dinámica ✅ (2026-10-04)
 12. **#14** Retención de disco (CLEANUP_DAYS configurable, 3 tipos) + /system/disk-usage ✅ (2026-10-04)
 13. **#15** Tests de lógica pura (scorer, bundles, STK, rate-limiter) ✅ (2026-10-04)
+14. **#16** Backups automáticos (pg_dump + JSON, retención, /backups) ✅ (2026-10-04)
 
-**Verificación local (2026-10-04):** `pytest backend/tests/` → **291 passed, 4-5 failed** (197 base + 9 push + 6 reader EPUB + 3 pagination + 4 sesión Anilist + 4 índices BD + 9 proxy covers + 19 telemetría + 10 retención disco + 30 lógica pura). `npm run build` OK (warning de chunk >500 kB: epubjs).
+**Verificación local (2026-10-04):** `pytest backend/tests/` → **311 passed, 4-5 failed** (197 base + 9 push + 6 reader EPUB + 3 pagination + 4 sesión Anilist + 4 índices BD + 9 proxy covers + 19 telemetría + 10 retención disco + 30 lógica pura + 20 backups). `npm run build` OK (warning de chunk >500 kB: epubjs).
 Los fallos (4-5) son de **entorno local/red** (sin Playwright browser, Google Books 429 sin API key,
 `/downloads` read-only, contaminación de estado de queue, y 1 scraper de red intermitente —
-pasa al ejecutarlo aislado) — **ninguno toca el código de #2/#3/#4/#5/#7/#8/#9/#10/#11/#12/#13/#14/#15**.
+pasa al ejecutarlo aislado) — **ninguno toca el código de #2/#3/#4/#5/#7/#8/#9/#10/#11/#12/#13/#14/#15/#16**.
 Todos los tests de `search` pasan. Nota: `httpx` quedó sin pin (`>=0.25`) y con `0.28.x` rompía
 `TestClient` de starlette 0.27 (kwarg `app`); **pinado a `httpx==0.27.2`** en `requirements.txt`
 para que un rebuild de Docker no rompa la suite.
