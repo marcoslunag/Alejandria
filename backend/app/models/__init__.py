@@ -10,5 +10,6 @@ from app.models.download import DownloadQueue
 from app.models.settings import AppSettings
 from app.models.translation import Translation
 from app.models.search_cache import SearchCache
+from app.models.push_subscription import PushSubscription
 
-__all__ = ["User", "Manga", "Chapter", "Comic", "ComicIssue", "Book", "BookChapter", "DownloadQueue", "AppSettings", "Translation", "SearchCache"]
+__all__ = ["User", "Manga", "Chapter", "Comic", "ComicIssue", "Book", "BookChapter", "DownloadQueue", "AppSettings", "Translation", "SearchCache", "PushSubscription"]

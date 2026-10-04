@@ -79,3 +79,41 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// Web Push (roadmap #7): mostrar notificación con la app cerrada
+self.addEventListener('push', (event) => {
+  let payload = {};
+  if (event.data) {
+    try {
+      payload = event.data.json();
+    } catch (e) {
+      payload = { title: 'Alejandría', body: event.data.text() || '' };
+    }
+  }
+  event.waitUntil(
+    self.registration.showNotification(payload.title || 'Alejandría', {
+      body: payload.body || '',
+      icon: payload.icon || '/icon-192.svg',
+      badge: payload.icon || '/icon-192.svg',
+      tag: payload.tag || 'alejandria',
+      data: { url: payload.url || '/' },
+    })
+  );
+});
+
+// Al hacer clic en la notificación: enfocar la ventana abierta o abrirla
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url === self.location.origin + url || new URL(client.url).pathname === url) {
+          client.focus();
+          return client;
+        }
+      }
+      return self.clients.openWindow(url);
+    })
+  );
+});

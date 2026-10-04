@@ -358,6 +358,13 @@ export const notificationsApi = {
   markSeen: () => api.post('/notifications/mark-seen'),
 };
 
+// Web Push API (roadmap #7)
+export const pushApi = {
+  getVapidKey: () => api.get('/push/vapid-public-key'),
+  subscribe: (subscription) => api.post('/push/subscribe', subscription),
+  unsubscribe: (endpoint) => api.delete('/push/subscribe', { data: { endpoint, keys: { p256dh: '', auth: '' } } }),
+};
+
 // Activity feed API
 export const activityApi = {
   getRecent: (hours = 48, limit = 100) =>

@@ -56,6 +56,9 @@ stkclient
 # Translation
 deep-translator==1.11.4
 
+# Web Push (roadmap #7)
+pywebpush>=1.14
+
 # Testing
 # httpx pinned: >=0.28 removes the `app=` kwarg from Client, which breaks
 # starlette 0.27 TestClient (all API tests error out).

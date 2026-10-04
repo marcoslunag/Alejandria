@@ -82,7 +82,7 @@ Ver también `SESION_2026-10-01_SCRAPER_REMEDIATION.md` (contexto de rendimiento
 |---|--------|--------|
 | 5 | Auto-send de libros en scheduler (`auto_send_to_kindle` + EPUB) | ✅ 2026-10-04: `scheduler.py` bucle `BookChapter.status=='converted'` (limit 6, respeta `auto_send_to_kindle` + `stk_device_serial`) + `_send_book_chapter_to_kindle` (espejo de cómics: partes por `\|`, `is_authenticated()`, `title="{book.title}{vol}"`, `author=book.authors[0]`, marca `sent` solo si todas las partes OK) |
 | 6 | Modo claro/oscuro + toggle persistido | ✅ 2026-10-04: la app ya era **dark-first** (tokens `dark.*` hardcodeados), así que se añadió **modo claro** (papel cálido + dorado) con toggle ☀/☾ en navbar (desktop + móvil), persistido en `localStorage('alejandria-theme')`. Implementación: bloque CSS **unlayered** bajo `html.light` en `index.css` (76 reglas, por utilidad: `text-*` oscurece, `bg-*`/`border-*` aclaran; `.card/.btn-secondary/.input/.skeleton` tocados a la clase por `@apply`; scrim del hero en variables `--tw-gradient-*`; acentos gold/rojo/colores de tipo intactos). Script inline en `index.html` aplica la clase **antes del paint** (anti-FOUC) + `theme-color` meta. `darkMode:'class'` en `tailwind.config.js` (inerte, sin variantes `dark:` usadas). Default = oscuro (identidad de la app). `npm run build` OK |
-| 7 | Web Push en PWA (service worker existe; fin del polling 60s de badges) | ⬜ |
+| 7 | Web Push en PWA (service worker existe; fin del polling 60s de badges) | ✅ 2026-10-04: Web Push **VAPID** de fondo (app cerrada). Backend: `PushSubscription` (endpoint único, p256dh/auth) + claves VAPID P-256 **persistidas en `app_settings`** (BD, para que API y worker compartan pareja — no hay volumen compartido); `push_service.py` genera pareja base64url si falta y `send_push()` fire-and-forget (nunca lanza, borra suscripciones 404/410); endpoints `GET /push/vapid-public-key` + `POST/DELETE /push/subscribe` (upsert por endpoint, DELETE filtra `user_id` anti-IDOR). Hook en `scheduler._check_manga` tras commit (manga `monitored` → push "Nuevos capítulos"). Frontend: `sw.js` handlers `push` (showNotification con icon/tag/data.url) + `notificationclick` (focus/abrir); card "Notificaciones Push" en Ajustes (permiso + subscribe/unsubscribe + `pushsubscriptionchange` re-suscripción); `pushApi` en `api.js`. `pywebpush` en requirements (compatible con `httpx==0.27.2`). Tests `test_push.py` (9): roundtrip VAPID, auth, upsert, IDOR, never-raises |
 | 8 | Web reader para EPUB (epub.js) + tamaño de fuente/tema | ⬜ |
 | 9 | Paginación/infinite scroll en grids grandes | ⬜ |
 
@@ -111,10 +111,11 @@ Ver también `SESION_2026-10-01_SCRAPER_REMEDIATION.md` (contexto de rendimiento
 2. **#3** traducción persistente ✅ (2026-10-04)
 3. **#4 + #5** STK proactivo + auto-send libros ✅ (2026-10-04)
 4. Estilo: **#6** modo claro/oscuro ✅ (2026-10-04)
+5. **#7** Web Push VAPID ✅ (2026-10-04)
 
-**Verificación local (2026-10-04):** `pytest backend/tests/` → **197 passed, 4 failed**.
+**Verificación local (2026-10-04):** `pytest backend/tests/` → **206 passed, 4 failed** (197 base + 9 de `test_push.py`).
 Los 4 fallos son de **entorno local** (sin Playwright browser, Google Books 429 sin API key,
-`/downloads` read-only, contaminación de estado de queue) — **ninguno toca el código de #2/#3/#4/#5**.
+`/downloads` read-only, contaminación de estado de queue) — **ninguno toca el código de #2/#3/#4/#5/#7**.
 Todos los tests de `search` pasan. Nota: `httpx` quedó sin pin (`>=0.25`) y con `0.28.x` rompía
 `TestClient` de starlette 0.27 (kwarg `app`); **pinado a `httpx==0.27.2`** en `requirements.txt`
 para que un rebuild de Docker no rompa la suite.

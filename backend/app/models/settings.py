@@ -25,6 +25,11 @@ class AppSettings(Base):
     # Feature flags
     auto_send_to_kindle = Column(Boolean, default=False)
 
+    # VAPID keys for Web Push (roadmap #7) — persistidas en BD para que el API
+    # (subscribe) y el scheduler (send) usen siempre la misma pareja
+    vapid_public_key = Column(String(256), nullable=True)
+    vapid_private_key = Column(String(256), nullable=True)
+
     def __repr__(self):
         return f"<AppSettings(id={self.id}, stk_device='{self.stk_device_name}')>"
 

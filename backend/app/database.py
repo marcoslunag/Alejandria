@@ -170,6 +170,16 @@ def _migrate_columns():
                 conn.execute(text("ALTER TABLE manga ADD COLUMN is_resolving BOOLEAN DEFAULT FALSE"))
                 logger.info("Added is_resolving column to manga table")
 
+        # Web Push (roadmap #7): claves VAPID en app_settings
+        if 'app_settings' in tables:
+            as_cols = {col['name'] for col in inspector.get_columns('app_settings')}
+            if 'vapid_public_key' not in as_cols:
+                conn.execute(text("ALTER TABLE app_settings ADD COLUMN vapid_public_key VARCHAR(256) NULL"))
+                logger.info("Added vapid_public_key column to app_settings table")
+            if 'vapid_private_key' not in as_cols:
+                conn.execute(text("ALTER TABLE app_settings ADD COLUMN vapid_private_key VARCHAR(256) NULL"))
+                logger.info("Added vapid_private_key column to app_settings table")
+
         # chapters: ampliar download_url/backup_url de VARCHAR(500) a TEXT
         if 'chapters' in tables:
             ch_cols = {col['name']: col for col in inspector.get_columns('chapters')}

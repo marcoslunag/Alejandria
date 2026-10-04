@@ -313,6 +313,21 @@ class ContentScheduler:
 
                 db.commit()
 
+                # Web Push (roadmap #7): notificar al dueño si el manga está monitorizado
+                if manga.monitored and manga.user_id:
+                    try:
+                        from app.services.push_service import send_push
+                        n = len(new_chapters)
+                        send_push(
+                            manga.user_id,
+                            f"Nuevos capítulos: {manga.title}",
+                            f"{n} capítulo{'s' if n != 1 else ''} nuevo{'s' if n != 1 else ''} disponible{'s' if n != 1 else ''}",
+                            f"/manga/{manga.id}",
+                            tag=f"manga-{manga.id}",
+                        )
+                    except Exception:
+                        pass
+
                 # Solo añadir a cola de descargas si el manga está monitorizado
                 if manga.monitored:
                     for ch_data in new_chapters:

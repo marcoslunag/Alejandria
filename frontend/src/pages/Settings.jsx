@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { mangaApi } from '../services/api';
+import { mangaApi, pushApi } from '../services/api';
 import api from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
@@ -28,7 +28,21 @@ import {
   FaExclamationTriangle,
   FaFileExport,
   FaFileImport,
+  FaBell,
+  FaBellSlash,
 } from 'react-icons/fa';
+
+// Convierte la clave VAPID base64url (sin padding) a Uint8Array para PushManager
+const urlBase64ToUint8Array = (base64String) => {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+};
 
 const LEVEL_STYLES = {
   INFO:    'bg-blue-500/20 text-blue-300 border-blue-500/30',
@@ -81,6 +95,15 @@ const Settings = () => {
   // Import folder state (Feature 5)
   const [importStatus, setImportStatus] = useState(null);
   const [importProcessing, setImportProcessing] = useState(false);
+
+  // Web Push (roadmap #7)
+  const [pushState, setPushState] = useState({
+    supported: typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window,
+    permission: typeof Notification !== 'undefined' ? Notification.permission : 'default',
+    subscribed: false,
+    busy: false,
+    message: { type: '', text: '' },
+  });
 
   // STK (Send to Kindle) OAuth state
   const [stkStatus, setStkStatus] = useState({ authenticated: false, devices: [] });
@@ -198,6 +221,85 @@ const Settings = () => {
       setStkDevicesLoading(false);
     }
   };
+
+  // Web Push (roadmap #7): estado, activación y desactivación
+  const loadPushState = async () => {
+    if (!pushState.supported) return;
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg ? await reg.pushManager.getSubscription() : null;
+      setPushState(prev => ({ ...prev, subscribed: !!sub }));
+    } catch (err) {
+      console.error('Error checking push state:', err);
+    }
+  };
+
+  const enablePush = async () => {
+    if (!pushState.supported) {
+      setPushState(prev => ({ ...prev, message: { type: 'error', text: 'Este navegador no soporta Web Push.' } }));
+      return;
+    }
+    try {
+      setPushState(prev => ({ ...prev, busy: true, message: { type: '', text: '' } }));
+      const perm = await Notification.requestPermission();
+      setPushState(prev => ({ ...prev, permission: perm }));
+      if (perm !== 'granted') {
+        setPushState(prev => ({ ...prev, message: { type: 'error', text: 'Permiso denegado. Activa las notificaciones en el navegador para usar push.' } }));
+        return;
+      }
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) {
+        setPushState(prev => ({ ...prev, message: { type: 'error', text: 'Service Worker no disponible. Recarga la página e inténtalo de nuevo.' } }));
+        return;
+      }
+      const { data } = await pushApi.getVapidKey();
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(data.publicKey),
+        });
+      }
+      await pushApi.subscribe(sub.toJSON());
+      setPushState(prev => ({ ...prev, subscribed: true, permission: perm, message: { type: 'success', text: 'Notificaciones push activadas. Recibirás avisos de nuevos capítulos aunque la app esté cerrada.' } }));
+    } catch (error) {
+      console.error('Error enabling push:', error);
+      setPushState(prev => ({ ...prev, message: { type: 'error', text: error.response?.data?.detail || 'Error al activar notificaciones push.' } }));
+    } finally {
+      setPushState(prev => ({ ...prev, busy: false }));
+    }
+  };
+
+  const disablePush = async () => {
+    try {
+      setPushState(prev => ({ ...prev, busy: true }));
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg ? await reg.pushManager.getSubscription() : null;
+      if (sub) {
+        await pushApi.unsubscribe(sub.endpoint).catch(() => {});
+        await sub.unsubscribe();
+      }
+      setPushState(prev => ({ ...prev, subscribed: false, message: { type: 'info', text: 'Notificaciones push desactivadas.' } }));
+    } catch (error) {
+      console.error('Error disabling push:', error);
+      setPushState(prev => ({ ...prev, message: { type: 'error', text: 'Error al desactivar notificaciones push.' } }));
+    } finally {
+      setPushState(prev => ({ ...prev, busy: false }));
+    }
+  };
+
+  useEffect(() => {
+    loadPushState();
+    // Re-suscribirse si el navegador rota las claves
+    const onPushSubChange = async (e) => {
+      try { await pushApi.subscribe(e.newSubscription.toJSON()); } catch (err) { console.error('pushsubscriptionchange error:', err); }
+    };
+    if (pushState.supported) {
+      navigator.serviceWorker.getRegistration()
+        .then(reg => reg?.pushManager.addEventListener('pushsubscriptionchange', onPushSubChange));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleExport = async () => {
     setExporting(true);
@@ -332,6 +434,63 @@ const Settings = () => {
                   </button>
                 ))}
               </div>
+            </div>
+          </section>}
+
+          {/* Notificaciones Push (roadmap #7) */}
+          {!isAdmin && <section>
+            <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+              <FaBell className="text-green-400" />
+              Notificaciones Push
+            </h2>
+            <div className="card p-6">
+              <p className="text-sm text-gray-400 mb-4">
+                Recibe notificaciones de nuevos capítulos en segundo plano, aunque tengas la app cerrada
+                (requiere instalarla como PWA en el navegador).
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                {pushState.subscribed ? (
+                  <>
+                    <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/30 text-green-300 text-sm">
+                      <FaBell className="text-green-400" />
+                      Activadas
+                    </span>
+                    <button
+                      onClick={disablePush}
+                      disabled={pushState.busy}
+                      className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 text-sm font-medium rounded-lg border border-red-500/30 transition-colors disabled:opacity-50"
+                    >
+                      <FaBellSlash className="mr-2" />
+                      Desactivar
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-700/30 border border-gray-600/40 text-gray-400 text-sm">
+                      <FaBellSlash className="text-gray-500" />
+                      {pushState.permission === 'denied' ? 'Permiso denegado en el navegador' : 'Desactivadas'}
+                    </span>
+                    {pushState.supported && pushState.permission !== 'denied' && (
+                      <button
+                        onClick={enablePush}
+                        disabled={pushState.busy}
+                        className="px-4 py-2 bg-green-500 hover:bg-green-600 text-dark font-medium rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        <FaBell className="mr-2" />
+                        {pushState.busy ? 'Activando...' : 'Activar'}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+              {pushState.message.text && (
+                <p className={`mt-3 text-sm ${
+                  pushState.message.type === 'success' ? 'text-green-300'
+                  : pushState.message.type === 'error' ? 'text-red-300'
+                  : 'text-gray-400'}`}>
+                  {pushState.message.text}
+                </p>
+              )}
             </div>
           </section>}
 
