@@ -11,10 +11,13 @@ import logging
 import os
 import sys
 
+import time
+
 from app.config import get_settings
 from app.database import init_db
 from app.api.v1 import api_router
 from app.core.deps import get_current_user
+from app.core.latency import get_latency_tracker
 from app.models.user import User
 from fastapi import Depends
 from app.services.scheduler import ContentScheduler
@@ -113,6 +116,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Latencia de peticiones API (roadmap #17): mide duración de cada request a
+# /api/v1/* y lo registra en el LatencyTracker (percentiles p50/p95/p99 en el
+# panel de logs, endpoint GET /system/latency).
+@app.middleware("http")
+async def latency_middleware(request, call_next):
+    if not request.url.path.startswith(settings.API_V1_PREFIX):
+        return await call_next(request)
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - start) * 1000
+    # Tras el routing, scope["route"] da la plantilla (/api/v1/manga/{id}) →
+    # agrupa métricas por endpoint, no por path con ID distinto.
+    route = request.scope.get("route")
+    route_path = route.path if route is not None else request.url.path
+    get_latency_tracker().record(route_path, duration_ms)
+    return response
 
 
 # Exception handlers

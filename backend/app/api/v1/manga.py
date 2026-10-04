@@ -35,6 +35,7 @@ from app.services.scraper import TomosMangaScraper
 from app.services.mangaycomics_scraper import MangayComicsScraper
 from app.models.user import User
 from app.core.deps import get_current_user
+from app.core.rate_limit import rate_limit_search
 from app.services.search_jobs import create_job, get_job, complete_job
 from app.services import search_cache
 import logging
@@ -143,7 +144,8 @@ async def search_manga(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    _limited: User = Depends(rate_limit_search)  # roadmap #17: rate-limit por usuario
 ):
     """
     Search manga on AniList + check availability in MangayComics scraper.

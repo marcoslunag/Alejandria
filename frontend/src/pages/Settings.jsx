@@ -30,6 +30,7 @@ import {
   FaFileImport,
   FaBell,
   FaBellSlash,
+  FaBolt,
 } from 'react-icons/fa';
 
 // Convierte la clave VAPID base64url (sin padding) a Uint8Array para PushManager
@@ -59,6 +60,9 @@ const Settings = () => {
   const [logs, setLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logLevel, setLogLevel] = useState('');
+  // Latencia API (roadmap #17, admin only)
+  const [latency, setLatency] = useState(null);
+  const [latencyLoading, setLatencyLoading] = useState(false);
   // Backup/Export
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -353,6 +357,19 @@ const Settings = () => {
       console.error('Error loading logs:', err);
     } finally {
       setLogsLoading(false);
+    }
+  };
+
+  const loadLatency = async () => {
+    setLatencyLoading(true);
+    try {
+      const { data } = await api.get('/system/latency', { params: { window_minutes: 60 } });
+      setLatency(data);
+    } catch (err) {
+      console.error('Error loading latency:', err);
+      setLatency(null);
+    } finally {
+      setLatencyLoading(false);
     }
   };
 
@@ -1153,6 +1170,60 @@ const Settings = () => {
                 <FaList className="text-purple-400" />
                 Logs del sistema
               </h2>
+
+              {/* Latencia de la API (roadmap #17) */}
+              <div className="card p-6 mb-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <FaBolt className="text-yellow-400" />
+                  <h3 className="text-sm font-semibold">Latencia de la API (última hora)</h3>
+                  {latencyLoading && <FaSpinner className="animate-spin text-xs text-gray-400" />}
+                </div>
+                {latency && latency.count > 0 ? (
+                  <>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {[['p50_ms', 'p50'], ['p95_ms', 'p95'], ['p99_ms', 'p99'], ['max_ms', 'max']].map(([key, label]) => (
+                        <div key={key} className="px-3 py-2 rounded bg-dark-lighter text-center">
+                          <p className="text-[10px] uppercase tracking-wide text-gray-500">{label}</p>
+                          <p className="text-sm font-bold tabular-nums">{latency[key] ?? '—'} ms</p>
+                        </div>
+                      ))}
+                      <div className="px-3 py-2 rounded bg-dark-lighter text-center">
+                        <p className="text-[10px] uppercase tracking-wide text-gray-500">peticiones</p>
+                        <p className="text-sm font-bold tabular-nums">{latency.count}</p>
+                      </div>
+                    </div>
+                    {latency.slowest && latency.slowest.length > 0 && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-gray-500 text-left">
+                              <th className="py-1 pr-2 font-medium">Endpoint</th>
+                              <th className="py-1 pr-2 font-medium text-right">Req</th>
+                              <th className="py-1 pr-2 font-medium text-right">p95</th>
+                              <th className="py-1 font-medium text-right">Max</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {latency.slowest.slice(0, 5).map(s => (
+                              <tr key={s.route} className="border-t border-dark-lighter/50">
+                                <td className="py-1 pr-2 font-mono text-gray-300">{s.route}</td>
+                                <td className="py-1 pr-2 text-right tabular-nums">{s.count}</td>
+                                <td className="py-1 pr-2 text-right tabular-nums">{s.p95_ms} ms</td>
+                                <td className="py-1 text-right tabular-nums text-gray-500">{s.max_ms} ms</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-xs text-gray-500">
+                    {latencyLoading ? 'Cargando…' : 'Sin datos todavía. Realiza algunas peticiones y pulsa "Actualizar".'}
+                  </p>
+                )}
+              </div>
+
               <div className="card p-6">
                 <div className="flex items-center gap-3 mb-4 flex-wrap">
                   {['', 'INFO', 'WARNING', 'ERROR'].map(lvl => (
@@ -1166,11 +1237,11 @@ const Settings = () => {
                       {lvl || 'Todos'}
                     </button>
                   ))}
-                  <button
-                    onClick={() => loadLogs(logLevel)}
-                    disabled={logsLoading}
-                    className="ml-auto btn btn-secondary flex items-center gap-1.5 text-sm"
-                  >
+                   <button
+                     onClick={() => { loadLogs(logLevel); loadLatency(); }}
+                     disabled={logsLoading}
+                     className="ml-auto btn btn-secondary flex items-center gap-1.5 text-sm"
+                   >
                     {logsLoading ? <FaSpinner className="animate-spin" /> : <FaSync />}
                     Actualizar
                   </button>

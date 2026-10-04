@@ -45,6 +45,7 @@ from app.services.comic_service import (
 )
 from app.models.user import User
 from app.core.deps import get_current_user
+from app.core.rate_limit import rate_limit_search
 from app.services.search_jobs import create_job, get_job, complete_job
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,8 @@ async def search_comics(
     limit: int = Query(20, ge=1, le=50),
     check_availability: bool = Query(True, description="Check if sources are available (slower but filters results)"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    _limited: User = Depends(rate_limit_search)  # roadmap #17: rate-limit por usuario
 ):
     """
     Search comics on ComicVine with optional source availability checking

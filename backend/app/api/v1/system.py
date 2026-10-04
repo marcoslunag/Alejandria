@@ -837,6 +837,19 @@ def get_recent_logs(
     return {"logs": logs, "total": len(logs)}
 
 
+@router.get("/latency")
+def get_latency_stats(
+    window_minutes: int = Query(60, ge=1, le=1440),
+    current_user: User = Depends(require_admin),
+):
+    """
+    Latencia de peticiones API (roadmap #17): percentiles p50/p95/p99 y
+    endpoints más lentos en la ventana dada. Solo admin.
+    """
+    from app.core.latency import get_latency_tracker
+    return get_latency_tracker().stats(window_minutes)
+
+
 @router.post("/translate")
 def translate_text(text: str, source: str = "en", target: str = "es", current_user: User = Depends(get_current_user)):
     """

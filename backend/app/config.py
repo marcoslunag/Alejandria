@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # valor negativo = limpieza desactivada.
     CLEANUP_DAYS: int = 7
 
+    # Rate limiting búsquedas (roadmap #17): máx. búsquedas por usuario
+    # (manga/comics/libros) en la ventana, para no saturar AniList/ComicVine/
+    # Google Books y los scrapers. 429 al exceder.
+    SEARCH_RATE_LIMIT_MAX: int = 30
+    SEARCH_RATE_LIMIT_WINDOW: int = 300  # segundos (5 min)
+
     # Scraper Settings
     SCRAPER_USER_AGENT: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     SCRAPER_TIMEOUT: int = 10

@@ -32,6 +32,7 @@ import logging
 from slugify import slugify
 from app.models.user import User
 from app.core.deps import get_current_user
+from app.core.rate_limit import rate_limit_search
 from app.services.search_jobs import create_job, get_job, complete_job
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,8 @@ async def search_books(
     language: Optional[str] = Query(None, description="Language filter (es, en, etc.)"),
     source: str = Query("all", description="Search source (all, google, openlibrary, scrapers, lectulandia)"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    _limited: User = Depends(rate_limit_search)  # roadmap #17: rate-limit por usuario
 ):
     """
     Search books on Google Books, Open Library, or EPUB scrapers
