@@ -1,12 +1,23 @@
 """
 Translation Service
 Traduce textos de AniList al español
+
+Caché en dos niveles (roadmap #3):
+- L1: memoria (dict, sobrevive mientras viva el proceso)
+- L2: tabla `translations` (sobrevive a restarts y es compartida entre el
+  proceso de API —página de detalle— y el worker de scheduler —enricher—)
+
+El texto se indexa por SHA-256 del texto truncado/normalizado, que es
+exactamente la cadena que se envía a Google Translate.
 """
 
+import hashlib
 import logging
 import threading
 import time
 from typing import Optional, Dict, List
+
+from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +161,66 @@ class TranslatorService:
             logger.warning(f"Could not initialize translator: {e}")
             self.translator = None
 
+    # ------------------------------------------------------------------
+    # Caché persistente (tabla translations)
+    # ------------------------------------------------------------------
+
+    def _key(self, text: str) -> str:
+        """Hash del texto tal y como se enviaría a Google (strip)."""
+        return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
+
+    def _db_lookup(self, keys: Dict[str, str]) -> Dict[str, str]:
+        """
+        Busca en la caché persistente.
+        keys: {source_hash: original_text} → {source_hash: translated}
+        Nunca lanza: si la BD no está disponible devuelve {} (se traduce igual).
+        """
+        if not keys:
+            return {}
+        try:
+            from app.database import SessionLocal
+            from app.models.translation import Translation
+            db = SessionLocal()
+            try:
+                rows = db.query(Translation).filter(
+                    Translation.source_hash.in_(list(keys.keys()))
+                ).all()
+                return {r.source_hash: r.translated for r in rows}
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning(f"Translation DB lookup failed (procediendo sin caché): {e}")
+            return {}
+
+    def _db_store(self, text: str, translated: str) -> None:
+        """Guarda en la caché persistente. Nunca lanza."""
+        try:
+            from app.database import SessionLocal
+            from app.models.translation import Translation
+            db = SessionLocal()
+            try:
+                db.add(Translation(
+                    source_hash=self._key(text),
+                    original=text,
+                    translated=translated,
+                ))
+                db.commit()
+            except IntegrityError:
+                # Otro proceso (API vs scheduler) lo cacheó primero — no es error
+                db.rollback()
+            except Exception as e:
+                db.rollback()
+                logger.warning(f"Translation DB store failed: {e}")
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning(f"Translation DB unavailable: {e}")
+
+    @staticmethod
+    def _normalize(text: str, max_length: int) -> str:
+        """Aplica el mismo truncado que se envía a Google (coherencia del hash)."""
+        return text[:max_length] + "..." if len(text) > max_length else text
+
     def translate_text(self, text: str, max_length: int = 5000) -> str:
         """
         Traduce texto al español
@@ -164,15 +235,23 @@ class TranslatorService:
         if not text or not self.translator:
             return text
 
-        # Limitar longitud
-        if len(text) > max_length:
-            text = text[:max_length] + "..."
+        # Limitar longitud (el hash se calcula sobre el texto truncado, que es
+        # exactamente lo que se envía a Google)
+        text = self._normalize(text, max_length)
+        key = self._key(text)
 
-        # Caché: el mismo texto (mismo manga, enricher semanal, visitas repetidas)
-        # no se vuelve a enviar a Google
+        # L1: caché en memoria
         cached = self._cache.get(text)
         if cached is not None:
             return cached
+
+        # L2: caché persistente (sobrevive a restarts, compartida con el scheduler)
+        hits = self._db_lookup({key: text})
+        if key in hits:
+            if len(self._cache) >= 1000:
+                self._cache.clear()  # cap simple de memoria
+            self._cache[text] = hits[key]
+            return hits[key]
 
         # Rate limit ANTES de llamar a Google (máx ~5 req/s)
         self._rate_limiter.wait()
@@ -183,6 +262,7 @@ class TranslatorService:
                 if len(self._cache) >= 1000:
                     self._cache.clear()  # cap simple de memoria
                 self._cache[text] = translated
+                self._db_store(text, translated)
                 return translated
             return text
 
@@ -193,6 +273,50 @@ class TranslatorService:
     def translate_description(self, description: str) -> str:
         """Traduce descripción de manga"""
         return self.translate_text(description)
+
+    def translate_batch(self, texts: List[str], max_length: int = 5000) -> List[str]:
+        """
+        Traduce una lista de textos de una vez (roadmap #3).
+
+        Deduplica entradas repetidas y reutiliza la caché persistente: solo los
+        textos que NO están cacheados llegan a Google (cada uno espaciado por el
+        rate limiter, ~5 req/s). Devuelve los resultados en el orden de entrada.
+
+        Pensado para el enricher semanal: N descripciones nuevas → N llamadas
+        espaciadas en vez de N llamadas por cada visita de detalle.
+        """
+        if not texts:
+            return []
+        unique: Dict[str, str] = {}
+        for t in texts:
+            if t and t not in unique:
+                unique[t] = self.translate_text(t, max_length=max_length)
+        return [unique.get(t, t) for t in texts]
+
+    def get_cached_translations(self, texts: List[str], max_length: int = 5000) -> Dict[str, str]:
+        """
+        Devuelve {texto_original: traducido} solo para los textos YA en caché
+        (memoria o BD), sin llamar a Google. El enricher lo usa para saber qué
+        descripciones quedan por pre-traducir antes de `translate_batch`.
+        """
+        out: Dict[str, str] = {}
+        pending: Dict[str, str] = {}  # source_hash → texto original de entrada
+        for t in texts:
+            if not t or t in out:
+                continue
+            norm = self._normalize(t, max_length)
+            cached = self._cache.get(norm)
+            if cached is not None:
+                out[t] = cached
+            else:
+                pending[self._key(norm)] = t
+        if pending:
+            hits = self._db_lookup(pending)
+            for key, translated in hits.items():
+                original = pending[key]
+                self._cache[self._normalize(original, max_length)] = translated
+                out[original] = translated
+        return out
 
 
 # Instancia global del traductor

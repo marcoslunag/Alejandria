@@ -8,5 +8,7 @@ from app.models.book import Book
 from app.models.book_chapter import BookChapter
 from app.models.download import DownloadQueue
 from app.models.settings import AppSettings
+from app.models.translation import Translation
+from app.models.search_cache import SearchCache
 
-__all__ = ["User", "Manga", "Chapter", "Comic", "ComicIssue", "Book", "BookChapter", "DownloadQueue", "AppSettings"]
+__all__ = ["User", "Manga", "Chapter", "Comic", "ComicIssue", "Book", "BookChapter", "DownloadQueue", "AppSettings", "Translation", "SearchCache"]

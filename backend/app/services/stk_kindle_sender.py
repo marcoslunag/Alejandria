@@ -90,6 +90,68 @@ def _client_file(user_id: int) -> Path:
     return DATA_DIR / f"stk_{user_id}.json"
 
 
+# ============================================================================
+# STK proactivo (roadmap #4): estado de la sesión visible en el frontend.
+# La BD es la fuente de verdad (el scheduler y la API son procesos distintos);
+# estos helpers nunca lanzan: un fallo de BD no puede romper el envío.
+# ============================================================================
+
+def mark_stk_needs_reauth(user_id: int, reason: str = "") -> None:
+    """Marca user.stk_needs_reauth=True → banner naranja 'Reconectar' en el frontend."""
+    try:
+        from app.database import SessionLocal
+        from app.models.user import User
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user and not user.stk_needs_reauth:
+                user.stk_needs_reauth = True
+                db.commit()
+                logger.info(f"STK user {user_id}: stk_needs_reauth=True {f'({reason[:150]})' if reason else ''}")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Could not set stk_needs_reauth for user {user_id}: {e}")
+
+
+def clear_stk_needs_reauth(user_id: int) -> None:
+    """Desmarca stk_needs_reauth (tras una re-auth exitosa o envío OK)."""
+    try:
+        from app.database import SessionLocal
+        from app.models.user import User
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user and user.stk_needs_reauth:
+                user.stk_needs_reauth = False
+                db.commit()
+                logger.info(f"STK user {user_id}: stk_needs_reauth=False")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Could not clear stk_needs_reauth for user {user_id}: {e}")
+
+
+def record_successful_send(user_id: int) -> None:
+    """Actualiza user.stk_last_sent_at (y desmarca needs_reauth) tras un envío OK."""
+    from datetime import datetime
+    try:
+        from app.database import SessionLocal
+        from app.models.user import User
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user:
+                user.stk_last_sent_at = datetime.utcnow()
+                if user.stk_needs_reauth:
+                    user.stk_needs_reauth = False
+                db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Could not record successful STK send for user {user_id}: {e}")
+
+
 class STKKindleSender:
     """
     Sends files to Kindle using stkclient (Amazon's Send to Kindle API).
@@ -152,6 +214,7 @@ class STKKindleSender:
         self._save_client()
         self._consecutive_failures = 0
         self._last_definitive_failure_at = 0.0
+        clear_stk_needs_reauth(self.user_id)  # Re-auth exitosa: el banner desaparece
         logger.info(f"STK authorization completed for user {self.user_id}")
         return True
 
@@ -284,6 +347,7 @@ class STKKindleSender:
             # Solo borra si es un fallo definitivo confirmado múltiples veces (umbral alto)
             if self._record_failure(error_msg):
                 self.logout()
+                mark_stk_needs_reauth(self.user_id, reason=f"get_devices: {error_msg}")
             return []
 
     def send_file(
@@ -294,6 +358,9 @@ class STKKindleSender:
         device_serials: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         if not self.client:
+            # Sin sesión: marcar el flag para que el frontend muestre el banner
+            # de reconexión (en vez de que el usuario se encuentre un 500 mudo).
+            mark_stk_needs_reauth(self.user_id, reason="envío intentado sin sesión")
             return {'success': False, 'message': 'Not authenticated. Please authorize first.'}
 
         if not file_path.exists():
@@ -342,6 +409,7 @@ class STKKindleSender:
             logger.info(f"Successfully sent {file_path.name} to Kindle for user {self.user_id}")
             self._save_client()
             self._reset_failure_count()
+            record_successful_send(self.user_id)  # 'último envío exitoso' + limpia needs_reauth
             return {'success': True, 'message': f'Sent to {len(device_serials)} device(s)'}
 
         except Exception as e:
@@ -350,6 +418,7 @@ class STKKindleSender:
 
             if self._record_failure(error_msg):
                 self.logout()
+                mark_stk_needs_reauth(self.user_id, reason=f"sesión revocada: {error_msg}")
                 return {'success': False, 'message': 'STK sesión revocada por Amazon. Reconecta en Ajustes → Amazon Send to Kindle.'}
 
             # Error temporal o no clasificado: informar sin borrar sesión

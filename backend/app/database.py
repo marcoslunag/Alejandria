@@ -153,6 +153,16 @@ def _migrate_columns():
                 conn.execute(text("ALTER TABLE users ADD COLUMN device_setup_completed BOOLEAN DEFAULT FALSE"))
                 logger.info("Added device_setup_completed column to users table")
 
+        # STK proactivo (roadmap #4)
+        if 'users' in tables:
+            u_cols = {col['name'] for col in inspector.get_columns('users')}
+            if 'stk_needs_reauth' not in u_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN stk_needs_reauth BOOLEAN DEFAULT FALSE"))
+                logger.info("Added stk_needs_reauth column to users table")
+            if 'stk_last_sent_at' not in u_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN stk_last_sent_at TIMESTAMP NULL"))
+                logger.info("Added stk_last_sent_at column to users table")
+
         # manga: campo is_resolving para estado de resolución de links
         if 'manga' in tables:
             mg_cols = {col['name'] for col in inspector.get_columns('manga')}

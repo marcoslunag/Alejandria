@@ -64,6 +64,24 @@ async def search_books(
     - lectulandia: Lectulandia scraper only
     - epubera: Epubera scraper only
     """
+    # Caché persistente (roadmap #2): misma consulta en <15 min → instantáneo,
+    # sin Google Books/Open Library ni scrapers. in_library se recalcula para el
+    # usuario actual (el payload es global).
+    from app.services import search_cache
+    extras = f"{source}|{language or ''}"
+    cached = search_cache.get_cached("book", q, page, limit, extras=extras)
+    if cached:
+        cached_results = cached.get("results", [])
+        search_cache.annotate_in_library("book", db, current_user.id, cached_results)
+        return BookSearchResponse(
+            results=cached_results,
+            total=cached.get("total", len(cached_results)),
+            page=page,
+            per_page=limit,
+            search_id=None,
+            status="complete",
+        )
+
     results = []
 
     try:
@@ -118,8 +136,14 @@ async def search_books(
                 meta={"page": page, "per_page": limit, "source": source},
             )
             asyncio.create_task(_finish_book_search_job(
-                job.job_id, results, q, page, limit, current_user.id, source
+                job.job_id, results, q, page, limit, current_user.id, source, language
             ))
+        else:
+            # Sin job (solo google/openlibrary): cacheamos el resultado directo.
+            search_cache.put_cached(
+                "book", q, list(results), len(results),
+                [source], page=page, limit=limit, extras=extras,
+            )
 
         return BookSearchResponse(
             results=results,
@@ -256,6 +280,7 @@ async def _finish_book_search_job(
     limit: int,
     user_id: int,
     source: str,
+    language: Optional[str] = None,
 ) -> None:
     """Background: ejecuta la fase de scrapers y completa el job."""
     try:
@@ -266,6 +291,12 @@ async def _finish_book_search_job(
     finally:
         # Complete incluso en error: el frontend deja de hacer polling
         complete_job(job_id, final, len(final))
+        # Caché persistente (roadmap #2): el resultado enriquecido es global
+        from app.services import search_cache
+        search_cache.put_cached(
+            "book", q, final, len(final), [source],
+            page=page, limit=limit, extras=f"{source}|{language or ''}",
+        )
 
 
 @router.get("/search/{job_id}", response_model=BookSearchResponse)

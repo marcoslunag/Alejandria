@@ -49,17 +49,30 @@ Ver también `SESION_2026-10-01_SCRAPER_REMEDIATION.md` (contexto de rendimiento
   (p. ej. `in_library`), se calcula en la fase metadata o se abre sesión nueva dentro del task.
 - Limpieza de jobs: lazy (al crear/leer) — no scheduler.
 
-### 2. Caché de búsqueda (TTL 10–15 min)  ⬜ PENDING
-Tabla `search_cache(query_hash, tipo, payload json, created_at)`; check al inicio de cada search.
+### 2. Caché de búsqueda (TTL 10–15 min)  ✅ IMPLEMENTADA (2026-10-04)
+- [x] `app/models/search_cache.py` — `SearchCache(query_hash unique, tipo, payload JSON, created_at)`; registrado en `models/__init__.py`; `create_all` la crea al arrancar.
+- [x] `app/services/search_cache.py` — TTL 15 min con expiración **lazy** (purge en cada `put` + borrado en `get` vencido, sin worker); `get_cached`/`put_cached` nunca lanzan (fallo = degrada a búsqueda en vivo).
+  - Key: `sha256(f"{tipo}|{q.lower().strip()}|{page}|{limit}|{extras}")` — extras: manga `""`, comic `check_availability`, book `"{source}|{language}"`.
+  - Payload `{"results", "total", "sources"}` se guarda **SIN estado por usuario**: `in_library`/`library_id` se recalculan en cada hit vía `annotate_in_library()` (1 query por tipo: manga por `anilist_id`, comic por `comicvine_id`, book por `google_books_id` + prefijo de título para cards de scraper).
+- [x] Integración: hit al inicio de `search_manga`/`search_comics`/`search_books` (devuelve `status="complete"`, `search_id=None`); write en `_finish_*_search_job` (fase enriquecida) y en los paths sin job (`source=google/openlibrary`, `check_availability=false`, resultados vacíos).
+- [ ] Verificación production (misma búsqueda <15 min → instantáneo, sin AniList/ComicVine/Google).
 
-### 3. Traducción: caché persistente + batch  ⬜ PENDING
-- Tabla `translations(source_hash, original, traducido)` — sobrevive restarts, compartida enricher/detalle.
-- `translate_batch` para el enricher semanal (N descripciones en 1 llamada a Google).
+### 3. Traducción: caché persistente + batch  ✅ IMPLEMENTADA (2026-10-04)
+- [x] `app/models/translation.py` — `Translation(source_hash unique, original, translated)`; registrado en `models/__init__.py`. `source_hash` = SHA-256(texto truncado a `max_length` y `strip`).
+- [x] `app/services/translator.py` — caché por niveles: **L1** memoria → **L2** BD (`translations`) → Google (rate limiter 0.2s) → guardar L1+L2. `translate_batch` + `get_cached_translations` (bulk). `IntegrityError` al insertar = rollback silencioso (2 procesos escriben: API + scheduler). deep-translator síncrono → siempre vía `asyncio.to_thread`.
+- [x] Warm-up en `metadata_enricher.py` (`run_weekly_enrichment`): tras el bucle de books, colecciona descripciones de mangas/cómics/libros, dedup, `get_cached_translations` + `translate_batch` (cap 50) vía `asyncio.to_thread`; stats `descriptions_cached`/`descriptions_translated`. El DB guarda la descripción ORIGINAL (inglés de AniList); la traducción ocurre en read; el warm-up solo calienta la caché persistente.
+- [ ] Verificación production (descripciones en ES sin 429 tras primer enriquecimiento).
 
-### 4. STK proactivo  ⬜ PENDING
-- Tras N fallos `DeviceInfoToken` → flag `stk_needs_reauth` → banner naranja en Settings/Home
-  "Sesión de Amazon caducada — Reconectar"; botón enviar deshabilitado con explicación (no 500).
-- Mostrar "último envío exitoso" por usuario.
+### 4. STK proactivo  ✅ IMPLEMENTADA (2026-10-04)
+- [x] `models/user.py` — `stk_needs_reauth` (Boolean, default False) + `stk_last_sent_at` (DateTime); ALTERs en `database.py::_migrate_columns()`.
+- [x] `stk_kindle_sender.py` — helpers module-level `mark_stk_needs_reauth(user_id, reason)` / `clear_stk_needs_reauth(user_id)` / `record_successful_send(user_id)` (nunca lanzan, `SessionLocal` propio). Wiring:
+  - `complete_authorization` éxito → `clear_stk_needs_reauth`.
+  - `send_file`: sin sesión → mark; éxito → `record_successful_send`; fallo definitivo → `logout()` + mark.
+  - `get_devices`: fallo definitivo → `logout()` + mark.
+- [x] `kindle.py` — `stk_status` devuelve `needs_reauth` (= flag BD **OR** `not is_authenticated()`, así también cubre usuarios que nunca se autorizaron) + `last_sent_at`. `stk_send_to_kindle`: no autenticado → **409** + `mark_stk_needs_reauth` + mensaje ES "Reconecta tu Kindle…"; fallo total → **409** con `last_error` (antes 500).
+- [x] Frontend: los 3 botones de envío (`SendToKindleButton`/`BookSendToKindleButton`/`ComicSendToKindleButton`) — `useEffect` mount lee `stkStatus.needs_reauth`, `handleSend` pre-check, botón `disabled` + gris + `FaExclamationTriangle` + "Reconectar".
+- [x] `Settings.jsx` — banner superior por `needs_reauth` ("Sesión de Amazon caducada"/"Kindle no configurado", botón "Reconectar"/"Configurar"); caja de estado 3 estados (orange/green/gray) + línea "Último envío exitoso"; flujo de autorización visible también con `needs_reauth`; resumen + mensaje de estado actualizados.
+- [ ] Verificación production (revocar sesión de Amazon → banner naranja + envío 409 amable).
 
 ---
 
@@ -67,7 +80,7 @@ Tabla `search_cache(query_hash, tipo, payload json, created_at)`; check al inici
 
 | # | Mejora | Estado |
 |---|--------|--------|
-| 5 | Auto-send de libros en scheduler (`auto_send_to_kindle` + EPUB) | ⬜ |
+| 5 | Auto-send de libros en scheduler (`auto_send_to_kindle` + EPUB) | ✅ 2026-10-04: `scheduler.py` bucle `BookChapter.status=='converted'` (limit 6, respeta `auto_send_to_kindle` + `stk_device_serial`) + `_send_book_chapter_to_kindle` (espejo de cómics: partes por `\|`, `is_authenticated()`, `title="{book.title}{vol}"`, `author=book.authors[0]`, marca `sent` solo si todas las partes OK) |
 | 6 | Modo oscuro (Tailwind `dark:` + toggle persistido) | ⬜ |
 | 7 | Web Push en PWA (service worker existe; fin del polling 60s de badges) | ⬜ |
 | 8 | Web reader para EPUB (epub.js) + tamaño de fuente/tema | ⬜ |
@@ -94,10 +107,17 @@ Tabla `search_cache(query_hash, tipo, payload json, created_at)`; check al inici
 
 ## Orden de ejecución acordado
 
-1. **#1** búsqueda progresiva (+ #2 después si tiene sentido)
-2. **#3** traducción persistente
-3. **#4 + #5** STK proactivo + auto-send libros
-4. Estilo: **#6** modo oscuro o **#7** push, según decisión
+1. **#1** búsqueda progresiva ✅ + **#2** caché persistente ✅ (2026-10-04)
+2. **#3** traducción persistente ✅ (2026-10-04)
+3. **#4 + #5** STK proactivo + auto-send libros ✅ (2026-10-04)
+4. Estilo: **#6** modo oscuro o **#7** push, según decisión (pendiente)
+
+**Verificación local (2026-10-04):** `pytest backend/tests/` → **197 passed, 4 failed**.
+Los 4 fallos son de **entorno local** (sin Playwright browser, Google Books 429 sin API key,
+`/downloads` read-only, contaminación de estado de queue) — **ninguno toca el código de #2/#3/#4/#5**.
+Todos los tests de `search` pasan. Nota: `httpx` quedó sin pin (`>=0.25`) y con `0.28.x` rompía
+`TestClient` de starlette 0.27 (kwarg `app`); **pinado a `httpx==0.27.2`** en `requirements.txt`
+para que un rebuild de Docker no rompa la suite.
 
 ## Comandos de deploy (recordatorio)
 

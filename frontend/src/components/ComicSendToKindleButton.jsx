@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { comicApi, mangaApi } from '../services/api';
 import {
   FaTabletAlt,
   FaSpinner,
   FaCheck,
   FaTimes,
-  FaRedo
+  FaRedo,
+  FaExclamationTriangle
 } from 'react-icons/fa';
 
 /**
@@ -31,6 +32,15 @@ const ComicSendToKindleButton = ({
 }) => {
   const [status, setStatus] = useState('idle'); // idle, sending, success, error
   const [errorMessage, setErrorMessage] = useState('');
+  // STK proactivo (roadmap #4): si la sesión de Amazon no está disponible,
+  // el botón se deshabilita con explicación en vez de lanzar un 409/500.
+  const [reauthNeeded, setReauthNeeded] = useState(false);
+
+  useEffect(() => {
+    mangaApi.stkGetStatus()
+      .then((res) => setReauthNeeded(!!res.data.needs_reauth))
+      .catch(() => {});
+  }, []);
 
   const handleSend = async (e) => {
     e.stopPropagation(); // Prevent triggering parent click handlers
@@ -41,10 +51,10 @@ const ComicSendToKindleButton = ({
       setStatus('sending');
       setErrorMessage('');
 
-      // Check if STK is authenticated
+      // Check if STK is authenticated (recheck: la sesión pudo caducar desde el mount)
       const stkStatus = await mangaApi.stkGetStatus();
-      if (!stkStatus.data.authenticated) {
-        throw new Error('STK no autenticado. Ve a Ajustes para conectar tu cuenta de Amazon.');
+      if (stkStatus.data.needs_reauth) {
+        throw new Error('Sesión de Amazon no disponible. Reconecta en Ajustes → Amazon Send to Kindle.');
       }
 
       // Send via comic API
@@ -113,9 +123,11 @@ const ComicSendToKindleButton = ({
     <div className="inline-flex items-center gap-2">
       <button
         onClick={handleSend}
-        disabled={status === 'sending'}
+        disabled={status === 'sending' || reauthNeeded}
         title={
-          errorMessage
+          reauthNeeded
+            ? 'Sesión de Amazon no disponible. Reconecta en Ajustes → Amazon Send to Kindle'
+            : errorMessage
             ? errorMessage
             : wasSent
             ? `Enviado el ${formatSentDate(sentAt)} - Click para reenviar`
@@ -126,7 +138,9 @@ const ComicSendToKindleButton = ({
           transition-all duration-200
           ${sizeClasses[size]}
           ${
-            status === 'error'
+            reauthNeeded
+              ? 'bg-gray-500/20 text-gray-400 border border-gray-500/30 cursor-not-allowed'
+              : status === 'error'
               ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30'
               : status === 'success' || wasSent
               ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/30'
@@ -135,7 +149,12 @@ const ComicSendToKindleButton = ({
           disabled:opacity-50 disabled:cursor-wait
         `}
       >
-        {status === 'sending' ? (
+        {reauthNeeded ? (
+          <>
+            <FaExclamationTriangle className={iconSize[size]} />
+            {showLabel && 'Reconectar'}
+          </>
+        ) : status === 'sending' ? (
           <>
             <FaSpinner className={`animate-spin ${iconSize[size]}`} />
             {showLabel && 'Enviando...'}

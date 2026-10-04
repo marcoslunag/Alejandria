@@ -74,6 +74,22 @@ async def search_comics(
     - Shows only comics with available sources first
     - Slightly slower but much more useful
     """
+    # Caché persistente (roadmap #2): misma consulta en <15 min → instantáneo,
+    # sin ComicVine ni scrapers. in_library se recalcula para el usuario actual.
+    from app.services import search_cache
+    cached = search_cache.get_cached("comic", q, page, limit, extras=str(check_availability))
+    if cached:
+        cached_results = cached.get("results", [])
+        search_cache.annotate_in_library("comic", db, current_user.id, cached_results)
+        return ComicSearchResponse(
+            results=[ComicSearchResult(**r) for r in cached_results],
+            total=cached.get("total", len(cached_results)),
+            page=page,
+            per_page=limit,
+            search_id=None,
+            status="complete",
+        )
+
     comicvine = get_comicvine_service()
     search_result = await comicvine.search_volumes(q, page=page, per_page=limit)
 
@@ -217,8 +233,15 @@ async def search_comics(
             meta={"page": page, "per_page": limit},
         )
         asyncio.create_task(_finish_comic_search_job(
-            job.job_id, results, run_availability_phase
+            job.job_id, results, run_availability_phase, q, page, limit, check_availability
         ))
+    else:
+        # Sin job (check_availability=False o resultados vacíos): cacheamos
+        # directamente el resultado de ComicVine.
+        search_cache.put_cached(
+            "comic", q, [r[0].dict() for r in results], search_result.get('total', 0),
+            ["comicvine"], page=page, limit=limit, extras=str(check_availability),
+        )
 
     # Extract just the results (without original items)
     final_results = [r[0] for r in results]
@@ -233,7 +256,9 @@ async def search_comics(
     )
 
 
-async def _finish_comic_search_job(job_id: str, results: List, run_availability_phase) -> None:
+async def _finish_comic_search_job(job_id: str, results: List, run_availability_phase,
+                                   q: str, page: int = 1, limit: int = 20,
+                                   check_availability: bool = True) -> None:
     """Background: check de disponibilidad + búsqueda directa y completa el job."""
     try:
         await run_availability_phase()
@@ -242,6 +267,12 @@ async def _finish_comic_search_job(job_id: str, results: List, run_availability_
     finally:
         # Complete incluso en error: el frontend deja de hacer polling
         complete_job(job_id, [r[0].dict() for r in results], len(results))
+        # Caché persistente (roadmap #2): el resultado enriquecido es global
+        from app.services import search_cache
+        search_cache.put_cached(
+            "comic", q, [r[0].dict() for r in results], len(results),
+            ["comicvine"], page=page, limit=limit, extras=str(check_availability),
+        )
 
 
 @router.get("/search/{job_id}", response_model=ComicSearchResponse)

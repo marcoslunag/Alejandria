@@ -1353,6 +1353,20 @@ class ContentScheduler:
                     continue
                 await self._send_comic_issue_to_kindle(issue.id, user)
 
+            # Auto-send de libros (roadmap #5): EPUBs convertidos pendientes de enviar
+            book_chapters = db.query(BookChapter).filter(
+                BookChapter.status == 'converted'
+            ).limit(6).all()
+
+            for book_chapter in book_chapters:
+                book = book_chapter.book
+                if not book:
+                    continue
+                user = db.query(User).filter(User.id == book.user_id).first()
+                if not user or not user.auto_send_to_kindle or not user.stk_device_serial:
+                    continue
+                await self._send_book_chapter_to_kindle(book_chapter.id, user)
+
         except Exception as e:
             logger.error(f"Error in send_to_kindle: {e}")
         finally:
@@ -1484,6 +1498,79 @@ class ContentScheduler:
 
         except Exception as e:
             logger.error(f"Error in _send_comic_issue_to_kindle: {e}")
+        finally:
+            db.close()
+
+    async def _send_book_chapter_to_kindle(self, book_chapter_id: int, user):
+        """
+        Envía un EPUB de libro al Kindle usando el STK del usuario (roadmap #5).
+        Espejo de _send_comic_issue_to_kindle: soporta partes separadas por '|'.
+        """
+        db: Session = SessionLocal()
+        try:
+            book_chapter = db.query(BookChapter).filter(
+                BookChapter.id == book_chapter_id
+            ).first()
+            if not book_chapter or not book_chapter.converted_path:
+                return
+
+            book = db.query(Book).filter(Book.id == book_chapter.book_id).first()
+            if not book:
+                return
+
+            # Manejar múltiples archivos (partes) separados por '|'
+            file_paths = [Path(p.strip()) for p in book_chapter.converted_path.split('|') if p.strip()]
+
+            # Verificar que todos los archivos existen
+            missing_files = [f for f in file_paths if not f.exists()]
+            if missing_files:
+                logger.error(f"Converted files not found: {[str(f) for f in missing_files]}")
+                return
+
+            vol_info = f" Vol {book_chapter.number}" if book_chapter.number else ""
+            if len(file_paths) > 1:
+                logger.info(f"Sending {len(file_paths)} parts for book {book.title}{vol_info}")
+
+            stk_sender = get_stk_sender(user.id)
+            if not stk_sender.is_authenticated():
+                logger.error(f"STK not authenticated for user {user.id}")
+                return
+
+            all_success = True
+            for idx, file_path in enumerate(file_paths):
+                file_size_mb = file_path.stat().st_size / (1024 * 1024)
+                part_info = f" (Part {idx + 1}/{len(file_paths)})" if len(file_paths) > 1 else ""
+                logger.info(f"Sending to Kindle via STK: {file_path.name}{part_info} ({file_size_mb:.1f}MB)")
+
+                book_author = None
+                if isinstance(book.authors, list) and book.authors:
+                    book_author = book.authors[0]
+
+                result = stk_sender.send_file(
+                    file_path=file_path,
+                    title=f"{book.title}{vol_info}",
+                    author=book_author,
+                    device_serials=[user.stk_device_serial] if user.stk_device_serial else None
+                )
+
+                if result.get('success'):
+                    logger.info(f"Sent via STK: {file_path.name}")
+                else:
+                    logger.error(f"Failed to send via STK: {file_path.name} — {result.get('message')}")
+                    all_success = False
+
+            # Marcar como enviado solo si todas las partes se enviaron correctamente
+            if all_success:
+                book_chapter.status = 'sent'
+                book_chapter.sent_at = datetime.utcnow()
+                logger.info(f"Successfully sent book to Kindle: {book.title}{vol_info}")
+            else:
+                logger.error(f"Some parts failed to send for book {book.title}{vol_info}")
+
+            db.commit()
+
+        except Exception as e:
+            logger.error(f"Error in _send_book_chapter_to_kindle: {e}")
         finally:
             db.close()
 

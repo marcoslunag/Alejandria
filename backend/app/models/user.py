@@ -34,6 +34,12 @@ class User(Base):
     stk_device_name = Column(String(100), nullable=True)
     auto_send_to_kindle = Column(Boolean, default=False)
 
+    # STK proactivo (roadmap #4): la sesión de Amazon caducó/revocada → el
+    # frontend muestra banner "Reconectar" y deshabilita el envío (en vez de 500).
+    stk_needs_reauth = Column(Boolean, default=False)
+    # Último envío exitoso a Kindle (roadmap #4: "último envío exitoso" por usuario)
+    stk_last_sent_at = Column(DateTime, nullable=True)
+
     # Download quality preferences (Feature 4)
     preferred_quality = Column(String(10), default='hq')   # 'hq'|'lq'|'any'
     preferred_format = Column(String(10), default='auto')  # 'epub'|'cbz'|'auto'

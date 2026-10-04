@@ -101,8 +101,14 @@ async def stk_status(db: Session = Depends(get_db), current_user: User = Depends
             "name": current_user.stk_device_name
         }
 
+    # STK proactivo (roadmap #4): el banner de reconexión se muestra cuando la
+    # sesión está caducada (flag marcado por un fallo) O no existe.
+    needs_reauth = bool(current_user.stk_needs_reauth) or not is_auth
+
     return {
         "authenticated": is_auth,
+        "needs_reauth": needs_reauth,
+        "last_sent_at": current_user.stk_last_sent_at,
         "devices": [],  # Use GET /stk/devices to fetch the live device list
         "saved_device": saved_device,
         "message": "Ready to send" if is_auth else "Not authenticated. Use /stk/signin-url to get authorization URL."
@@ -168,14 +174,17 @@ async def stk_send_to_kindle(
     current_user: User = Depends(get_current_user)
 ):
     """Send chapter to Kindle via STK using the current user's session"""
-    from app.services.stk_kindle_sender import get_stk_sender
+    from app.services.stk_kindle_sender import get_stk_sender, mark_stk_needs_reauth
 
     sender = get_stk_sender(current_user.id)
 
     if not sender.is_authenticated():
+        # STK proactivo (roadmap #4): 409 con mensaje claro (el frontend muestra
+        # el banner de reconexión) en vez de 401/500 genéricos.
+        mark_stk_needs_reauth(current_user.id, reason="envío manual sin sesión")
         raise HTTPException(
-            status_code=401,
-            detail="STK not authenticated. Go to Settings and authorize with Amazon."
+            status_code=409,
+            detail="Sesión de Amazon no disponible. Reconecta tu Kindle en Ajustes → Amazon Send to Kindle."
         )
 
     chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
@@ -204,6 +213,7 @@ async def stk_send_to_kindle(
 
     sent_count = 0
     failed_files = []
+    last_error = ""
 
     for idx, book_file in enumerate(file_paths, 1):
         part_suffix = f" (Parte {idx}/{len(file_paths)})" if len(file_paths) > 1 else ""
@@ -220,7 +230,8 @@ async def stk_send_to_kindle(
             sent_count += 1
         else:
             failed_files.append(book_file.name)
-            logger.error(f"Failed to send {book_file.name}: {result['message']}")
+            last_error = result.get('message', 'error desconocido')
+            logger.error(f"Failed to send {book_file.name}: {last_error}")
 
     if sent_count > 0:
         chapter.sent_at = datetime.utcnow()
@@ -233,7 +244,12 @@ async def stk_send_to_kindle(
 
         return SendResponse(ok=True, message=message, chapter_id=chapter_id, sent_at=chapter.sent_at)
     else:
-        raise HTTPException(status_code=500, detail=f"Failed to send: {', '.join(failed_files)}")
+        # Fallo total: 409 con el motivo real (roadmap #4: no un 500 mudo).
+        # Si la sesión fue revocada, send_file ya marcó stk_needs_reauth.
+        raise HTTPException(
+            status_code=409,
+            detail=f"No se pudo enviar: {last_error or ', '.join(failed_files)}"
+        )
 
 
 @router.post("/stk/logout")

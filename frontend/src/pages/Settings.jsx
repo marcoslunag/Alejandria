@@ -267,15 +267,20 @@ const Settings = () => {
         </p>
       </div>
 
-      {/* STK Warning Banner — shown when Kindle user hasn't connected Amazon */}
-      {!loading && !isAdmin && settings.ereader_type === 'kindle' && !stkStatus.authenticated && (
+      {/* STK Warning Banner (roadmap #4) — session expired OR never connected.
+          needs_reauth = flag de BD (fallo real) OR sin sesión. */}
+      {!loading && !isAdmin && settings.ereader_type === 'kindle' && stkStatus.needs_reauth && (
         <div className="mb-6 flex items-start gap-4 bg-orange-500/10 border border-orange-500/40 rounded-xl px-5 py-4">
           <FaExclamationTriangle className="text-orange-400 text-xl flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
-            <p className="font-semibold text-orange-300">Kindle no configurado</p>
+            <p className="font-semibold text-orange-300">
+              {stkStatus.authenticated ? 'Sesión de Amazon caducada' : 'Kindle no configurado'}
+            </p>
             <p className="text-sm text-gray-400 mt-0.5">
-              Conecta tu cuenta de Amazon para poder enviar contenido directamente a tu Kindle.
-              Baja hasta la sección <strong className="text-gray-200">Amazon Send to Kindle</strong> para autorizarte.
+              {stkStatus.authenticated
+                ? 'La sesión de Amazon dejó de funcionar (posiblemente revocada). Reconecta para poder enviar contenido a tu Kindle.'
+                : 'Conecta tu cuenta de Amazon para poder enviar contenido directamente a tu Kindle.'}
+              {' '}Baja hasta la sección <strong className="text-gray-200">Amazon Send to Kindle</strong> para autorizarte.
             </p>
           </div>
           <button
@@ -284,7 +289,7 @@ const Settings = () => {
             }}
             className="flex-shrink-0 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium rounded-lg transition-colors"
           >
-            Configurar
+            {stkStatus.authenticated ? 'Reconectar' : 'Configurar'}
           </button>
         </div>
       )}
@@ -539,20 +544,44 @@ const Settings = () => {
                 </p>
               </div>
 
-              {/* Estado de conexion */}
-              <div className={`flex items-center gap-3 p-4 rounded-lg ${stkStatus.authenticated ? 'bg-green-500/10 border border-green-500/30' : 'bg-gray-500/10 border border-gray-500/30'}`}>
-                <div className={`p-2 rounded-full ${stkStatus.authenticated ? 'bg-green-500/20' : 'bg-gray-500/20'}`}>
-                  {stkStatus.authenticated ? (
+              {/* Estado de conexion (roadmap #4: needs_reauth = sesión caducada o inexistente) */}
+              <div className={`flex items-center gap-3 p-4 rounded-lg ${
+                stkStatus.needs_reauth
+                  ? 'bg-orange-500/10 border border-orange-500/30'
+                  : stkStatus.authenticated
+                  ? 'bg-green-500/10 border border-green-500/30'
+                  : 'bg-gray-500/10 border border-gray-500/30'
+              }`}>
+                <div className={`p-2 rounded-full ${
+                  stkStatus.needs_reauth
+                    ? 'bg-orange-500/20'
+                    : stkStatus.authenticated
+                    ? 'bg-green-500/20'
+                    : 'bg-gray-500/20'
+                }`}>
+                  {stkStatus.needs_reauth ? (
+                    <FaExclamationCircle className="text-orange-400 text-xl" />
+                  ) : stkStatus.authenticated ? (
                     <FaCheckCircle className="text-green-500 text-xl" />
                   ) : (
                     <FaExclamationCircle className="text-gray-500 text-xl" />
                   )}
                 </div>
                 <div className="flex-1">
-                  <p className="font-bold">{stkStatus.authenticated ? 'Conectado a Amazon' : 'No conectado'}</p>
+                  <p className="font-bold">
+                    {stkStatus.needs_reauth
+                      ? (stkStatus.authenticated ? 'Sesión de Amazon caducada' : 'No conectado')
+                      : 'Conectado a Amazon'}
+                  </p>
                   {stkStatus.authenticated && stkStatus.devices?.length > 0 && (
                     <p className="text-sm text-gray-400">
                       {stkStatus.devices.length} dispositivo(s) Kindle disponible(s)
+                    </p>
+                  )}
+                  {stkStatus.last_sent_at && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Último envío exitoso:{' '}
+                      {new Date(stkStatus.last_sent_at).toLocaleString('es-ES')}
                     </p>
                   )}
                 </div>
@@ -566,8 +595,8 @@ const Settings = () => {
                 )}
               </div>
 
-              {/* Flujo de autorizacion */}
-              {!stkStatus.authenticated && (
+              {/* Flujo de autorizacion (también cuando la sesión caducó: needs_reauth) */}
+              {(stkStatus.needs_reauth || !stkStatus.authenticated) && (
                 <div className="space-y-4">
                   {!stkSigninUrl ? (
                     <button
@@ -580,7 +609,7 @@ const Settings = () => {
                       ) : (
                         <FaAmazon />
                       )}
-                      Conectar con Amazon
+                      {stkStatus.authenticated ? 'Reconectar con Amazon' : 'Conectar con Amazon'}
                     </button>
                   ) : (
                     <div className="space-y-4">
@@ -768,10 +797,18 @@ const Settings = () => {
             </h2>
             <div className="card p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Amazon STK */}
+                {/* Amazon STK (roadmap #4: needs_reauth = sesión caducada o inexistente) */}
                 <div className="flex items-center gap-4">
-                  <div className={`p-3 rounded-full ${stkStatus.authenticated ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
-                    {stkStatus.authenticated ? (
+                  <div className={`p-3 rounded-full ${
+                    stkStatus.needs_reauth
+                      ? 'bg-orange-500/20'
+                      : stkStatus.authenticated
+                      ? 'bg-green-500/20'
+                      : 'bg-red-500/20'
+                  }`}>
+                    {stkStatus.needs_reauth ? (
+                      <FaExclamationCircle className="text-orange-400 text-xl" />
+                    ) : stkStatus.authenticated ? (
                       <FaCheckCircle className="text-green-500 text-xl" />
                     ) : (
                       <FaExclamationCircle className="text-red-500 text-xl" />
@@ -779,7 +816,11 @@ const Settings = () => {
                   </div>
                   <div>
                     <p className="text-gray-400 text-sm">Amazon STK</p>
-                    <p className="font-bold">{stkStatus.authenticated ? 'Conectado' : 'No conectado'}</p>
+                    <p className="font-bold">
+                      {stkStatus.needs_reauth
+                        ? (stkStatus.authenticated ? 'Sesión caducada' : 'No conectado')
+                        : 'Conectado'}
+                    </p>
                     {stkStatus.authenticated && stkStatus.devices?.length > 0 && (
                       <p className="text-xs text-gray-500">{stkStatus.devices.length} dispositivo(s)</p>
                     )}
@@ -814,7 +855,16 @@ const Settings = () => {
                 </div>
               )}
 
-              {stkStatus.authenticated && (
+              {stkStatus.needs_reauth && stkStatus.authenticated && (
+                <div className="mt-4 p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg">
+                  <p className="text-sm text-orange-300">
+                    <strong>Atención:</strong> La sesión de Amazon dejó de funcionar.
+                    Reconecta en la sección "Amazon Send to Kindle" de arriba para volver a enviar.
+                  </p>
+                </div>
+              )}
+
+              {stkStatus.authenticated && !stkStatus.needs_reauth && (
                 <div className="mt-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
                   <p className="text-sm text-green-300">
                     Todo listo para enviar manga a tu Kindle. Los archivos se dividiran automaticamente

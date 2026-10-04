@@ -6,6 +6,7 @@ desde AniList (manga), ComicVine (comics) y Google Books (libros).
 Diseñado para ejecutarse semanalmente para mantener los datos frescos.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
@@ -300,6 +301,41 @@ class MetadataEnricher:
                 except Exception as e:
                     logger.error(f"Weekly enrichment error for book {book.id}: {e}")
                     stats['errors'] += 1
+
+            # Pre-traducción de descripciones (roadmap #3): calienta la caché
+            # persistente (tabla translations) para que la página de detalle no
+            # tenga que llamar a Google en cada visita (429 frecuentes).
+            # deep-translator es SÍNCRONO → asyncio.to_thread.
+            try:
+                from app.services.translator import get_translator
+                translator = get_translator()
+                descs = []
+                for m in mangas:
+                    if m.description:
+                        descs.append(m.description)
+                for c in comics:
+                    if c.description:
+                        descs.append(c.description)
+                for b in books:
+                    if b.description:
+                        descs.append(b.description)
+                descs = list(dict.fromkeys(descs))  # dedup preserving order
+
+                if descs:
+                    cached = await asyncio.to_thread(translator.get_cached_translations, descs)
+                    missing = [d for d in descs if d not in cached]
+                    stats['descriptions_cached'] = len(cached)
+                    if missing:
+                        # Cap: no saturar el job semanal (rate limiter 5 req/s)
+                        to_translate = missing[:50]
+                        logger.info(
+                            f"Weekly enrichment: pre-translating "
+                            f"{len(to_translate)}/{len(missing)} missing descriptions"
+                        )
+                        await asyncio.to_thread(translator.translate_batch, to_translate)
+                        stats['descriptions_translated'] = len(to_translate)
+            except Exception as e:
+                logger.warning(f"Weekly enrichment: error pre-translating descriptions: {e}")
 
             logger.info(f"Weekly enrichment complete: {stats}")
             return stats

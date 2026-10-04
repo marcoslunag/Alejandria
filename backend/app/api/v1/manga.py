@@ -36,6 +36,7 @@ from app.services.mangaycomics_scraper import MangayComicsScraper
 from app.models.user import User
 from app.core.deps import get_current_user
 from app.services.search_jobs import create_job, get_job, complete_job
+from app.services import search_cache
 import logging
 from slugify import slugify
 from pydantic import BaseModel
@@ -147,6 +148,21 @@ async def search_manga(
     """
     Search manga on AniList + check availability in MangayComics scraper.
     """
+    # Caché persistente (roadmap #2): misma consulta en <15 min → instantáneo,
+    # sin AniList ni scrapers. in_library se recalcula para el usuario actual.
+    cached = search_cache.get_cached("manga", q, page, limit)
+    if cached:
+        cached_results = cached.get("results", [])
+        search_cache.annotate_in_library("manga", db, current_user.id, cached_results)
+        return SearchResponse(
+            query=q,
+            results=[MangaSearch(**r) for r in cached_results],
+            total=cached.get("total", len(cached_results)),
+            sources=cached.get("sources", ["anilist"]),
+            search_id=None,
+            status="complete",
+        )
+
     results = []
 
     try:
@@ -314,8 +330,12 @@ async def search_manga(
             meta={"sources": ["anilist"]},
         )
         asyncio.create_task(_finish_manga_search_job(
-            job.job_id, results, run_scraper_phase
+            job.job_id, results, run_scraper_phase, q, page, limit
         ))
+    else:
+        # Sin resultados de AniList: cacheamos el vacío (TTL 15 min) para no
+        # re-consultar AniList en cada re-intento de la misma búsqueda.
+        search_cache.put_cached("manga", q, [], 0, ["anilist"], page=page, limit=limit)
 
     return SearchResponse(
         query=q,
@@ -327,7 +347,8 @@ async def search_manga(
     )
 
 
-async def _finish_manga_search_job(job_id: str, results: List[MangaSearch], run_scraper_phase) -> None:
+async def _finish_manga_search_job(job_id: str, results: List[MangaSearch], run_scraper_phase,
+                                   q: str, page: int = 1, limit: int = 20) -> None:
     """Background: enriquece los resultados con scrapers y completa el job."""
     try:
         await run_scraper_phase()
@@ -336,6 +357,11 @@ async def _finish_manga_search_job(job_id: str, results: List[MangaSearch], run_
     finally:
         # Complete incluso en error: el frontend deja de hacer polling
         complete_job(job_id, [r.dict() for r in results], len(results))
+        # Caché persistente (roadmap #2): el resultado enriquecido es global
+        search_cache.put_cached(
+            "manga", q, [r.dict() for r in results], len(results),
+            ["anilist"], page=page, limit=limit,
+        )
 
 
 @router.get("/search/{job_id}", response_model=SearchResponse)
