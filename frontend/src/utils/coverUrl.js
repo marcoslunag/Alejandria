@@ -17,5 +17,9 @@ export function proxyCover(url) {
     return url; // relativa o no válida → la sirve el mismo origen
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '#';
-  return `${API_BASE}/covers/proxy?url=${encodeURIComponent(url)}`;
+  // <img src> no puede enviar cabeceras → el token va por query param (mismo
+  // patrón que el web reader). Sin token el proxy devuelve 401.
+  const token = localStorage.getItem('token');
+  const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+  return `${API_BASE}/covers/proxy?url=${encodeURIComponent(url)}${tokenParam}`;
 }

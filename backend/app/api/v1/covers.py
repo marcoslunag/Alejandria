@@ -9,7 +9,7 @@ backend en vez de hotlink directo:
 - 304 Not Modified cuando el cliente ya tiene la copia
 
 Seguridad:
-- Requiere autenticación (get_current_user)
+- Requiere autenticación: header Authorization (axios) o ?token=JWT (<img src>)
 - Allowlist de hosts → NO es un proxy abierto (evita SSRF)
 """
 import hashlib
@@ -23,9 +23,11 @@ from urllib.parse import urlparse
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.core.deps import get_current_user
+from app.core.security import decode_token
+from app.database import get_db
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -97,11 +99,43 @@ def _serve_cached(data: bytes, ext: str, request: Request) -> Response:
     )
 
 
+def _user_from_token(token: str, db: Session) -> User:
+    """Resuelve el usuario a partir de un JWT (misma lógica que get_current_user)."""
+    payload = decode_token(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Token invalido o expirado")
+    user_id = payload.get("sub")
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Token invalido")
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="Usuario no encontrado o inactivo")
+    return user
+
+
+def get_user_by_header_or_token(
+    request: Request,
+    token: Optional[str] = Query(None, description="JWT token (para <img src>)"),
+    db: Session = Depends(get_db),
+) -> User:
+    """Auth por header Authorization (axios) o por query param token (<img src>).
+
+    <img src> no puede enviar cabeceras, así que el frontend añade ?token=JWT
+    (mismo patrón que el web reader de manga).
+    """
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[len("Bearer "):]
+    if not token:
+        raise HTTPException(status_code=401, detail="Token requerido")
+    return _user_from_token(token, db)
+
+
 @router.get("/proxy")
 def proxy_cover(
     request: Request,
     url: str = Query(..., description="URL externa de la portada (http/https)"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_user_by_header_or_token),
 ):
     """Proxy de portadas con caché local + ETag/Cache-Control.
 

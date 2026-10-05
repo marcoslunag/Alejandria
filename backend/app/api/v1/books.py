@@ -4,6 +4,7 @@ Books API Endpoints - Integration with Google Books and EPUB Scrapers
 
 from datetime import datetime
 import asyncio
+import re
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, Request, Response
 from pydantic import BaseModel
@@ -524,14 +525,17 @@ async def add_book_from_google_books(
         monitored=data.monitored,
         auto_download=data.auto_download,
         user_id=current_user.id,
-        source_urls={}
+        source_urls={data.scraper_source: data.scraper_url}
+        if data.scraper_source and data.scraper_url
+        else {}
     )
 
     db.add(book)
     db.commit()
     db.refresh(book)
 
-    # Search in scrapers in background
+    # Search in scrapers in background (resolve known source_urls first,
+    # then fall back to searching with a cleaned title)
     background_tasks.add_task(_search_scrapers_for_book, book.id, metadata['title'])
 
     return BookResponse.from_orm(book)
@@ -1048,10 +1052,24 @@ def get_book_chapter_epub(
 # HELPER FUNCTIONS
 # ============================================================================
 
+def _clean_book_search_title(title: str) -> str:
+    """Limpia el título para la búsqueda en scrapers.
+
+    Quita paréntesis y corchetes ('El Hobbit (edición revisada)' → 'El Hobbit'),
+    que confunden a los buscadores de los scrapers. Si queda vacío, usa el original.
+    """
+    cleaned = re.sub(r'\([^)]*\)', ' ', title)
+    cleaned = re.sub(r'\[[^\]]*\]', ' ', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned or title.strip()
+
+
 async def _search_scrapers_for_book(book_id: int, title: str):
     """
     Search all scrapers for a book and create chapters.
-    Runs Lectulandia + Epubera in parallel, picks best link across all sources.
+    1) Resuelve primero las source_urls ya conocidas (match de la búsqueda).
+    2) Si no hay links, busca en Lectulandia + Epubera (título limpio) en paralelo.
+    Elige el mejor link entre todas las fuentes.
     """
     from app.database import SessionLocal
     db = SessionLocal()
@@ -1062,56 +1080,91 @@ async def _search_scrapers_for_book(book_id: int, title: str):
             return
 
         scrapers = [LectulandiaScraper()] + ([EpuberaScraper()] if EpuberaScraper.ENABLED else [])
-        title_lower = title.lower().strip()
-        title_keywords = set(w for w in title_lower.split() if len(w) > 2)
+        scrapers_by_name = {s.name: s for s in scrapers}
+        resolved = []  # [(scraper_name, search_hit, dl_result), ...]
 
-        async def _search_one(scraper):
-            try:
-                results = await asyncio.wait_for(scraper.search(title, page=1), timeout=45.0)
-                if not results:
+        # 1) Source URLs ya conocidas (la búsqueda del frontend ya matcheó la
+        #    página del libro) → resuélvelas directamente sin re-buscar.
+        if book.source_urls:
+            for scraper_name, src_url in book.source_urls.items():
+                scraper = scrapers_by_name.get(scraper_name)
+                if not scraper or not src_url:
+                    continue
+                try:
+                    dl_result = await asyncio.wait_for(
+                        scraper.get_download_links(src_url), timeout=60.0
+                    )
+                    if dl_result.success and dl_result.best_link:
+                        logger.info(
+                            f"{scraper.name}: direct URL resolved for book {book_id} "
+                            f"({dl_result.best_link.host.value})"
+                        )
+                        resolved.append(
+                            (scraper.name, {'title': book.title, 'url': src_url}, dl_result)
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"{scraper.name}: direct URL failed for book {book_id}: {e}"
+                    )
+
+        # 2) Fallback: buscar en scrapers con el título limpio.
+        if not resolved:
+            search_title = _clean_book_search_title(title)
+            title_lower = search_title.lower().strip()
+            title_keywords = set(w for w in title_lower.split() if len(w) > 2)
+
+            async def _search_one(scraper):
+                try:
+                    results = await asyncio.wait_for(
+                        scraper.search(search_title, page=1), timeout=45.0
+                    )
+                    if not results:
+                        return None
+
+                    # Find best matching result by title similarity
+                    best = None
+                    best_score = 0
+                    for r in results:
+                        r_title = r['title'].lower().strip()
+                        r_keywords = set(w for w in r_title.split() if len(w) > 2)
+
+                        if r_title == title_lower or title_lower in r_title or r_title in title_lower:
+                            score = 100
+                        else:
+                            overlap = len(title_keywords & r_keywords)
+                            min_needed = min(2, max(1, len(title_keywords) // 2))
+                            score = overlap * 10 if overlap >= min_needed else 0
+
+                        if score > best_score:
+                            best_score = score
+                            best = r
+
+                    if not best or best_score == 0:
+                        logger.info(f"{scraper.name}: No good title match for '{title}'")
+                        return None
+
+                    logger.info(f"{scraper.name}: Best match '{best['title']}' (score={best_score})")
+                    dl_result = await asyncio.wait_for(
+                        scraper.get_download_links(best['url']), timeout=60.0
+                    )
+
+                    if dl_result.success and dl_result.best_link:
+                        return (scraper.name, best, dl_result)
+                    return None
+                except Exception as e:
+                    logger.error(f"Error searching {scraper.name} for book {book_id}: {e}")
                     return None
 
-                # Find best matching result by title similarity
-                best = None
-                best_score = 0
-                for r in results:
-                    r_title = r['title'].lower().strip()
-                    r_keywords = set(w for w in r_title.split() if len(w) > 2)
+            # Run all scrapers in parallel
+            gathered = await asyncio.gather(*[_search_one(s) for s in scrapers], return_exceptions=True)
+            for result in gathered:
+                if isinstance(result, Exception) or result is None:
+                    continue
+                resolved.append(result)
 
-                    if r_title == title_lower or title_lower in r_title or r_title in title_lower:
-                        score = 100
-                    else:
-                        overlap = len(title_keywords & r_keywords)
-                        min_needed = min(2, max(1, len(title_keywords) // 2))
-                        score = overlap * 10 if overlap >= min_needed else 0
-
-                    if score > best_score:
-                        best_score = score
-                        best = r
-
-                if not best or best_score == 0:
-                    logger.info(f"{scraper.name}: No good title match for '{title}'")
-                    return None
-
-                logger.info(f"{scraper.name}: Best match '{best['title']}' (score={best_score})")
-                dl_result = await asyncio.wait_for(scraper.get_download_links(best['url']), timeout=60.0)
-
-                if dl_result.success and dl_result.best_link:
-                    return (scraper.name, best, dl_result)
-                return None
-            except Exception as e:
-                logger.error(f"Error searching {scraper.name} for book {book_id}: {e}")
-                return None
-
-        # Run all scrapers in parallel
-        gathered = await asyncio.gather(*[_search_one(s) for s in scrapers], return_exceptions=True)
-
+        # Agregar los links de todas las fuentes resueltas (directas o por búsqueda)
         all_links = []
-        for result in gathered:
-            if isinstance(result, Exception) or result is None:
-                continue
-            scraper_name, search_hit, dl_result = result
-
+        for scraper_name, search_hit, dl_result in resolved:
             if not book.source_urls:
                 book.source_urls = {}
             book.source_urls[scraper_name] = search_hit['url']

@@ -34,6 +34,27 @@ def test_proxy_requires_auth(client):
     assert r.status_code in (401, 403)
 
 
+def test_proxy_accepts_token_query_param(client, regular_user, regular_token, monkeypatch, tmp_path):
+    """<img src> no puede enviar cabeceras: el token va por ?token= (mismo patrón que el web reader)."""
+    _patch_cache(monkeypatch, tmp_path)
+    r = client.get(
+        "/api/v1/covers/proxy",
+        params={"url": COVER_URL, "token": regular_token},
+    )
+    assert r.status_code == 200
+    assert r.content == FAKE_JPEG
+
+
+def test_proxy_rejects_invalid_token_query_param(client, monkeypatch, tmp_path):
+    """?token= inválido → 401 (no 500)."""
+    _patch_cache(monkeypatch, tmp_path)
+    r = client.get(
+        "/api/v1/covers/proxy",
+        params={"url": COVER_URL, "token": "token-invalido"},
+    )
+    assert r.status_code == 401
+
+
 def test_proxy_rejects_non_allowlisted_host(client, auth_headers):
     r = client.get(
         "/api/v1/covers/proxy",

@@ -1,6 +1,9 @@
 """Tests for book endpoints: CRUD, IDOR protection, reading status, EPUB reader."""
 import pytest
-from .conftest import _make_book, _make_book_chapter, _auth, _token
+from .conftest import _make_book, _make_book_chapter, _auth, _token, TestingSessionLocal
+from app.models.book import Book
+from app.models.book_chapter import BookChapter
+from app.services.book_scrapers.base import BookScraperResult, DownloadLink, HostType
 
 
 def test_get_books_library_empty(client, auth_headers):
@@ -161,3 +164,130 @@ def test_books_library_total_count_header(client, db, regular_user, auth_headers
     assert r.status_code == 200
     assert len(r.json()) == 2
     assert r.headers.get("x-total-count") == "3"
+
+
+# ============================================================================
+# El Hobbit fix: no perder la scraper_url de la búsqueda al añadir
+# ============================================================================
+
+def test_clean_book_search_title():
+    """Quita paréntesis/corchetes que confunden a los scrapers."""
+    from app.api.v1.books import _clean_book_search_title
+    assert _clean_book_search_title("El Hobbit (edición revisada)") == "El Hobbit"
+    assert _clean_book_search_title("Book [Vol 1] Edition") == "Book Edition"
+    assert _clean_book_search_title("  Multiple   Spaces ") == "Multiple Spaces"
+    # Si queda vacío, conserva el original
+    assert _clean_book_search_title("(solo parentesis)") == "(solo parentesis)"
+
+
+def test_add_book_from_google_books_saves_scraper_url(client, db, regular_user, auth_headers, monkeypatch):
+    """Si la búsqueda matcheó un scraper, el endpoint guarda source_urls."""
+    from app.api.v1 import books as books_module
+
+    class _FakeGB:
+        async def get_book_by_id(self, gb_id):
+            return {
+                "title": "El Hobbit (edición revisada)",
+                "google_books_id": gb_id,
+                "authors": ["J.R.R. Tolkien"],
+                "categories": [],
+            }
+
+    async def noop_search(book_id, title):
+        pass
+
+    monkeypatch.setattr(books_module, "get_google_books_service", lambda: _FakeGB())
+    monkeypatch.setattr(books_module, "_search_scrapers_for_book", noop_search)
+
+    r = client.post(
+        "/api/v1/books/from-google-books",
+        json={
+            "google_books_id": "hob1",
+            "monitored": True,
+            "auto_download": True,
+            "scraper_source": "lectulandia",
+            "scraper_url": "https://ww3.lectulandia.com/book/el-hobbit",
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    book = db.query(Book).filter_by(google_books_id="hob1").first()
+    assert book is not None
+    assert book.source_urls == {"lectulandia": "https://ww3.lectulandia.com/book/el-hobbit"}
+
+
+def test_add_book_from_google_books_without_scraper_url(client, db, regular_user, auth_headers, monkeypatch):
+    """Sin scraper_url → source_urls vacío (comportamiento previo)."""
+    from app.api.v1 import books as books_module
+
+    class _FakeGB:
+        async def get_book_by_id(self, gb_id):
+            return {
+                "title": "Some Book",
+                "google_books_id": gb_id,
+                "authors": ["Author"],
+                "categories": [],
+            }
+
+    async def noop_search(book_id, title):
+        pass
+
+    monkeypatch.setattr(books_module, "get_google_books_service", lambda: _FakeGB())
+    monkeypatch.setattr(books_module, "_search_scrapers_for_book", noop_search)
+
+    r = client.post(
+        "/api/v1/books/from-google-books",
+        json={"google_books_id": "nb1", "monitored": True, "auto_download": True},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    book = db.query(Book).filter_by(google_books_id="nb1").first()
+    assert book is not None
+    assert book.source_urls in ({}, None)
+
+
+async def test_search_scrapers_resolves_known_source_urls_without_researching(db, regular_user, monkeypatch):
+    """Si el libro ya tiene source_urls, se resuelven directo sin re-buscar."""
+    from app.api.v1 import books as books_module
+
+    book = _make_book(
+        db, regular_user,
+        title="El Hobbit (edición revisada)", google_books_id="hob2",
+    )
+    book.source_urls = {"lectulandia": "https://ww3.lectulandia.com/book/el-hobbit"}
+    db.commit()
+    book_id = book.id
+
+    searched = {"n": 0}
+
+    async def fake_search(self, query, page=1):
+        searched["n"] += 1
+        return []
+
+    async def fake_dl(self, url):
+        return BookScraperResult(
+            title="El Hobbit",
+            source="lectulandia",
+            source_url=url,
+            success=True,
+            download_links=[
+                DownloadLink(url="https://example.com/hobbit.epub", host=HostType.DIRECT, quality_score=70)
+            ],
+        )
+
+    monkeypatch.setattr(books_module.LectulandiaScraper, "search", fake_search)
+    monkeypatch.setattr(books_module.LectulandiaScraper, "get_download_links", fake_dl)
+    # La función crea su propia sesión; apuntamos a la del test.
+    monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+
+    await books_module._search_scrapers_for_book(book_id, "El Hobbit (edición revisada)")
+
+    # `db` fue cerrado por el finally de la función; usamos sesión nueva para verificar.
+    verify = TestingSessionLocal()
+    ch = verify.query(BookChapter).filter_by(book_id=book_id, number=1).first()
+    assert ch is not None
+    assert ch.download_url == "https://example.com/hobbit.epub"
+    assert searched["n"] == 0  # no re-buscó
+    b = verify.query(Book).filter_by(id=book_id).first()
+    assert b.source_urls["lectulandia"] == "https://ww3.lectulandia.com/book/el-hobbit"
+    verify.close()

@@ -74,6 +74,12 @@ class BookCreateFromGoogleBooks(BaseModel):
     google_books_id: str = Field(..., description="Google Books volume ID")
     monitored: bool = Field(True, description="Monitor for updates")
     auto_download: bool = Field(True, description="Auto-download when available")
+    scraper_source: Optional[str] = Field(
+        None, description="Scraper que matcheó en la búsqueda (lectulandia, epubera)"
+    )
+    scraper_url: Optional[str] = Field(
+        None, description="URL del scraper si la búsqueda ya matcheó la página de descarga"
+    )
 
 
 class BookCreateFromURL(BaseModel):

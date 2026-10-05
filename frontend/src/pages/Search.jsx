@@ -199,7 +199,13 @@ const Search = () => {
     if (book.source_url && !book.google_books_id) {
       await bookApi.addFromUrl({ source_url: book.source_url, monitored: true, auto_download: true });
     } else if (book.google_books_id) {
-      await bookApi.addFromGoogleBooks({ google_books_id: book.google_books_id, monitored: true, auto_download: true }, force);
+      const payload = { google_books_id: book.google_books_id, monitored: true, auto_download: true };
+      // Si la búsqueda ya matcheó un scraper, pasa la URL para no perderla
+      if (book.scraper_url) {
+        payload.scraper_source = book.scraper_sources?.[0] || null;
+        payload.scraper_url = book.scraper_url;
+      }
+      await bookApi.addFromGoogleBooks(payload, force);
     } else {
       toast.error('Este libro no tiene suficiente información para ser añadido');
       return;
@@ -253,7 +259,12 @@ const Search = () => {
       if (!libraryId) {
         let res;
         if (book.google_books_id) {
-          res = await bookApi.addFromGoogleBooks({ google_books_id: book.google_books_id, monitored: false, auto_download: false });
+          const payload = { google_books_id: book.google_books_id, monitored: false, auto_download: false };
+          if (book.scraper_url) {
+            payload.scraper_source = book.scraper_sources?.[0] || null;
+            payload.scraper_url = book.scraper_url;
+          }
+          res = await bookApi.addFromGoogleBooks(payload);
         } else if (book.source_url) {
           res = await bookApi.addFromUrl({ source_url: book.source_url, monitored: false, auto_download: false });
         } else { toast.error('Sin información suficiente'); return; }
