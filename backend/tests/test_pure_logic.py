@@ -240,6 +240,55 @@ def test_stk_deviceinfotoken_marks_reauth_banner(stk_sender, monkeypatch):
     assert "token inválido" in calls[0][1]
 
 
+def test_stk_send_retries_transient_deviceinfotoken(stk_sender, monkeypatch, tmp_path):
+    # El 403 "Failed to validate DeviceInfoToken." es TRANSITORIO (viene y va).
+    # send_file debe reintentar (sin borrar la sesión) hasta que un intento salga OK.
+    from app.services import stk_kindle_sender as stk_module
+    monkeypatch.setattr(stk_module, "SEND_RETRY_BASE_DELAY", 0)  # sin espera en tests
+    monkeypatch.setattr(stk_module, "record_successful_send", lambda uid: None)
+    calls = {"n": 0}
+    def fake_send_file(fp, serials, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise Exception('HTTP Error 403: {"Message": "Failed to validate DeviceInfoToken."}')
+        return None
+    class FakeClient:
+        def dumps(self):
+            return "{}"
+        def send_file(self, *a, **kw):
+            fake_send_file(*a, **kw)
+    stk_sender.client = FakeClient()
+    test_file = tmp_path / "test.epub"
+    test_file.write_bytes(b"epub-data")
+    result = stk_sender.send_file(
+        file_path=test_file, title="T", author="A", device_serials=["SERIAL1"]
+    )
+    assert result["success"] is True
+    assert calls["n"] == 2  # reintentó el 403 transitorio y el 2º intento salió OK
+
+
+def test_stk_send_no_retry_on_definitive_revocation(stk_sender, monkeypatch, tmp_path):
+    # Una revocación REAL del dispositivo (señal definitiva) NO reintenta: fail-fast.
+    from app.services import stk_kindle_sender as stk_module
+    monkeypatch.setattr(stk_module, "SEND_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(stk_module, "record_successful_send", lambda uid: None)
+    calls = {"n": 0}
+    class FakeClient:
+        def dumps(self):
+            return "{}"
+        def send_file(self, *a, **kw):
+            calls["n"] += 1
+            raise Exception("Device not registered")
+    stk_sender.client = FakeClient()
+    test_file = tmp_path / "test.epub"
+    test_file.write_bytes(b"epub-data")
+    result = stk_sender.send_file(
+        file_path=test_file, title="T", author="A", device_serials=["SERIAL1"]
+    )
+    assert result["success"] is False
+    assert calls["n"] == 1  # revocación real: sin reintentos
+
+
 # ── 4. Rate-limiter del traductor ─────────────────────────────────────────────
 
 @pytest.fixture

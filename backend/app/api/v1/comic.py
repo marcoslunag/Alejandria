@@ -1126,7 +1126,7 @@ async def send_issue_to_kindle(
     Prefers converted EPUB over original CBZ.
     Supports sending multiple parts if file was split due to 200MB limit.
     """
-    from app.services.stk_kindle_sender import get_stk_service
+    from app.services.stk_kindle_sender import get_stk_sender, mark_stk_needs_reauth
     from pathlib import Path
 
     comic = db.query(Comic).filter(Comic.id == comic_id, Comic.user_id == current_user.id).first()
@@ -1162,59 +1162,65 @@ async def send_issue_to_kindle(
     if not file_paths:
         raise HTTPException(status_code=400, detail="No files available to send")
 
-    # Get STK service
-    stk = await get_stk_service()
-    if not stk or not stk.is_authenticated:
-        raise HTTPException(status_code=400, detail="STK not configured")
+    # STK per-usuario (mismo patrón que kindle.py / books.py). La sesión es de larga
+    # duración (adp_token + RSA); si Amazon rechaza el token, send_file reintenta solo y
+    # al final marca el banner (stk_needs_reauth) → aquí devolvemos 409 coherente.
+    sender = get_stk_sender(current_user.id)
+    if not sender.is_authenticated():
+        mark_stk_needs_reauth(current_user.id, reason="envío manual sin sesión")
+        raise HTTPException(
+            status_code=409,
+            detail="Sesión de Amazon no disponible. Reconecta tu Kindle en Ajustes → Amazon Send to Kindle."
+        )
 
-    # Send to Kindle
-    try:
-        title = f"{comic.title} - Issue #{issue.issue_number or '?'}"
-        author = ", ".join(comic.writers[:2]) if comic.writers else "Unknown"
+    # Device: si el usuario tiene uno guardado, usarlo (si no, STK manda a todos)
+    device_serials = [current_user.stk_device_serial] if current_user.stk_device_serial else None
 
-        all_success = True
-        sent_files = []
+    title = f"{comic.title} - Issue #{issue.issue_number or '?'}"
+    author = ", ".join(comic.writers[:2]) if comic.writers else "Unknown"
 
-        for idx, file_path in enumerate(file_paths):
-            part_info = f" (Part {idx + 1}/{len(file_paths)})" if len(file_paths) > 1 else ""
-            file_title = f"{title}{part_info}"
+    all_success = True
+    sent_files = []
+    last_error = ""
 
-            logger.info(f"Sending to Kindle: {file_path.name}{part_info}")
+    for idx, file_path in enumerate(file_paths):
+        part_info = f" (Part {idx + 1}/{len(file_paths)})" if len(file_paths) > 1 else ""
+        file_title = f"{title}{part_info}"
 
-            result = await stk.send_file(
-                file_path=str(file_path),
-                title=file_title,
-                author=author
-            )
+        logger.info(f"Sending to Kindle: {file_path.name}{part_info}")
 
-            if result.get("success"):
-                sent_files.append(file_path.name)
-                logger.info(f"Sent: {file_path.name}")
-            else:
-                logger.error(f"Failed to send: {file_path.name} - {result.get('error')}")
-                all_success = False
+        result = sender.send_file(
+            file_path=file_path,
+            title=file_title,
+            author=author,
+            device_serials=device_serials
+        )
 
-        if all_success:
-            issue.status = "sent"
-            issue.sent_at = datetime.utcnow()
-            db.commit()
-
-            parts_msg = f" ({len(file_paths)} partes)" if len(file_paths) > 1 else ""
-            return {
-                "success": True,
-                "message": f"Enviado a Kindle correctamente{parts_msg}",
-                "files_sent": sent_files
-            }
+        if result.get("success"):
+            sent_files.append(file_path.name)
+            logger.info(f"Sent: {file_path.name}")
         else:
-            return {
-                "success": False,
-                "message": f"Algunos archivos fallaron al enviar",
-                "files_sent": sent_files
-            }
+            logger.error(f"Failed to send: {file_path.name} - {result.get('message', 'error desconocido')}")
+            last_error = result.get('message', last_error)
+            all_success = False
 
-    except Exception as e:
-        logger.error(f"Error sending to Kindle: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    if all_success:
+        issue.status = "sent"
+        issue.sent_at = datetime.utcnow()
+        db.commit()
+
+        parts_msg = f" ({len(file_paths)} partes)" if len(file_paths) > 1 else ""
+        return {
+            "success": True,
+            "message": f"Enviado a Kindle correctamente{parts_msg}",
+            "files_sent": sent_files
+        }
+
+    # Fallo total: 409 con el motivo real (mismo patrón que kindle.py) → banner Reconectar
+    raise HTTPException(
+        status_code=409,
+        detail=f"No se pudo enviar: {last_error or ', '.join(f.name for f in file_paths)}"
+    )
 
 
 @router.post("/{comic_id}/issues/{issue_id}/mark-read")

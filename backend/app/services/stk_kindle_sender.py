@@ -61,6 +61,13 @@ MAX_CONSECUTIVE_FAILURES = 20
 # operación. Protege contra enviar N EPUBs en bucle con Amazon un poco justo.
 BURST_WINDOW_SECONDS = 120
 
+# Reintentos del envío ante el 403 "Failed to validate DeviceInfoToken." — un fallo
+# TRANSITORIO de validación en el lado de Amazon (viene y va: p. ej. falla 09:35, OK
+# 10:05, falla 13:54). Sin reintentos, cada fallo = un envío perdido. Solo reintentamos
+# fallos NO definitivos: una revocación REAL del dispositivo es fail-fast (sin reintentos).
+SEND_MAX_ATTEMPTS = 3
+SEND_RETRY_BASE_DELAY = 3  # segundos; delay = base * intento (3s, 6s, ...)
+
 # Palabras clave que Amazon devuelve cuando el dispositivo/ADP token está DEFINITIVAMENTE
 # revocado. 'deviceinfotoken' fue RETIRADO: es un 403 transitorio (rate-limit,
 # mantenimiento) y contarlo como definitivo era la causa principal de la muerte diaria.
@@ -398,70 +405,95 @@ class STKKindleSender:
         if not file_path.exists():
             return {'success': False, 'message': f'File not found: {file_path}'}
 
-        try:
-            if not device_serials:
-                devices_response = self.client.get_owned_devices()
-                if isinstance(devices_response, list):
-                    devices = devices_response
-                elif hasattr(devices_response, 'owned_devices'):
-                    devices = devices_response.owned_devices
+        # Reintentos: el 403 "Failed to validate DeviceInfoToken." es TRANSITORIO en el
+        # lado de Amazon (viene y va). Sin reintentos, cada fallo = un envío perdido.
+        # Solo reintentamos fallos NO definitivos: una revocación REAL del dispositivo
+        # es fail-fast (sin reintentos) y se registra como fallo definitivo.
+        last_error = ""
+        for attempt in range(1, SEND_MAX_ATTEMPTS + 1):
+            try:
+                ds = device_serials
+                if not ds:
+                    devices_response = self.client.get_owned_devices()
+                    if isinstance(devices_response, list):
+                        devices = devices_response
+                    elif hasattr(devices_response, 'owned_devices'):
+                        devices = devices_response.owned_devices
+                    else:
+                        return {'success': False, 'message': f'Unexpected devices response: {type(devices_response)}'}
+                    ds = [d.device_serial_number for d in devices]
+
+                if not ds:
+                    return {'success': False, 'message': 'No Kindle devices found'}
+
+                if not title:
+                    title = file_path.stem
+
+                file_size_mb = file_path.stat().st_size / (1024 * 1024)
+                logger.info(
+                    f"Sending {file_path.name} ({file_size_mb:.0f}MB) to {len(ds)} device(s) "
+                    f"for user {self.user_id} (intento {attempt}/{SEND_MAX_ATTEMPTS})"
+                )
+
+                # Declarar el formato REAL al API de STK: Amazon convierte PDF/MOBI
+                # en el dispositivo. Declarar PDF como EPUB corrupte el envío.
+                file_ext = file_path.suffix.lower()
+                if file_ext == '.epub':
+                    file_format = 'EPUB'
+                elif file_ext == '.pdf':
+                    file_format = 'PDF'
+                elif file_ext in ['.mobi', '.azw', '.azw3']:
+                    file_format = 'MOBI'
                 else:
-                    return {'success': False, 'message': f'Unexpected devices response: {type(devices_response)}'}
-                device_serials = [d.device_serial_number for d in devices]
+                    file_format = 'EPUB'
 
-            if not device_serials:
-                return {'success': False, 'message': 'No Kindle devices found'}
+                self.client.send_file(
+                    file_path,
+                    ds,
+                    author=author or "Unknown",
+                    title=title,
+                    format=file_format
+                )
 
-            if not title:
-                title = file_path.stem
+                logger.info(f"Successfully sent {file_path.name} to Kindle for user {self.user_id}")
+                self._save_client()
+                self._reset_failure_count()
+                record_successful_send(self.user_id)  # 'último envío exitoso' + limpia needs_reauth
+                return {'success': True, 'message': f'Sent to {len(ds)} device(s)'}
 
-            file_size_mb = file_path.stat().st_size / (1024 * 1024)
-            logger.info(f"Sending {file_path.name} ({file_size_mb:.0f}MB) to {len(device_serials)} device(s) for user {self.user_id}")
+            except Exception as e:
+                last_error = str(e)
+                logger.error(
+                    f"Failed to send to Kindle for user {self.user_id} "
+                    f"(intento {attempt}/{SEND_MAX_ATTEMPTS}): {last_error}"
+                )
+                # Revocación REAL del dispositivo: fail-fast, sin reintentos.
+                if self._is_definitive_expiry(last_error):
+                    break
+                if attempt < SEND_MAX_ATTEMPTS:
+                    delay = SEND_RETRY_BASE_DELAY * attempt
+                    logger.warning(
+                        f"STK reintentando envío en {delay}s (fallo transitorio) "
+                        f"user {self.user_id}: {last_error}"
+                    )
+                    time.sleep(delay)
+                # else: intento final agotado → salir del bucle
 
-            # Declarar el formato REAL al API de STK: Amazon convierte PDF/MOBI
-            # en el dispositivo. Declarar PDF como EPUB corrupte el envío.
-            file_ext = file_path.suffix.lower()
-            if file_ext == '.epub':
-                file_format = 'EPUB'
-            elif file_ext == '.pdf':
-                file_format = 'PDF'
-            elif file_ext in ['.mobi', '.azw', '.azw3']:
-                file_format = 'MOBI'
-            else:
-                file_format = 'EPUB'
+        # Todos los intentos fallaron (o fallo definitivo): registrar UN solo fallo.
+        if self._record_failure(last_error):
+            self.logout()
+            mark_stk_needs_reauth(self.user_id, reason=f"sesión revocada: {last_error}")
+            return {
+                'success': False,
+                'message': 'STK sesión revocada por Amazon. Reconecta en Ajustes → Amazon Send to Kindle.',
+                'needs_reauth': True,
+            }
 
-            self.client.send_file(
-                file_path,
-                device_serials,
-                author=author or "Unknown",
-                title=title,
-                format=file_format
-            )
-
-            logger.info(f"Successfully sent {file_path.name} to Kindle for user {self.user_id}")
-            self._save_client()
-            self._reset_failure_count()
-            record_successful_send(self.user_id)  # 'último envío exitoso' + limpia needs_reauth
-            return {'success': True, 'message': f'Sent to {len(device_serials)} device(s)'}
-
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Failed to send to Kindle for user {self.user_id}: {error_msg}")
-
-            if self._record_failure(error_msg):
-                self.logout()
-                mark_stk_needs_reauth(self.user_id, reason=f"sesión revocada: {error_msg}")
-                return {
-                    'success': False,
-                    'message': 'STK sesión revocada por Amazon. Reconecta en Ajustes → Amazon Send to Kindle.',
-                    'needs_reauth': True,
-                }
-
-            # Error temporal o no clasificado: informar sin borrar sesión.
-            # needs_reauth=True → el endpoint devuelve 409 (banner Reconectar).
-            # Si era transitorio, el próximo envío OK limpia el flag.
-            needs_reauth = self._is_session_invalid(error_msg)
-            return {'success': False, 'message': str(e), 'needs_reauth': needs_reauth}
+        # Error temporal o token rechazado: informar sin borrar sesión.
+        # needs_reauth=True → el endpoint devuelve 409 (banner Reconectar).
+        # Si era transitorio, el próximo envío OK limpia el flag.
+        needs_reauth = self._is_session_invalid(last_error)
+        return {'success': False, 'message': last_error, 'needs_reauth': needs_reauth}
 
     def logout(self):
         """Logout MANUAL (botón Desconectar). Borra la credencial persistida."""
