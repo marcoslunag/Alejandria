@@ -132,6 +132,22 @@ Todos los tests de `search` pasan. Nota: `httpx` quedó sin pin (`>=0.25`) y con
 `TestClient` de starlette 0.27 (kwarg `app`); **pinado a `httpx==0.27.2`** en `requirements.txt`
 para que un rebuild de Docker no rompa la suite.
 
+## Deploy production (2026-10-05)
+
+**Deployado `702c663` (incluye #13–#19 + features previas; el servidor estaba en `cebae88`):**
+1. `git push` local → GitHub ✅
+2. Servidor: `git pull` (fast-forward, 82 archivos) + `docker compose restart backend` ✅
+3. `docker compose up -d --build frontend` (rebuild backend+frontend, creado volumen `backups`) ✅
+4. **Scheduler: imagen propia** (`workers/scheduler/Dockerfile`) → `docker compose up -d --build scheduler` (iba 2 días con código viejo; ahora tiene job backup + retención + telemetría) ✅
+
+**Verificado en producción:**
+- 6/6 contenedores healthy (backend, frontend, scheduler, db, converter, flaresolverr)
+- Backend: arranque limpio, BD inicializada (tablas nuevas `create_all`: `scraper_stats`, `search_cache`, `translations`, `push_subscriptions`), **0 ERROR/Traceback** post-restart, `/health` 200
+- Endpoints nuevos live (403 auth, no 404): `recommendations/library-sections`, `system/latency`, `system/backups`, `system/scraper-stats`, `system/disk-usage`
+- Frontend: `GET /` → 200 (nuevo build con Discover 2.0)
+- Warning scheduler "SECRET_KEY not set" es inofensiva (el scheduler no emite/verifica JWT; `SECRET_KEY` sí está en `.env` del backend)
+- Pendiente de verificación **real de uso** (usuario): #1 búsqueda progresiva, #2 caché, #3 traducciones, #4 STK proactivo
+
 ## Comandos de deploy (recordatorio)
 
 ```bash
