@@ -7,6 +7,8 @@ from app.api.v1 import covers as covers_module
 
 COVER_URL = "https://media.anilist.co/file/cover.jpg"
 OTHER_URL = "https://www.comicvine.com/cover.png"
+# CDN actual de AniList (el que devuelve la API hoy): s4.anilist.co, NO media.anilist.co
+ANILIST_S4_URL = "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx30013-BeslEMqiPhlk.jpg"
 FAKE_JPEG = b"\xff\xd8\xff\xe0" + b"fake-image-data" * 10
 
 
@@ -53,6 +55,19 @@ def test_proxy_rejects_invalid_token_query_param(client, monkeypatch, tmp_path):
         params={"url": COVER_URL, "token": "token-invalido"},
     )
     assert r.status_code == 401
+
+
+def test_proxy_allows_anilist_s4_cdn(client, auth_headers, monkeypatch, tmp_path):
+    """Regresión: las portadas de manga usan s4.anilist.co (CDN actual de AniList).
+    Antes solo estaba media.anilist.co en el allowlist → 400 y las portadas no se veían."""
+    _patch_cache(monkeypatch, tmp_path)
+    r = client.get(
+        "/api/v1/covers/proxy",
+        params={"url": ANILIST_S4_URL},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    assert r.content == FAKE_JPEG
 
 
 def test_proxy_rejects_non_allowlisted_host(client, auth_headers):

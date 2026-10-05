@@ -37,8 +37,9 @@ router = APIRouter(prefix="/covers", tags=["covers"])
 
 # Solo CDN conocidos de portadas (el endpoint no debe servir de proxy abierto)
 ALLOWED_HOSTS = {
-    # AniList
+    # AniList (CDN antiguo + actual)
     "media.anilist.co",
+    "s4.anilist.co",
     # ComicVine
     "www.comicvine.com",
     # Google Books
