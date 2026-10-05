@@ -35,6 +35,9 @@ nuevamente salvo logout manual):
   revocación REAL del dispositivo. Los 403 transitorios NUNCA cuentan.
 - `heartbeat()` (para el scheduler) NUNCA borra la sesión: solo verifica y persiste.
 - La única forma de resetear es el botón "Desconectar" (logout manual).
+- Si Amazon rechaza el token (DeviceInfoToken), marcamos el banner de reconexión
+  (stk_needs_reauth=True) SIN borrar la sesión: el próximo envío OK lo limpia solo,
+  así un 403 transitorio no obliga al usuario a reconectar.
 - Si Amazon revoca el dispositivo de verdad (p. ej. el usuario borra la app en Amazon),
   los envíos fallan con un mensaje claro y el usuario pulsa logout y reconecta.
 """
@@ -67,6 +70,17 @@ _DEFINITIVE_EXPIRY_SIGNALS = [
     'invalid adp token',
     'adp_token is invalid',
     'customer not found',
+]
+
+# Señales de "token rechazado por Amazon" (DeviceInfoToken inválido). A diferencia
+# de las señales DEFINITIVAS, esto NO borra la sesión automáticamente (respetamos el
+# diseño "meter Amazon una vez"): solo marcamos el banner de reconexión
+# (stk_needs_reauth=True). El próximo envío exitoso lo limpia solo
+# (record_successful_send), así que si era un 403 transitorio el banner desaparece
+# sin perder la credencial larga.
+_SESSION_INVALID_SIGNALS = [
+    'deviceinfotoken',           # {"Message": "Failed to validate DeviceInfoToken."}
+    'failed to validate device',
 ]
 
 def _init_data_dir() -> Path:
@@ -235,6 +249,14 @@ class STKKindleSender:
             'retry', 'service unavailable', '503', '502', '429', '403', 'forbidden',
         ])
 
+    def _is_session_invalid(self, error_message: str) -> bool:
+        """Amazon rechazó el token del dispositivo (DeviceInfoToken inválido).
+        Indica que la sesión NO funcionará hasta re-autenticar. NO borra la sesión:
+        solo marcamos el banner para que el usuario pulse Reconectar (y si era un
+        403 transitorio, el próximo envío OK limpia el flag)."""
+        error_str = str(error_message).lower()
+        return any(s in error_str for s in _SESSION_INVALID_SIGNALS)
+
     def _record_failure(self, error_message: str) -> bool:
         """
         Registra un fallo y decide si la sesión debe borrarse.
@@ -245,6 +267,16 @@ class STKKindleSender:
         enviados en bucle, todos fallando) cuentan como UNA sola operación fallida,
         no como N fallos independientes.
         """
+        if self._is_session_invalid(error_message):
+            # Token rechazado por Amazon: la sesión no funcionará hasta re-auth.
+            # Marcamos el banner (Reconectar) SIN borrar la sesión: si era un 403
+            # transitorio, el próximo envío OK limpia el flag (record_successful_send).
+            mark_stk_needs_reauth(self.user_id, reason=f"token inválido: {error_message}")
+            logger.warning(
+                f"STK token inválido (banner reconectar, sesión intacta) user {self.user_id}: {error_message}"
+            )
+            return False
+
         if self._is_definitive_expiry(error_message):
             now = time.time()
             time_since_last = now - self._last_definitive_failure_at
@@ -419,10 +451,17 @@ class STKKindleSender:
             if self._record_failure(error_msg):
                 self.logout()
                 mark_stk_needs_reauth(self.user_id, reason=f"sesión revocada: {error_msg}")
-                return {'success': False, 'message': 'STK sesión revocada por Amazon. Reconecta en Ajustes → Amazon Send to Kindle.'}
+                return {
+                    'success': False,
+                    'message': 'STK sesión revocada por Amazon. Reconecta en Ajustes → Amazon Send to Kindle.',
+                    'needs_reauth': True,
+                }
 
-            # Error temporal o no clasificado: informar sin borrar sesión
-            return {'success': False, 'message': str(e)}
+            # Error temporal o no clasificado: informar sin borrar sesión.
+            # needs_reauth=True → el endpoint devuelve 409 (banner Reconectar).
+            # Si era transitorio, el próximo envío OK limpia el flag.
+            needs_reauth = self._is_session_invalid(error_msg)
+            return {'success': False, 'message': str(e), 'needs_reauth': needs_reauth}
 
     def logout(self):
         """Logout MANUAL (botón Desconectar). Borra la credencial persistida."""

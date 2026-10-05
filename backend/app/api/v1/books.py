@@ -879,7 +879,14 @@ async def send_book_to_kindle(
         }
     else:
         logger.error(f"Failed to send {file_path.name}: {result['message']}")
-        raise HTTPException(status_code=500, detail=result['message'])
+        if result.get('needs_reauth'):
+            # Sesión rechazada por Amazon: 409 con banner de reconexión (coherente
+            # con el endpoint de manga en kindle.py). No un 500 mudo.
+            raise HTTPException(
+                status_code=409,
+                detail="Sesión de Amazon no disponible. Reconecta tu Kindle en Ajustes → Amazon Send to Kindle."
+            )
+        raise HTTPException(status_code=502, detail=f"Error temporal de Amazon: {result['message']}")
 
 
 @router.post("/{book_id}/chapters/{chapter_id}/mark-read")

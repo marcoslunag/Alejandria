@@ -207,6 +207,39 @@ def test_stk_reset_failure_count(stk_sender):
     assert stk_sender._last_definitive_failure_at == 0.0
 
 
+def test_stk_session_invalid_signals(stk_sender):
+    # Amazon rechaza el token del dispositivo → "sesión inválida"
+    assert stk_sender._is_session_invalid("Failed to validate DeviceInfoToken.")
+    assert stk_sender._is_session_invalid('HTTP Error 403: {"Message": "Failed to validate DeviceInfoToken."}')
+    # Un 403 genérico (rate limit) NO es "sesión inválida"
+    assert not stk_sender._is_session_invalid("403 Forbidden")
+    # Ni un fallo definitivo lo es
+    assert not stk_sender._is_session_invalid("invalid adp token")
+
+
+def test_stk_deviceinfotoken_is_not_definitive(stk_sender):
+    # Regresión de la "muerte diaria": deviceinfotoken NO debe acumular hacia el
+    # auto-logout (no borra la sesión), aunque sí marque el banner.
+    assert not stk_sender._is_definitive_expiry("Failed to validate DeviceInfoToken.")
+    assert stk_sender._record_failure("Failed to validate DeviceInfoToken.") is False
+    assert stk_sender._consecutive_failures == 0
+
+
+def test_stk_deviceinfotoken_marks_reauth_banner(stk_sender, monkeypatch):
+    from app.services import stk_kindle_sender as stk_module
+    calls = []
+    monkeypatch.setattr(
+        stk_module, "mark_stk_needs_reauth",
+        lambda uid, reason="": calls.append((uid, reason)),
+    )
+    # Un DeviceInfoToken inválido marca el banner (reconectar) SIN borrar la sesión
+    # (_record_failure devuelve False → el caller no llama a logout()).
+    assert stk_sender._record_failure('HTTP Error 403: {"Message": "Failed to validate DeviceInfoToken."}') is False
+    assert len(calls) == 1
+    assert calls[0][0] == 99999
+    assert "token inválido" in calls[0][1]
+
+
 # ── 4. Rate-limiter del traductor ─────────────────────────────────────────────
 
 @pytest.fixture
