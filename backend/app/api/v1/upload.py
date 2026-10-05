@@ -242,8 +242,8 @@ async def _find_or_create_manga(db: Session, user: User, external_id: str):
         return existing.id, existing.title
 
     # Create from AniList
-    from app.services.anilist import AnilistService
-    anilist = AnilistService()
+    from app.services.anilist import get_anilist_service
+    anilist = get_anilist_service()
     metadata = await anilist.get_manga_by_id(anilist_id)
 
     if not metadata:

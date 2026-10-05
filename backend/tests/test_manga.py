@@ -172,7 +172,7 @@ def test_add_manga_from_anilist(client, db, regular_user, auth_headers):
         "country": "JP",
         "mal_id": None,
     }
-    with patch("app.api.v1.manga.AnilistService") as MockAnilist:
+    with patch("app.api.v1.manga.get_anilist_service") as MockAnilist:
         instance = MockAnilist.return_value
         instance.get_manga_by_id = AsyncMock(return_value=mock_metadata)
         r = client.post("/api/v1/manga/add/anilist",
@@ -185,7 +185,7 @@ def test_add_manga_from_anilist(client, db, regular_user, auth_headers):
 def test_add_manga_duplicate(client, db, regular_user, auth_headers):
     """Adding same manga twice should return 409."""
     manga = _make_manga(db, regular_user, anilist_id=555)
-    with patch("app.api.v1.manga.AnilistService"):
+    with patch("app.api.v1.manga.get_anilist_service"):
         r = client.post("/api/v1/manga/add/anilist",
                         json={"anilist_id": 555, "monitored": True},
                         headers=auth_headers)

@@ -171,7 +171,7 @@ def test_manga_search_rate_limit_429(client, auth_headers, tight_search_limiter,
         async def search_manga(self, q, page=1, per_page=20):
             return {"results": [], "total": 0}
 
-    monkeypatch.setattr(manga_module, "AnilistService", _FakeAnilist)
+    monkeypatch.setattr(manga_module, "get_anilist_service", lambda: _FakeAnilist())
 
     for i in range(3):
         r = client.get(f"/api/v1/manga/search?q=busqueda+{i}", headers=auth_headers)
@@ -190,7 +190,7 @@ def test_rate_limit_is_per_user(client, admin_headers, auth_headers, tight_searc
         async def search_manga(self, q, page=1, per_page=20):
             return {"results": [], "total": 0}
 
-    monkeypatch.setattr(manga_module, "AnilistService", _FakeAnilist)
+    monkeypatch.setattr(manga_module, "get_anilist_service", lambda: _FakeAnilist())
 
     for i in range(3):
         r = client.get(f"/api/v1/manga/search?q=user+{i}", headers=auth_headers)

@@ -30,7 +30,7 @@ from app.schemas.manga import (
     LibraryStats
 )
 from app.schemas.chapter import ChapterResponse
-from app.services.anilist import AnilistService
+from app.services.anilist import get_anilist_service
 from app.services.scraper import TomosMangaScraper
 from app.services.mangaycomics_scraper import MangayComicsScraper
 from app.models.user import User
@@ -72,7 +72,7 @@ async def get_trending_manga(
     """
     Get trending manga from Anilist
     """
-    anilist = AnilistService()
+    anilist = get_anilist_service()
     trending = await anilist.get_trending_manga(page=page, per_page=limit)
 
     # Check which ones are already in library
@@ -111,7 +111,7 @@ async def get_popular_manga(
     """
     Get popular manga from Anilist
     """
-    anilist = AnilistService()
+    anilist = get_anilist_service()
     popular = await anilist.get_popular_manga(page=page, per_page=limit)
 
     result = []
@@ -168,7 +168,7 @@ async def search_manga(
     results = []
 
     try:
-        anilist = AnilistService()
+        anilist = get_anilist_service()
         anilist_results = await anilist.search_manga(q, page=page, per_page=limit)
 
         for item in anilist_results['results']:
@@ -461,7 +461,7 @@ async def add_manga_from_anilist(
         raise HTTPException(status_code=400, detail="Manga already in library")
 
     # Fetch metadata from Anilist
-    anilist = AnilistService()
+    anilist = get_anilist_service()
     metadata = await anilist.get_manga_by_id(data.anilist_id)
 
     if not metadata:
@@ -608,7 +608,7 @@ async def add_manga_from_url(
     # Fetch Anilist metadata if ID provided
     metadata = None
     if data.anilist_id:
-        anilist = AnilistService()
+        anilist = get_anilist_service()
         metadata = await anilist.get_manga_by_id(data.anilist_id)
 
     # Create manga
